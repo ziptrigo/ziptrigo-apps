@@ -1,0 +1,36 @@
+{% extends 'core/base.html' %}
+
+{% block title %}File request - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-16 max-w-xl">
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+        {% if access == 'needs_password' %}
+        <h1 class="text-2xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">{{ transfer.title }}</h1>
+        <form method="post" action="{% url 't:unlock' transfer.slug %}" class="space-y-3">
+            {% csrf_token %}
+            <label for="{{ password_form.password.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                This link is password protected. Enter the password to continue.
+            </label>
+            {{ password_form.password }}
+            {% for error in password_form.password.errors %}
+            <p role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+            {% endfor %}
+            <button type="submit" class="btn px-4 py-2 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400">Unlock</button>
+        </form>
+        {% elif access == 'needs_confirmed_email' %}
+        <h1 class="text-2xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">Confirm your email address to use this link.</h1>
+        <p class="text-gray-600 dark:text-gray-400 mb-4">We sent you a link when you signed up. If you cannot find it, we can send another one.</p>
+        <a href="{% url 'accounts:resend-confirmation' %}"
+           class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">Send the confirmation email again</a>
+        {% else %}
+        <h1 class="text-2xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">This link is for specific people.</h1>
+        <p class="text-gray-600 dark:text-gray-400 mb-4">Sign in with the address it was sent to.</p>
+        <form method="post" action="{% url 'accounts:logout' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">Sign out</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -105,9 +105,7 @@ def upload_to_request(fake_storage):
     from ..services import request_upload
 
     def _upload(transfer, uploader, name='photo.jpg', size=1024, *, ip='9.9.9.9'):
-        file = request_upload.add_file(
-            transfer, uploader, name, size, ip=ip, storage=fake_storage
-        )
+        file = request_upload.add_file(transfer, uploader, name, size, ip=ip, storage=fake_storage)
         fake_storage.seed_object(file.storage_key, size)
         return request_upload.complete_file(
             transfer,

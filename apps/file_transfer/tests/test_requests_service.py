@@ -9,13 +9,20 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.accounts.tests.factories import UserFactory
-from apps.billing.services import InsufficientCreditsError, add_credits
+from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
 from apps.core.models import Notification
 from apps.core.ratelimit import limiter
 
 from .. import services
-from ..models import RequestInvite, Transfer, TransferKind, TransferStatus, UploadAudience, ZipStatus
+from ..models import (
+    RequestInvite,
+    Transfer,
+    TransferKind,
+    TransferStatus,
+    UploadAudience,
+    ZipStatus,
+)
 from ..services.actions import TransferHeldError
 from ..services.blocklist import BlockedSenderError
 from ..services.request_uploader import Uploader
@@ -75,7 +82,11 @@ def test_a_blocked_ip_cannot_create_one(funded_user):
 
 @pytest.mark.parametrize(
     ('title', 'message'),
-    [('', 'Give the request a title.'), ('   ', 'Give the request a title.'), ('x' * 101, 'Keep the title')],
+    [
+        ('', 'Give the request a title.'),
+        ('   ', 'Give the request a title.'),
+        ('x' * 101, 'Keep the title'),
+    ],
 )
 def test_the_title_is_required_and_at_most_100_characters(funded_user, title, message):
     with pytest.raises(ValidationError) as excinfo:
@@ -292,21 +303,22 @@ def test_update_is_all_or_nothing(make_request):
     assert transfer.title == 'Wedding photos'
 
 
-def test_limits_cannot_go_below_what_is_uploaded(
-    make_request, upload_to_request, anon_uploader
-):
+def test_limits_cannot_go_below_what_is_uploaded(make_request, upload_to_request, anon_uploader):
     transfer = make_request()
     upload_to_request(transfer, anon_uploader, 'a.txt', 600)
     upload_to_request(transfer, anon_uploader, 'b.txt', 600)
 
     with pytest.raises(ValidationError) as excinfo:
         services.requests.update_request(transfer, {'max_files': 1})
-    assert excinfo.value.message_dict['max_files'] == ['Already 2 files uploaded; choose at least 2.']
+    assert excinfo.value.message_dict['max_files'] == [
+        'Already 2 files uploaded; choose at least 2.'
+    ]
     with pytest.raises(ValidationError) as excinfo:
         services.requests.update_request(transfer, {'max_total_size_bytes': 1000})
-    assert 'Already 1.2 KB uploaded; choose at least 1.2 KB.' in excinfo.value.message_dict[
-        'max_total_size_bytes'
-    ][0]
+    assert (
+        'Already 1.2 KB uploaded; choose at least 1.2 KB.'
+        in excinfo.value.message_dict['max_total_size_bytes'][0]
+    )
     services.requests.update_request(transfer, {'max_files': 2, 'max_total_size_bytes': 1200})
 
 
@@ -316,9 +328,7 @@ def test_switching_to_selected_requires_an_address(make_request):
         services.requests.update_request(transfer, {'upload_audience': 'selected'})
     assert 'emails' in excinfo.value.message_dict
     with pytest.raises(ValidationError):
-        services.requests.update_request(
-            transfer, {'upload_audience': 'selected', 'emails': []}
-        )
+        services.requests.update_request(transfer, {'upload_audience': 'selected', 'emails': []})
     assert transfer.invites.count() == 0
 
 
@@ -426,7 +436,9 @@ def test_an_uploader_marks_it_done_and_the_owner_is_told(
     assert len(sent_emails) == 1
     assert sent_emails[0]['to'] == funded_user.email
     assert sent_emails[0]['subject'] == 'Your file request is done'
-    assert '2 files, 4.0 KB' in sent_emails[0]['text_body'] and 'Jane' in sent_emails[0]['text_body']
+    assert (
+        '2 files, 4.0 KB' in sent_emails[0]['text_body'] and 'Jane' in sent_emails[0]['text_body']
+    )
     assert 'Wedding photos' not in sent_emails[0]['subject']
 
 
@@ -453,14 +465,20 @@ def test_done_without_a_name_says_someone(
 
 
 def test_the_owner_marking_done_sends_nothing(
-    funded_user, make_request, upload_to_request, anon_uploader,
-    django_capture_on_commit_callbacks, sent_emails,
+    funded_user,
+    make_request,
+    upload_to_request,
+    anon_uploader,
+    django_capture_on_commit_callbacks,
+    sent_emails,
 ):
     transfer = make_request()
     upload_to_request(transfer, anon_uploader, 'a.txt', 10)
     with django_capture_on_commit_callbacks(execute=True):
         services.requests.owner_mark_done(transfer, funded_user)
-    assert not Notification.objects.filter(user=funded_user, key__startswith='transfer_request_done').exists()
+    assert not Notification.objects.filter(
+        user=funded_user, key__startswith='transfer_request_done'
+    ).exists()
     assert sent_emails == []
 
 
@@ -468,7 +486,9 @@ def test_the_owner_uploading_then_marking_done_sends_nothing(
     funded_user, make_request, upload_to_request, django_capture_on_commit_callbacks, sent_emails
 ):
     transfer = make_request()
-    owner = Uploader(user=funded_user, token_hash='', name=funded_user.name, email=funded_user.email)
+    owner = Uploader(
+        user=funded_user, token_hash='', name=funded_user.name, email=funded_user.email
+    )
     upload_to_request(transfer, owner, 'a.txt', 10)
     with django_capture_on_commit_callbacks(execute=True):
         services.requests.mark_done(transfer, by_user=funded_user)
@@ -519,7 +539,9 @@ def test_done_deletes_unfinished_uploads_of_every_uploader(
 
     transfer = make_request()
     upload_to_request(transfer, anon_uploader, 'done.txt', 10)
-    pending = request_upload.add_file(transfer, user_uploader, 'slow.bin', 500, storage=fake_storage)
+    pending = request_upload.add_file(
+        transfer, user_uploader, 'slow.bin', 500, storage=fake_storage
+    )
     assert pending.upload_id in fake_storage.active_uploads
 
     with django_capture_on_commit_callbacks(execute=True):
@@ -531,7 +553,9 @@ def test_done_deletes_unfinished_uploads_of_every_uploader(
     assert transfer.size_bytes == 10
 
 
-def test_done_is_refused_when_the_link_is_not_active(make_request, upload_to_request, anon_uploader):
+def test_done_is_refused_when_the_link_is_not_active(
+    make_request, upload_to_request, anon_uploader
+):
     transfer = make_request()
     upload_to_request(transfer, anon_uploader, 'a.txt', 10)
     Transfer.objects.filter(pk=transfer.pk).update(status=TransferStatus.DISABLED)
@@ -549,8 +573,12 @@ def test_the_owner_cannot_mark_a_disabled_request_done(funded_user, make_request
 
 
 def test_an_inactive_owner_is_not_told(
-    funded_user, make_request, upload_to_request, anon_uploader,
-    django_capture_on_commit_callbacks, sent_emails,
+    funded_user,
+    make_request,
+    upload_to_request,
+    anon_uploader,
+    django_capture_on_commit_callbacks,
+    sent_emails,
 ):
     from apps.accounts.models import User
 
@@ -565,8 +593,12 @@ def test_an_inactive_owner_is_not_told(
 
 
 def test_an_unconfirmed_owner_gets_the_notice_but_no_email(
-    funded_user, make_request, upload_to_request, anon_uploader,
-    django_capture_on_commit_callbacks, sent_emails,
+    funded_user,
+    make_request,
+    upload_to_request,
+    anon_uploader,
+    django_capture_on_commit_callbacks,
+    sent_emails,
 ):
     transfer = make_request()
     upload_to_request(transfer, anon_uploader, 'a.txt', 10)
@@ -579,7 +611,9 @@ def test_an_unconfirmed_owner_gets_the_notice_but_no_email(
     assert sent_emails == []
 
 
-def test_reopen_puts_the_link_back_in_upload_mode(funded_user, make_request, upload_to_request, anon_uploader):
+def test_reopen_puts_the_link_back_in_upload_mode(
+    funded_user, make_request, upload_to_request, anon_uploader
+):
     transfer = make_request()
     upload_to_request(transfer, anon_uploader, 'a.txt', 10)
     services.requests.mark_done(transfer, by_name='Jane')

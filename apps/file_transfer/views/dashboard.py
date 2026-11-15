@@ -16,6 +16,7 @@ from django.db.models import Count, Prefetch
 from django.forms import Form
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.accounts.http import AuthenticatedHttpRequest
@@ -26,7 +27,14 @@ from apps.core.services.client_ip import client_ip
 
 from .. import services
 from ..forms import AddRecipientsForm, TransferSettingsActionForm
-from ..models import ENDED_STATUSES, DownloadEvent, Transfer, TransferRecipient, TransferStatus
+from ..models import (
+    ENDED_STATUSES,
+    DownloadEvent,
+    Transfer,
+    TransferKind,
+    TransferRecipient,
+    TransferStatus,
+)
 
 #: How many rows of a transfer's per-download log the row partial shows (spec section 6: "a
 #: per-download log is available per transfer") -- fetched via `Prefetch` below so a transfer with
@@ -36,6 +44,11 @@ _DOWNLOAD_LOG_LIMIT = 20
 ACTIVE_FILTER = 'active'
 ENDED_FILTER = 'ended'
 
+#: The dashboard's two tabs (issue #306): the transfers the owner sent (the default) and the file
+#: requests they made, chosen by `?kind=send|request`.
+SENT_TAB = TransferKind.SEND.value
+REQUESTS_TAB = TransferKind.REQUEST.value
+
 #: Never shown on the dashboard: a draft (or, in phase 2, unconfirmed) transfer isn't a "sent"
 #: transfer yet, and `send_page` creates one on every visit, so without this exclusion every
 #: reload of the send page would add an "Untitled transfer" row to the active list for up to the
@@ -43,9 +56,14 @@ ENDED_FILTER = 'ended'
 _UNLISTED_STATUSES = (TransferStatus.DRAFT, TransferStatus.PENDING_CONFIRMATION)
 
 
-def _transfers_for(user, filter_value: str):
+def _kind(request: AuthenticatedHttpRequest) -> str:
+    """The tab asked for (`?kind=`): anything but `request` is the Sent tab."""
+    return REQUESTS_TAB if request.GET.get('kind') == REQUESTS_TAB else SENT_TAB
+
+
+def _transfers_for(user, filter_value: str, kind: str = SENT_TAB):
     qs = (
-        Transfer.objects.filter(owner=user)
+        Transfer.objects.filter(owner=user, kind=kind)
         .exclude(status__in=_UNLISTED_STATUSES)
         # Avoids a `COUNT` query per row for `Transfer.download_count` (used by both
         # `download_count` and `downloads_remaining`); `files`/`recipients` are prefetched
@@ -59,6 +77,7 @@ def _transfers_for(user, filter_value: str):
         .prefetch_related(
             'files',
             'recipients',
+            'invites',
             # `to_attr` is required for a *sliced* `Prefetch` queryset: Django's own prefetch
             # machinery needs to further filter this queryset by parent id, which a slice
             # otherwise forbids ("Cannot filter a query once a slice has been taken") -- `to_attr`
@@ -103,9 +122,12 @@ def _resumable_draft(user) -> Transfer | None:
 @require_GET
 def dashboard(request: AuthenticatedHttpRequest) -> HttpResponse:
     filter_value = request.GET.get('filter', ACTIVE_FILTER)
+    kind = _kind(request)
     context = {
-        'transfers': _transfers_for(request.user, filter_value),
+        'transfers': _transfers_for(request.user, filter_value, kind),
         'filter': filter_value,
+        'kind': kind,
+        'kind_tabs': [(SENT_TAB, 'Sent'), (REQUESTS_TAB, 'Requests')],
         'resumable_draft': _resumable_draft(request.user),
     }
     return render(request, 'file_transfer/dashboard.html', context)
@@ -116,12 +138,28 @@ def dashboard(request: AuthenticatedHttpRequest) -> HttpResponse:
 def transfer_list(request: AuthenticatedHttpRequest) -> HttpResponse:
     """HTMX partial: the transfer list, for switching the active/ended filter without a reload."""
     filter_value = request.GET.get('filter', ACTIVE_FILTER)
-    context = {'transfers': _transfers_for(request.user, filter_value), 'filter': filter_value}
+    kind = _kind(request)
+    context = {
+        'transfers': _transfers_for(request.user, filter_value, kind),
+        'filter': filter_value,
+        'kind': kind,
+    }
     return render(request, 'file_transfer/partials/transfer_list.html', context)
 
 
-def _owned_transfer(request: AuthenticatedHttpRequest, transfer_id: str) -> Transfer:
-    return get_object_or_404(Transfer, id=transfer_id, owner=request.user)
+def _owned_transfer(
+    request: AuthenticatedHttpRequest, transfer_id: str, *, kind: str | None = None
+) -> Transfer:
+    """The caller's own transfer (or file request, with `kind=None`); another user's is a 404."""
+    filters = {'kind': kind} if kind else {}
+    return get_object_or_404(Transfer, id=transfer_id, owner=request.user, **filters)
+
+
+def _row_template(transfer: Transfer) -> str:
+    """A file request's row (issue #306) or a transfer's."""
+    if transfer.is_request:
+        return 'file_transfer/partials/request_row.html'
+    return 'file_transfer/partials/transfer_row.html'
 
 
 def _row_response(
@@ -134,7 +172,7 @@ def _row_response(
 ) -> HttpResponse:
     return render(
         request,
-        'file_transfer/partials/transfer_row.html',
+        _row_template(transfer),
         {'transfer': transfer, 'error': error, 'notice': notice},
         status=status,
     )
@@ -158,6 +196,8 @@ def _respond(
             messages.error(request, error)
         elif notice:
             messages.success(request, notice)
+        if transfer.is_request:
+            return redirect(f'{reverse("file_transfer:dashboard")}?kind={REQUESTS_TAB}')
         return redirect('file_transfer:dashboard')
     return _row_response(request, transfer, error=error, notice=notice, status=status)
 
@@ -213,7 +253,7 @@ def delete_now(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpRespo
 @login_required
 @require_POST
 def update_settings(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpResponse:
-    transfer = _owned_transfer(request, transfer_id)
+    transfer = _owned_transfer(request, transfer_id, kind=SENT_TAB)
     form = TransferSettingsActionForm(request.POST)
     if not form.is_valid():
         return _respond(request, transfer, error=_form_error_text(form), status=422)
@@ -244,7 +284,7 @@ def update_settings(request: AuthenticatedHttpRequest, transfer_id: str) -> Http
 @login_required
 @require_POST
 def add_recipients(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpResponse:
-    transfer = _owned_transfer(request, transfer_id)
+    transfer = _owned_transfer(request, transfer_id, kind=SENT_TAB)
     form = AddRecipientsForm(request.POST)
     if not form.is_valid():
         return _respond(request, transfer, error=_form_error_text(form), status=422)
@@ -269,7 +309,7 @@ def add_recipients(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpR
 def resend_recipient(
     request: AuthenticatedHttpRequest, transfer_id: str, recipient_id: str
 ) -> HttpResponse:
-    transfer = _owned_transfer(request, transfer_id)
+    transfer = _owned_transfer(request, transfer_id, kind=SENT_TAB)
     recipient = get_object_or_404(TransferRecipient, id=recipient_id, transfer=transfer)
     try:
         services.resend_recipient_email(

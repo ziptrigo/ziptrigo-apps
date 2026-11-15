@@ -1,0 +1,47 @@
+{% extends 'core/base.html' %}
+{% load ft_ui %}
+
+{% block title %}Request created - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-2xl text-center">
+    <i class="fas fa-check-circle text-5xl text-sage-500 dark:text-sage-300 mb-4"></i>
+    <h1 class="text-3xl font-semibold tracking-tight mb-4 text-gray-900 dark:text-gray-100">Your request is ready</h1>
+    <p class="text-gray-600 dark:text-gray-400 mb-2">
+        Share this link with the people you want files from: <span class="font-medium">{{ transfer.title }}</span>.
+    </p>
+    {% if invite_count %}
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">We emailed {{ invite_count }} {% if invite_count == 1 %}person{% else %}people{% endif %} the link.</p>
+    {% else %}
+    <div class="mb-6"></div>
+    {% endif %}
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-4 flex items-center gap-2 mb-4 border border-gray-200 dark:border-gray-700">
+        <input type="text" readonly value="{{ download_url }}" id="download-url-input" aria-label="The link"
+               class="flex-1 text-sm bg-transparent text-gray-900 dark:text-gray-100 border-none">
+        <button type="button" id="copy-link-btn"
+                class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400">
+            <i class="fas fa-copy mr-1" aria-hidden="true"></i><span id="copy-link-label" aria-live="polite">Copy link</span>
+        </button>
+    </div>
+    <div class="mb-6">
+        {% transfer_qr_data_uri transfer as qr_uri %}
+        {% include 'file_transfer/partials/request_qr.html' with qr_uid=transfer.id qr_uri=qr_uri link=download_url %}
+    </div>
+    <a href="{% url 'file_transfer:dashboard' %}?kind=request" class="text-sage-600 dark:text-sage-300 hover:underline">Back to your requests</a>
+</div>
+<script>
+document.getElementById('copy-link-btn').addEventListener('click', function () {
+    const input = document.getElementById('download-url-input');
+    const label = document.getElementById('copy-link-label');
+    input.select();
+    const copied = function () {
+        label.textContent = 'Copied';
+        clearTimeout(label._timer);
+        label._timer = setTimeout(function () { label.textContent = 'Copy link'; }, 2000);
+    };
+    navigator.clipboard.writeText(input.value).then(copied, function () {
+        if (document.execCommand('copy')) copied();
+    });
+});
+</script>
+{% endblock %}

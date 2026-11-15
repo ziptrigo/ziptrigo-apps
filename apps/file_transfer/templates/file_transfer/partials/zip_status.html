@@ -1,4 +1,4 @@
-<div id="zip-area">
+{% with area=area_id|default:"zip-area" %}<div id="{{ area }}">
     {% if transfer.zip_status == 'ready' %}
     <a href="{% url 't:download-zip' transfer.slug %}"
        class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 whitespace-nowrap hover:bg-sage-400">
@@ -7,19 +7,19 @@
     {% elif transfer.zip_status == 'failed' %}
     <div class="flex items-center gap-2 text-sm">
         <span class="text-red-600 dark:text-red-400">Could not prepare the zip.</span>
-        <button type="button" hx-get="{% url 't:zip-status' transfer.slug %}" hx-target="#zip-area" hx-swap="outerHTML"
+        <button type="button" hx-get="{% url 't:zip-status' transfer.slug %}?area={{ area }}" hx-target="#{{ area }}" hx-swap="outerHTML"
                 class="text-sage-600 dark:text-sage-300 hover:underline">Try again</button>
     </div>
     {% elif poll_cap_reached %}
     <div class="flex items-center gap-2 text-sm">
         <span class="text-gray-500 dark:text-gray-400">Still preparing the zip -- this is taking longer than usual.</span>
-        <button type="button" hx-get="{% url 't:zip-status' transfer.slug %}" hx-target="#zip-area" hx-swap="outerHTML"
+        <button type="button" hx-get="{% url 't:zip-status' transfer.slug %}?area={{ area }}" hx-target="#{{ area }}" hx-swap="outerHTML"
                 class="text-sage-600 dark:text-sage-300 hover:underline">Check again</button>
     </div>
     {% else %}
-    <div hx-get="{% url 't:zip-status' transfer.slug %}?polls={{ next_poll }}" hx-trigger="every 2s" hx-target="#zip-area" hx-swap="outerHTML"
+    <div hx-get="{% url 't:zip-status' transfer.slug %}?polls={{ next_poll }}&amp;area={{ area }}" hx-trigger="every 2s" hx-target="#{{ area }}" hx-swap="outerHTML"
          class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
         <i class="fas fa-spinner fa-spin"></i>Preparing the zip...
     </div>
     {% endif %}
-</div>
+</div>{% endwith %}

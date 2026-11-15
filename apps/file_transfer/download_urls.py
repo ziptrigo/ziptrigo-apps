@@ -6,7 +6,16 @@ manage link (spec section 6) lives here too, for the same reason.
 
 from django.urls import path
 
-from .views import download_file, download_page, download_zip, report_transfer, unlock, zip_status
+from .views import (
+    download_file,
+    download_page,
+    download_zip,
+    report_transfer,
+    request_public,
+    request_upload,
+    unlock,
+    zip_status,
+)
 from .views import manage as manage_views
 
 app_name = 't'
@@ -18,6 +27,30 @@ urlpatterns = [
     path('t/<str:slug>/zip/', download_zip, name='download-zip'),
     path('t/<str:slug>/zip/status/', zip_status, name='zip-status'),
     path('t/<str:slug>/report/', report_transfer, name='report'),
+    # A file request's upload page (issue #306): the page itself is `t:download` while it is open;
+    # these are the JSON calls it makes, and "Mark as done".
+    path('t/<str:slug>/upload/files/', request_upload.add_file, name='request-add-file'),
+    path(
+        't/<str:slug>/upload/files/<uuid:file_id>/parts/',
+        request_upload.part_urls,
+        name='request-part-urls',
+    ),
+    path(
+        't/<str:slug>/upload/files/<uuid:file_id>/complete/',
+        request_upload.complete_file,
+        name='request-complete-file',
+    ),
+    path(
+        't/<str:slug>/upload/files/<uuid:file_id>/remove/',
+        request_upload.remove_file,
+        name='request-remove-file',
+    ),
+    path(
+        't/<str:slug>/upload/files/<uuid:file_id>/resume/',
+        request_upload.resume_file,
+        name='request-resume-file',
+    ),
+    path('t/<str:slug>/upload/done/', request_public.request_done, name='request-done'),
     path('t/<str:slug>/manage/<str:token>/', manage_views.manage_page, name='manage'),
     path(
         't/<str:slug>/manage/<str:token>/disable/',
