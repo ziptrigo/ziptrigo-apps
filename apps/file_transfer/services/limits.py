@@ -108,7 +108,9 @@ def validate_new_file_anonymous(
     )
 
 
-def _validate_recipients(emails: list[str], *, max_recipients: int) -> list[str]:
+def _validate_recipients(
+    emails: list[str], *, max_recipients: int, subject: str = 'A transfer', noun: str = 'recipient'
+) -> list[str]:
     seen: set[str] = set()
     deduped: list[str] = []
     for email in emails:
@@ -125,9 +127,7 @@ def _validate_recipients(emails: list[str], *, max_recipients: int) -> list[str]
             raise ValidationError(f'"{deduped[-1][:80]}" is not a valid email address.')
 
     if len(deduped) > max_recipients:
-        raise ValidationError(
-            f'A transfer can have at most {_count_text(max_recipients, "recipient")}.'
-        )
+        raise ValidationError(f'{subject} can have at most {_count_text(max_recipients, noun)}.')
     return deduped
 
 
@@ -137,9 +137,30 @@ def validate_recipients(emails: list[str], settings: FileTransferSettings) -> li
     return _validate_recipients(emails, max_recipients=settings.logged_in_max_recipients)
 
 
+def validate_invitees(emails: list[str], settings: FileTransferSettings) -> list[str]:
+    """`validate_recipients` for the people a file request is for (issue #306): the same dedupe,
+    format check and cap, worded for a request."""
+    return _validate_recipients(
+        emails,
+        max_recipients=settings.logged_in_max_recipients,
+        subject='A request',
+        noun='invitee',
+    )
+
+
 def validate_recipients_anonymous(emails: list[str], settings: FileTransferSettings) -> list[str]:
     """Same as `validate_recipients`, against the separate (smaller) anonymous-sender limit."""
     return _validate_recipients(emails, max_recipients=settings.anonymous_max_recipients)
+
+
+def size_text(num_bytes: int) -> str:
+    """A size as the pages show it (`50.0 MB`, `5.0 GB`); the public name of `_size_text`."""
+    return _size_text(num_bytes)
+
+
+def count_text(count: int, noun: str) -> str:
+    """`1 file`, `3 files`; the public name of `_count_text`."""
+    return _count_text(count, noun)
 
 
 def validate_has_files(transfer: Transfer) -> None:

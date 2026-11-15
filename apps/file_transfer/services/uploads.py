@@ -227,8 +227,9 @@ def complete_file_upload(
 
     file.checksum = info.checksum_sha256
     file.uploaded = True
+    file.uploaded_at = timezone.now()
     file.upload_id = ''
-    file.save(update_fields=['checksum', 'uploaded', 'upload_id'])
+    file.save(update_fields=['checksum', 'uploaded', 'uploaded_at', 'upload_id'])
     return file
 
 

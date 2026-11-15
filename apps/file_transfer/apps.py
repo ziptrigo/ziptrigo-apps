@@ -80,10 +80,22 @@ class FileTransferConfig(AppConfig):
                 name='file_transfer.purge_download_ips',
                 func=jobs.purge_download_ips,
                 description=(
-                    'Removes the IP address from download log entries older than 90 days.'
+                    'Removes the IP address from download log entries, and from the files uploaded to file requests, older than 90 days.'
                 ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
+            )
+        )
+        register_job(
+            JobSpec(
+                name='file_transfer.send_request_notices',
+                func=jobs.send_request_notices,
+                description=(
+                    'Tells the owner of a file request that new files arrived, once the last '
+                    'upload of a batch is 15 minutes old (one notice per batch, in the app only).'
+                ),
+                interval=timedelta(minutes=1),
+                lease=timedelta(minutes=5),
             )
         )
 
