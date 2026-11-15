@@ -20,6 +20,8 @@
  *  - Empty lists. A row action removes the row without re-rendering its list, so a list marked
  *    `data-empty-list` shows its `<template data-empty-state>` when the last row has left (or hides
  *    the section marked `data-vanish-when-empty`) and takes it away when a row is back.
+ *  - A click anywhere on a row (`.task-row`) opens the task, as the title link does, unless it lands
+ *    on something interactive (a link, button, field, menu, the drag handle) or ends a text selection.
  *  - The tab title follows an inline rename (`#task-panel[data-document-title]`).
  *  - `[data-scroll-hint]` menus (a phone's horizontal scrollers) say whether there is more to
  *    scroll to (`data-more-right`, which the layout's CSS turns into a fade).
@@ -155,6 +157,36 @@
             refreshEmpty();
         }, 30);
     }).observe(document.body, { childList: true, subtree: true });
+
+    // A click on a row's empty space opens the task, like its title link. Anything interactive keeps
+    // its own behaviour: links, buttons, fields, the drag handle, and whatever sits inside an Alpine
+    // menu (the state and Postpone menus), so closing a menu never opens the task.
+    const INTERACTIVE = 'a, button, input, select, textarea, label, summary, [role="button"], ' +
+        '[role="menu"], [role="menuitem"], [role="menuitemradio"], [role="listbox"], [x-data], .drag-handle';
+    // A press that lands while a menu is open only closes it (the menu's own outside-click runs before
+    // the click does, so ask at press time).
+    let menuWasOpen = false;
+    document.addEventListener('pointerdown', function () {
+        menuWasOpen = !!document.querySelector('.task-row [aria-expanded="true"]');
+    }, true);
+    document.addEventListener('click', function (event) {
+        if (event.defaultPrevented || event.button !== 0) return;
+        if (menuWasOpen) { menuWasOpen = false; return; }
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const row = target.closest('.task-row');
+        if (!row) return;
+        const hit = target.closest(INTERACTIVE);
+        if (hit && row.contains(hit)) return;
+        const selection = window.getSelection ? window.getSelection() : null;
+        if (selection && !selection.isCollapsed && row.contains(selection.anchorNode)) return;
+        const link = row.querySelector('a.task-title');
+        if (!link) return;
+        // Ctrl/Cmd-click opens a new tab like the link does, by asking for it outright (a synthetic click
+        // on the link could be treated as a popup); anything else is a plain visit.
+        if (event.ctrlKey || event.metaKey) window.open(link.href, '_blank', 'noopener');
+        else link.click();
+    });
 
     // The tab title follows an inline rename of the task page.
     document.addEventListener('htmx:afterSettle', function (event) {

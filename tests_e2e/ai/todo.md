@@ -1205,6 +1205,19 @@ one`; a second user (Session B) with a task.
 | 11 | `GET /api/todo/settings`. | `credits_balance` equals the number the website shows next to the account's credits. |
 | 12 | `GET /api/todo/settings`; note `max_attachment_bytes` and `max_attachments_per_task`. In `/admin/todo/todosettings/` set "Max attachment bytes" to 1048576 and "Max attachments per task" to 3, save, and read `GET /api/todo/settings` again. Then, on a task, `POST .../attachments` with a `size` of 2 MB, and (after attaching two files to the task and one to a comment of it) once more with a small file. Finally `GET /api/todo/tasks/<n>`. | The first read shows the defaults (52428800 and 20); the second the new values at once. The 2 MB start is a 400 `The file is too large (max 1 MB).`; the next one is a 400 `A task can have up to 3 files.` (the comment's file counts). The task's `attachment_count` is 2 while `files_toward_limit` is 3, equal to `max_attachments_per_task`. Restore the defaults afterwards. |
 
+### TODO-61 All tasks: the Manual sort and clicking a row
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Open **All tasks** with at least four open tasks. | The "Sort by" bar reads Due date, Priority, Newest, Title, **Manual** (Manual last); no drag handles on the rows. |
+| 2 | Click **Manual**. | The URL gets `?sort=manual`; every row shows a drag handle (grip icon, left of the circle). Manual has no arrow: clicking it again changes nothing, and adding `&dir=desc` to the URL is ignored. |
+| 3 | On Manual, drag the last row to the top, then reload. | The order is kept after the reload. **Title**, **Newest** and **Today** show their own orders, unchanged by the drag. |
+| 4 | Focus a handle and press the Up / Down arrow keys. | The row moves and the order is saved (as on Today). |
+| 5 | Add a new task above, with Manual selected. | The new task is at the end of the list. |
+| 6 | With more than 50 open tasks, drag a row on page 1 to a different place on that page, then open page 2. | Page 2's tasks keep their order; the tasks on page 1 follow the new order. |
+| 7 | Click the empty space of a row (to the right of the title, or beside the chips) on All, Today, a search and the Trash. | The task page opens, as the title link does. Ctrl/Cmd-click opens it in a new tab. |
+| 8 | Click the state pill, the Postpone button, the trash button, the circle, a label chip's neighbours that are links (the parent link), and the drag handle; also select some title text by dragging. | Each does only its own thing (menu opens, task completes...); no navigation. Selecting text does not open the task. Closing the state menu by clicking elsewhere on the row does not open the task. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it

@@ -39,10 +39,23 @@ SORTS = {
     'created': 'Newest',
     'title': 'Title',
 }
+#: The sorts of the All tasks page: the shared ones plus the hand-made order (`Task.all_position`).
+#: Only the page has it; the API, saved filters and search keep `SORTS`.
+MANUAL_SORT = 'manual'
+LIST_SORTS = {**SORTS, MANUAL_SORT: 'Manual'}
 #: The direction each sort runs in when none is asked for (`?dir=asc|desc`): the due date and the
 #: title ascending, priority 1 first (ascending), the creation time newest first (descending).
 DIRECTIONS = ('asc', 'desc')
-DEFAULT_DIRECTIONS = {'date': 'asc', 'priority': 'asc', 'created': 'desc', 'title': 'asc'}
+DEFAULT_DIRECTIONS = {
+    'date': 'asc',
+    'priority': 'asc',
+    'created': 'desc',
+    'title': 'asc',
+    MANUAL_SORT: 'asc',
+    # The internal keys of the manual orders, so `order_tasks` can reverse them like any other sort.
+    'all_manual': 'asc',
+    'today_manual': 'asc',
+}
 UPCOMING_DAYS = 14
 
 
@@ -97,8 +110,8 @@ def order_tasks(
     """`queryset` in `sort` order (see `sort_direction` for `direction`; the opposite of the sort's
     default is its exact reverse, ties included): `date` (the default, also for an unknown value), `priority`
     (then date), `created` (newest first), `title`, `manual` (a parent's subtasks: `Task.position`)
-    or `today_manual` (the Today list: `Task.today_position`), the manual ones then in the default
-    order for the tasks that tie."""
+    `today_manual` (the Today list: `Task.today_position`) or `all_manual` (the All tasks list:
+    `Task.all_position`), the manual ones then in the default order for the tasks that tie."""
     ordered = _order_tasks(queryset, sort)
     if sort in DEFAULT_DIRECTIONS and sort_direction(sort, direction) != DEFAULT_DIRECTIONS[sort]:
         return ordered.reverse()
@@ -116,6 +129,8 @@ def _order_tasks(queryset: QuerySet, sort: str) -> QuerySet:
         return queryset.order_by('position', *default_order())
     if sort == 'today_manual':
         return queryset.order_by('today_position', *default_order())
+    if sort == 'all_manual':
+        return queryset.order_by('all_position', *default_order())
     return queryset.order_by(*default_order())
 
 
@@ -303,6 +318,14 @@ def next_position(parent: Task | None) -> int:
     if parent is None:
         return 0
     return after_the_others(subtasks_of(parent), 'position')
+
+
+def next_all_position(user: User) -> int:
+    """`Task.all_position` of a new task: after the others when the user's open tasks (subtasks
+    included, the set the All list shows) already have a manual order, else 0 (the default sort
+    applies). A closed or trashed task keeps the number it had, so a reopened or restored one can
+    tie with a live task; ties fall back to the default order."""
+    return after_the_others(open_tasks(user), 'all_position')
 
 
 def next_today_position(user: User, due_date: date | None) -> int:

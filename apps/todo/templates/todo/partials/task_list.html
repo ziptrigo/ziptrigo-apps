@@ -89,8 +89,8 @@
         {% for link in sort_links %}
         <a href="{{ page_url }}{% if link.query %}?{{ link.query }}{% endif %}"
            hx-get="{{ list_url }}?view=all{% if link.query %}&{{ link.query }}{% endif %}" hx-target="#task-list" hx-swap="innerHTML"
-           {% if link.active %}aria-current="true" title="Click to sort {% if link.direction == 'asc' %}descending{% else %}ascending{% endif %}"{% endif %}
-           class="rounded-md {% if link.active %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ link.label }}{% if link.active %}<i class="fas fa-arrow-{% if link.direction == 'asc' %}up{% else %}down{% endif %} ml-1 text-xs" aria-hidden="true"></i><span class="sr-only">, sorted {% if link.direction == 'asc' %}ascending{% else %}descending{% endif %}</span>{% endif %}</a>
+           {% if link.active %}aria-current="true"{% if link.direction %} title="Click to sort {% if link.direction == 'asc' %}descending{% else %}ascending{% endif %}"{% elif link.key == 'manual' %} title="Drag the rows to put them in your own order"{% endif %}{% endif %}
+           class="rounded-md {% if link.active %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ link.label }}{% if link.active and link.direction %}<i class="fas fa-arrow-{% if link.direction == 'asc' %}up{% else %}down{% endif %} ml-1 text-xs" aria-hidden="true"></i><span class="sr-only">, sorted {% if link.direction == 'asc' %}ascending{% else %}descending{% endif %}</span>{% endif %}</a>
         {% endfor %}
     </div>
     {% elif view == 'closed' %}
@@ -108,8 +108,8 @@
     </p>
     {% endif %}
     <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
-        <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
-            {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list{% if sortable %} data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="all"{% endif %}>
+            {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False sortable=sortable %}
             {% empty %}
             <li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">
                 {% if view == 'closed' %}{% if resolution == 'done' %}No tasks closed as done yet.{% elif resolution == 'wont_do' %}No tasks closed as won't do yet.{% else %}No closed tasks yet.{% endif %}{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}

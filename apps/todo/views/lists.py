@@ -28,8 +28,9 @@ from ..forms import TaskForm
 from ..models import Label, MutedOverdue, Resolution, Task, TaskBlocker, TodoSettings
 from ..services import (
     DEFAULT_DIRECTIONS,
+    LIST_SORTS,
+    MANUAL_SORT,
     SORT_DEFAULT,
-    SORTS,
     UPCOMING_DAYS,
     closed_set,
     get_account,
@@ -131,8 +132,19 @@ def sort_links(sort: str, direction: str) -> list[dict]:
     its `direction`. A sort's link asks for its own default direction, except the active one, which
     asks for the opposite: a second click reverses it."""
     links = []
-    for key, label in SORTS.items():
+    for key, label in LIST_SORTS.items():
         active = key == sort
+        if key == MANUAL_SORT:  # no second click to reverse: it has no direction
+            links.append(
+                {
+                    'key': key,
+                    'label': label,
+                    'query': _query(sort=key),
+                    'active': active,
+                    'direction': '',
+                }
+            )
+            continue
         wanted = ('asc' if direction == 'desc' else 'desc') if active else DEFAULT_DIRECTIONS[key]
         query = _query(
             sort=key if key != SORT_DEFAULT else '',
@@ -156,8 +168,9 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     user = request.user
     today = user_today(user)
     sort = request.GET.get('sort', '')
-    sort = sort if sort in SORTS else SORT_DEFAULT
-    direction = sort_direction(sort, request.GET.get('dir'))
+    sort = sort if sort in LIST_SORTS else SORT_DEFAULT
+    # The Manual order is never reversed: a drag in a reversed list would mean the opposite.
+    direction = 'asc' if sort == MANUAL_SORT else sort_direction(sort, request.GET.get('dir'))
     context: dict = {'view': view, 'list_title': TITLES[view], 'today': today}
 
     if view == 'today':
@@ -198,7 +211,11 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
         return context
 
     if view == 'all':
-        queryset = order_tasks(decorate(open_tasks(user)), sort, direction)
+        # The Manual sort is `Task.all_position`; `manual` in `order_tasks` is a parent's subtasks.
+        queryset = order_tasks(
+            decorate(open_tasks(user)), 'all_manual' if sort == MANUAL_SORT else sort, direction
+        )
+        context['sortable'] = sort == MANUAL_SORT
     elif view == 'closed':
         resolution = request.GET.get('resolution', '')
         resolution = resolution if resolution in Resolution.values else ''
@@ -228,7 +245,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
             'tasks': tasks,
             'page_obj': page_obj,
             'sort': sort,
-            'sorts': SORTS,
+            'sorts': LIST_SORTS,
             'sort_links': sort_links(sort, direction),
             'page_query': _query(**base, page=str(page_obj.number) if page_obj.number > 1 else ''),
             'prev_query': _query(**base, page=str(page_obj.previous_page_number()))
@@ -310,12 +327,12 @@ def task_list(request: AuthenticatedHttpRequest) -> HttpResponse:
     if not is_htmx(request):
         resolution = request.GET.get('resolution', '')
         sort = request.GET.get('sort', '')
-        sort = sort if sort in SORTS else ''
+        sort = sort if sort in LIST_SORTS else ''
         direction = request.GET.get('dir', '')
         page = request.GET.get('page', '')
         query = _query(
             sort=sort,
-            dir=direction if direction in DIRECTIONS else '',
+            dir=direction if direction in DIRECTIONS and sort != MANUAL_SORT else '',
             resolution=resolution if view == 'closed' and resolution in Resolution.values else '',
             page=str(int(page)) if page.isascii() and page.isdigit() else '',
         )

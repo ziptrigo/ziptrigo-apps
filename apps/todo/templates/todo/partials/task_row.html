@@ -9,7 +9,7 @@
 <li id="task-{{ task.number }}" data-task-id="{{ task.pk }}" data-group="{{ task.state_group }}"{% if oob %} hx-swap-oob="true"{% endif %}
     hx-target="#task-{{ task.number }}" hx-swap="outerHTML swap:200ms"
     hx-vals='{"view": "{{ view }}", "ctx": "row"{% if sortable %}, "sortable": "1"{% endif %}}'
-    class="task-row row-leave row-enter flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
+    class="task-row row-leave row-enter cursor-pointer flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
     {% if sortable %}
     {% comment %}A span with role=button, not a <button>: Firefox will not start a drag from a button inside the draggable row.
        The arrow keys move the row (tasks.js), so ordering doesn't need a mouse.{% endcomment %}
