@@ -846,7 +846,7 @@ the server, and an account made with the tick has the acceptance on record (issu
 | 2 | In the developer console run `document.querySelector('[name=accept_terms]').required = false`, then click `Create account`. | The form is replaced in place (422, URL unchanged). The red block reads `Terms: You need to agree to the Terms of Use to continue.`; the same message without the `Terms:` prefix shows under the checkbox line. Name and Email keep what was typed. `/__e2e__/mail/?to=<TERMS>` shows `No emails.` |
 | 3 | Click `Terms of Use` in the checkbox label, then `Privacy Policy`. | Each opens in a new tab (`/terms/`, `/privacy/`); the register tab keeps the typed Name and Email. |
 | 4 | Type P1 again, tick the checkbox, click `Create account`. | `/account/created/`, **Check your email**. |
-| 5 | Context B: `/admin/accounts/user/`, search TERMS, open the user. | Under **Status**: `Terms version` is `2026-11-09` and `Terms accepted at` is a moment ago. Both are read-only (plain text, no input). |
+| 5 | Context B: `/admin/accounts/user/`, search TERMS, open the user. | Under **Status**: `Terms version` is `2026-11-14` and `Terms accepted at` is a moment ago. Both are read-only (plain text, no input). |
 
 ### ACC-50 The accept page for an account that has not accepted the current terms
 

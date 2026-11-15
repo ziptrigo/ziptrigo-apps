@@ -11,9 +11,9 @@ fix needs no bump.
 from datetime import date
 
 #: The version users accept, recorded on `accounts.User.terms_version`. A date string.
-TERMS_VERSION = '2026-11-09'
+TERMS_VERSION = '2026-11-14'
 #: The date both documents show as "Effective date".
-EFFECTIVE_DATE = date(2026, 11, 9)
+EFFECTIVE_DATE = date(2026, 11, 14)
 
 #: The service is run by an individual, not a company (the documents say so).
 OPERATOR_NAME = 'Joao Coelho'

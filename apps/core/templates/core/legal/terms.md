@@ -2,7 +2,7 @@
 
 **Effective date:** {{ effective_date }}
 
-These Terms of Use ("**Terms**") govern your use of the ZipTrigo website and services at `ziptrigo.com` and its subdomains, and of the ZipTrigo mobile app, including QR codes, file transfer, receipts, short links and to-do lists (the "**Service**").
+These Terms of Use ("**Terms**") govern your use of the ZipTrigo website and services at `ziptrigo.com` and its subdomains, and of the ZipTrigo mobile app, including QR codes, file transfer, receipts, short links, to-do lists, notes and a world clock (the "**Service**").
 
 The Service is operated by **{{ operator_name }}**, an individual based in the {{ operator_country }} ("**ZipTrigo**", "**we**", "**us**"). It is not operated by a company.
 
@@ -27,9 +27,10 @@ You must be at least **16 years old**, and able to form a binding contract, to u
 
 ## 4. Your content
 
-- **You own your content.** The QR codes and short links you create, the files, receipts and tasks you add, and the messages you send remain yours.
-- **License to us:** you give ZipTrigo a worldwide, non-exclusive, royalty-free license to host, store, copy, transmit, display and process your content only as needed to operate the Service. Examples: storing a file and delivering it to your recipients, serving a QR code or a short link, and sending a receipt to an AI model to read its details. This license ends when your content is deleted from the Service, except for copies kept in backups for a limited time or as required by law.
+- **You own your content.** The QR codes and short links you create, the files, receipts, tasks and notes you add, the places you save on the world clock, and the messages you send remain yours.
+- **License to us:** you give ZipTrigo a worldwide, non-exclusive, royalty-free license to host, store, copy, transmit, display and process your content only as needed to operate the Service. Examples: storing a file and delivering it to your recipients, serving a QR code or a short link, showing a note or a time you chose to share to anyone who has its link, and sending a receipt to an AI model to read its details. This license ends when your content is deleted from the Service, except for copies kept in backups for a limited time or as required by law.
 - **Your responsibility:** you confirm that you have all the rights needed to upload and share your content, and that doing so does not break any law or anyone else's rights. This includes emails and documents written by other people that you forward to the Service.
+- **Sharing:** a shared note or a shared World Time event can be opened by anyone who has its link, without signing in, until you revoke or delete it. A file request link lets the people it allows (anyone with the link, anyone signed in, or only the people you invited) upload files to you; you are responsible for what you ask for and accept, and files someone uploads to your request are their content, which they must have the right to share. If you let others edit a note through a link, they can change its content, and a change made while signed in is shown to you with that person's account name. Share only what you are willing to show to everyone who may get the link.
 - **Not a backup service:** transfers are temporary, and files are deleted when a transfer ends. Stored files may become unavailable, and may be deleted, if your account runs out of credits. Keep your own copies of everything.
 - **Automated results:** details read from a receipt, and dates read from a task title, are produced by an AI model and can be wrong. Check them before relying on them. The Service does not give accounting, tax or legal advice.
 
@@ -52,7 +53,7 @@ You agree **not** to use the Service to:
 - overload, disrupt or attack the Service or its infrastructure, or access it by automated means except through our published API, within its limits;
 - resell or provide the Service to third parties as your own, without our written permission.
 
-**Reports and enforcement:** anyone can report a transfer or a short link from its public page. We may review reported content, place it on hold, take it down, block senders and destinations, and suspend or close accounts that break these Terms, with or without notice. We check short link destinations against lists of unsafe sites. We are not obliged to monitor content, but we may do so to enforce these Terms or comply with the law, and we may report illegal content to the authorities.
+**Reports and enforcement:** anyone can report a transfer, a short link, a file request or a shared note from its public page. We may review reported content, place it on hold, take it down, block senders and destinations, and suspend or close accounts that break these Terms, with or without notice. We check short link destinations against lists of unsafe sites. We are not obliged to monitor content, but we may do so to enforce these Terms or comply with the law, and we may report illegal content to the authorities.
 
 **Copyright complaints:** if you believe content on the Service infringes your copyright, send a notice to {{ contact_email }} identifying the work, the content (for example its link) and your contact details, with a statement that you have a good-faith belief the use is unauthorized.
 
@@ -62,7 +63,7 @@ Where we allow transfers without an account, you must confirm the email address 
 
 ## 8. Third-party services
 
-The Service relies on third parties, for example Google and Microsoft for sign-in, cloud providers for storage and email, and AI providers for reading receipts and task titles. Your use of those services may also be governed by their own terms. QR codes, short links and transfers may lead to third-party sites and content that we do not control and are not responsible for.
+The Service relies on third parties, for example Google and Microsoft for sign-in, cloud providers for storage and email, and AI providers for reading receipts and task titles. Your use of those services may also be governed by their own terms. QR codes, short links, shared notes and transfers may lead to third-party sites and content that we do not control and are not responsible for.
 
 ## 9. Changes and termination
 

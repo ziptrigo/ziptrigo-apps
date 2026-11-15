@@ -23,7 +23,7 @@ def test_legal_pages_render_without_a_login(client, name, path, heading):
     assert response.status_code == 200
     html = response.content.decode()
     assert f'<h1>{heading}</h1>' in html
-    assert 'Nov 9, 2026' in html  # the effective date, in the public wording
+    assert 'Nov 14, 2026' in html  # the effective date, in the public wording
     assert legal.OPERATOR_NAME in html
     assert f'mailto:{legal.CONTACT_EMAIL}' in html
     # Nothing left to fill in, and the template comment is not part of the page.
@@ -70,3 +70,14 @@ def test_legal_pages_refuse_a_post(client):
 
 def test_terms_version_is_the_effective_date():
     assert legal.TERMS_VERSION == legal.EFFECTIVE_DATE.isoformat()
+
+
+def test_documents_cover_notes_and_the_world_clock(client):
+    privacy = client.get(reverse('core:privacy')).content.decode()
+    terms = client.get(reverse('core:terms')).content.decode()
+
+    assert 'Nov 14, 2026' in privacy and 'Nov 14, 2026' in terms
+    assert 'notes and a world clock' in terms
+    assert 'shared World Time event' in privacy
+    assert 'a shared note' in terms
+    assert 'a file request' in terms
