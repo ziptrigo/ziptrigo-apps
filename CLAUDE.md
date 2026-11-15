@@ -6289,7 +6289,7 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
     with `apps.core.admin_log.log_change`.
   - **Privacy Policy.** `core/legal/privacy.md` now says shared links show a note to anyone who has them, an
     edit through a link while signed in is recorded with the account and shown to the owner, and reports
-    store the reporter's IP and optional email. `TERMS_VERSION` was **not** bumped: the owner decides.
+    store the reporter's IP and optional email (the version was bumped to `2026-11-14` for all of Notes and World Time, #302).
 - **Search and saved filters** (PR 5; `services/search.py`, `services/filters.py`, `services/saved_filters.py`,
   `models/saved_filter.py`, `views/search.py`, `views/filters.py`, migration `0003_saved_filters`). To-do's search and
   saved filters (see "To-do" > "Search and saved filters", written up there in full) for notes, on the shared
@@ -6747,7 +6747,7 @@ mounted at the site root; the JWT API is `api/` + `schemas/`, mounted at `/api/t
     review of #300 and left for the owner to decide. nginx counts `/w/` in its main zone (nothing changed in
     the `infra` repo). Staff can still see events in the read-only `EventAdmin`, which shows only
     a code's first 6 characters and refuses any `code` lookup from the query string.
-  - *Privacy Policy* gained the shared-event lines; `TERMS_VERSION` was **not** bumped: the owner decides.
+  - *Privacy Policy* gained the shared-event lines (`TERMS_VERSION` bumped to `2026-11-14`, #302).
 - **API and CLI** (PR 3; `api/`, `schemas/`, `admin/worldtime.py`; no migration). `/api/time/` is JWT-only
   like the other products' (router-level `auth=JWTAuth()` in `api/router.py`, tag `World Time` in `TAGS`;
   endpoint modules `tabs.py`, `locations.py`, `grid.py`, `events.py`, `settings.py` share that one `Router`;
@@ -7233,10 +7233,9 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   (links, the public pages, editing through a link, reports and takedown) and search with saved
   filters exist, with the JWT API (`/api/notes/`) and the `inv notes` CLI. Renewals run in the daily
   `notes.renew` job inside the web workers, like the other daily jobs; the first deploy after the
-  foundation charges every paid note whose `paid_through` has already passed. **The owner decides
-  whether to bump `apps.core.legal.TERMS_VERSION`** for PR 4's additions to the Privacy Policy (shared
-  links, edits through a link recorded with the account, reports): they were added to the text without
-  bumping it.
+  foundation charges every paid note whose `paid_through` has already passed. The additions
+  to the Privacy Policy for Notes and World Time (and the matching Terms text) were released with the
+  bump of `TERMS_VERSION` to `2026-11-14` (#302).
 - Welcome credits (#160) are built and **on by default** (1,000 credits; set `BillingSettings.
   welcome_credits` to 0 to turn them off). Limits worth knowing: the remembered addresses start with
   the confirmed accounts that exist when `accounts.0006` runs, so an address an existing account has
