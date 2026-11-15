@@ -22,12 +22,14 @@ from uuid import UUID
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import transaction
 from django.db.models import Q
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
 from apps.billing.services import InsufficientCreditsError
 from apps.core.markdown import checklist_item_text, toggle_checklist_item
+from apps.core.services import notifications
 
 from ..models import (
     SELECTABLE_STATES,
@@ -845,6 +847,9 @@ def close_task(
             # A transient flag for the caller (the view tells the user); never stored.
             task.already_closed = True
             return task
+        # Before `on_completed`, whose "couldn't create the next one" notice points at this task
+        # and is about the close itself, so it must stay new.
+        _mark_notices_seen(task.user_id, [task.number])
         recurrence_service.on_completed(task)
         ended = [task.pk]
         cascaded: list[Task] = []
@@ -861,6 +866,7 @@ def close_task(
                     if sub.completed_at is None and sub.deleted_at is None
                 ]
             ended += subtask_ids
+            _mark_notices_seen(task.user_id, [sub.number for sub in cascaded])
             open_subtasks.update(
                 completed_at=now, resolution=subtasks, state=TaskState.TODO, updated_at=now
             )
@@ -874,6 +880,20 @@ def close_task(
     task.state = TaskState.TODO
     task.updated_at = now
     return task
+
+
+def _mark_notices_seen(user_id: UUID, numbers: list[int]) -> None:
+    """Closing a task (Done or Won't do) means its notifications -- a reminder, "no longer
+    blocked" -- need no more attention: mark the ones pointing at its page opened and read, so they
+    leave the bell and the dropdown. Its own savepoint, logged and never raised: tidying a notice
+    must not undo or fail the close."""
+    try:
+        with transaction.atomic():
+            notifications.mark_opened_for_urls(
+                user_id, [reverse('todo:task', args=[n]) for n in numbers], source='todo'
+            )
+    except Exception:
+        logger.exception('Could not mark the notices of closed tasks as seen')
 
 
 def _loaded_parent(task: Task, parent_id: UUID) -> Task | None:

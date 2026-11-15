@@ -4524,6 +4524,13 @@ log" below); the API/CLI change (#275) is described under "API and CLI".
   "section"`) and `PATCH` accepts it, through the same `set_muted_overdue` (`clean_muted_overdue` first,
   so an unknown value, `null` included, is a 400 `muted_overdue: Choose Today (dimmed), ...` before
   `TODO_EDIT_USER` is spent); `inv todo settings local --muted-overdue dimmed|hidden|section`.
+- **Closing marks the task's notices seen.** `close_task` (so the circle, Won't do, the push Complete
+  button and the API, whatever the resolution) calls `notifications.mark_opened_for_urls` for the
+  notifications of source `todo` that point at the task's page, and at those of the open subtasks it
+  closes with it: they get `opened_at` and `read_at` (so they leave the bell and the dropdown, stay on the
+  notifications page, and an earlier `opened_at` is kept). It runs before the next occurrence is made, so
+  "Couldn't create the next ..." (which points at the closed task) stays new. Own savepoint, logged and
+  never raised. Tests: `apps/todo/tests/test_close_marks_notices.py`.
 - **Held reminders** (`services/reminders.py`; see its module docstring). `deliver_due` skips a muted
   task's reminders (they stay unsent, due) and `sweep_stale` does not sweep them while the task is open
   and muted. Leaving a muted state (`set_state`, or an automatic unblock: `task_state.write_state`, in its transaction) calls `reminders.release_held(task)`:
