@@ -435,7 +435,7 @@ def test_a_made_up_slug_creates_no_per_request_counter(client, settings):
 
     settings.RATELIMIT_ENABLE = True
     _post_json(client, reverse('t:request-add-file', args=['nope']), {'name': 'a', 'size': 1})
-    assert limiter.peek('nope', 'FT_REQUEST_UPLOAD_TRANSFER').remaining == 600
+    assert limiter.peek('nope', 'FT_REQUEST_UPLOAD_TRANSFER').remaining == 3000
 
 
 def test_a_signed_in_uploader_also_spends_the_shared_upload_budget(make_request, settings):

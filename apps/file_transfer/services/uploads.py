@@ -4,6 +4,7 @@ part directly to S3 (spec section 2). Shared by the send-page HTMX/JSON views an
 by the `cleanup_drafts` job.
 """
 
+import logging
 import math
 from datetime import timedelta
 
@@ -16,7 +17,16 @@ from django.utils import timezone
 
 from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
 from . import anon_limits, limits
-from .storage import PART_SIZE_BYTES, S3Storage, get_storage, storage_key, transfer_prefix
+from .storage import (
+    PART_SIZE_BYTES,
+    ObjectInfo,
+    S3Storage,
+    get_storage,
+    storage_key,
+    transfer_prefix,
+)
+
+logger = logging.getLogger(__name__)
 
 #: An empty draft is reused by the next visit to the send page only while it is this young. An
 #: older one is left for `cleanup_drafts`: `cleanup_drafts` measures a draft's age from its
@@ -191,20 +201,22 @@ def presign_parts(
     return urls
 
 
-def complete_file_upload(
+def finish_upload_in_storage(
     file: TransferFile, parts: list[dict], *, storage: S3Storage | None = None
-) -> TransferFile:
-    """Complete `file`'s multipart upload and verify it landed in S3 with the expected size.
-
-    `parts` is `[{'PartNumber': n, 'ETag': etag, 'ChecksumSHA256': checksum}, ...]`, one entry per
-    part the browser PUT, in order; passed straight through to S3's `CompleteMultipartUpload`.
+) -> ObjectInfo:
+    """The S3 half of completing an upload: assemble the parts (`CompleteMultipartUpload`) and
+    verify the object's size against the declared one. Writes nothing but the row's `upload_id`
+    when the size is wrong; `mark_file_uploaded` is the database half. Split so a caller that must
+    hold a lock for its database write (a file request's row lock) can do the slow S3 round trips
+    outside it.
 
     Raises:
-        ValidationError: S3 rejected completing the upload (e.g. no parts were ever PUT), or the
-            object's size in S3 doesn't match what was declared up front -- in which case the
-            object S3 just assembled is deleted immediately rather than left as an orphan (the
-            completed upload is no longer "in progress", so neither `remove_file` nor
-            `abort_draft` would otherwise ever clean it up).
+        ValidationError: S3 rejected completing the upload (e.g. no parts were ever PUT; the
+            exception is logged, the message is neutral since it may reach an anonymous uploader),
+            or the object's size doesn't match the declared one -- in which case the object S3 just
+            assembled is deleted immediately rather than left as an orphan (the completed upload is
+            no longer "in progress", so neither `remove_file` nor `abort_draft` would otherwise
+            ever clean it up) and the row's `upload_id` is cleared.
     """
     if not file.upload_id:
         raise ValidationError('File has no upload in progress.')
@@ -215,7 +227,8 @@ def complete_file_upload(
         storage.complete_multipart_upload(file.storage_key, file.upload_id, parts)
         info = storage.head_object(file.storage_key)
     except ClientError as exc:
-        raise ValidationError(f'Could not complete the upload: {exc}') from exc
+        logger.warning('Could not complete the upload of file %s: %s', file.pk, exc)
+        raise ValidationError('Could not complete the upload. Please try again.') from exc
 
     if info.size != file.size:
         storage.delete_object(file.storage_key)
@@ -224,12 +237,31 @@ def complete_file_upload(
         raise ValidationError(
             f'Uploaded file size ({info.size}) does not match the declared size ({file.size}).'
         )
+    return info
 
+
+def mark_file_uploaded(file: TransferFile, info: ObjectInfo) -> None:
+    """The database half of completing an upload: record the verified object on the row."""
     file.checksum = info.checksum_sha256
     file.uploaded = True
     file.uploaded_at = timezone.now()
     file.upload_id = ''
     file.save(update_fields=['checksum', 'uploaded', 'uploaded_at', 'upload_id'])
+
+
+def complete_file_upload(
+    file: TransferFile, parts: list[dict], *, storage: S3Storage | None = None
+) -> TransferFile:
+    """Complete `file`'s multipart upload and verify it landed in S3 with the expected size.
+
+    `parts` is `[{'PartNumber': n, 'ETag': etag, 'ChecksumSHA256': checksum}, ...]`, one entry per
+    part the browser PUT, in order; passed straight through to S3's `CompleteMultipartUpload`.
+
+    Raises:
+        ValidationError: see `finish_upload_in_storage`.
+    """
+    info = finish_upload_in_storage(file, parts, storage=storage)
+    mark_file_uploaded(file, info)
     return file
 
 
@@ -266,7 +298,8 @@ def list_uploaded_parts(file: TransferFile, *, storage: S3Storage | None = None)
         code = exc.response.get('Error', {}).get('Code', '')
         if code == 'NoSuchUpload':
             raise UploadExpired() from exc
-        raise ValidationError(f"Could not list the upload's parts: {exc}") from exc
+        logger.warning('Could not list the parts of file %s: %s', file.pk, exc)
+        raise ValidationError("Could not check the upload's progress. Please try again.") from exc
 
 
 def restart_upload(file: TransferFile, *, storage: S3Storage | None = None) -> TransferFile:

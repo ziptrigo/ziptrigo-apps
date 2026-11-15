@@ -1091,6 +1091,9 @@ pay). Use the **Visitor window** for the anonymous uploader and a second private
 | 4 | Add an empty file `empty.txt`. | "Could not add empty.txt: File is empty." |
 | 5 | As `qa.user`: Manage > Max files `2`, **Save**. | A red "Already 3 files uploaded; choose at least 3." in the row (nothing saved); with `3` it saves. Max total size `0.01` saves (the files are a few KB); blank clears the limit ("the site maximum"). The smallest the form takes is `0.01` GB; below what is stored the row says "Already <size> uploaded; choose at least <size>." |
 | 6 | Create a request with Max files `1` and add two files from one browser at once (select both). | One is added, the other shows "This request accepts at most 1 file." (the limit is checked under the request's lock, so two parallel adds cannot both pass). |
+| 7 | (Shell) Register an unfinished file on the request without uploading a byte (a caller who only asks for room): `python tests_e2e/ai/manage.py shell -c "from apps.file_transfer.models import Transfer; from apps.file_transfer.services import request_upload; from apps.file_transfer.services.request_uploader import Uploader; t = Transfer.objects.get(title='QA photos'); request_upload.add_file(t, Uploader(user=None, token_hash='f'*64, name='Ghost', email=''), 'ghost.bin', 1000)"`. As `qa.user`, open `/transfer/?kind=request` > Manage on **QA photos**. | The Files list has a row `ghost.bin` with "Upload in progress (counts toward the limits; removed automatically if it stalls)" and a trash button, but **no Download** button; the file count in the row's header does not include it. The file counts toward Max files and Max total size. |
+| 8 | Click the trash button of `ghost.bin` and confirm ("Its upload will be cancelled."). | "File removed."; the row is gone and the limits are free again. |
+| 9 | (Shell) Add a `ghost.bin` again, set its `created_at` to 3 hours ago and run `from apps.file_transfer.jobs import cleanup_drafts; cleanup_drafts()`. | The unfinished file with no parts uploaded is gone from the Manage list after a reload (an unfinished upload that has parts is only removed after 24 hours). |
 
 ### FT-58 Mark as done by an uploader
 
@@ -1198,5 +1201,6 @@ pay). Use the **Visitor window** for the anonymous uploader and a second private
   browser test; the 70 MiB file of FT-39 exercises the multipart path the same way.
 - **The JWT API `/api/ft/` (requests included, `/api/ft/requests`) and the `inv filetransfer` CLI (`request-*`)**: unit tests.
 - **Rate limits of requests** (`FT_REQUEST_CREATE_USER`, `FT_REQUEST_UPLOAD_IP`, `FT_REQUEST_UPLOAD_TRANSFER`): unit tests.
-- **The debounced "new files" job and the 24-hour cleanup of abandoned request uploads**: NOTIF-31 runs the job
-  with a shell step; the cleanup is unit tested.
+- **The debounced "new files" job**: NOTIF-31 runs it with a shell step. The cleanup of abandoned request uploads
+  (2 hours for an upload with no part in S3, 24 hours otherwise) is covered by a shell step in FT-57 for the
+  2-hour rule; the 24-hour rule and S3 listing failures are unit tested.

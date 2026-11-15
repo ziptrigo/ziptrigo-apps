@@ -15,6 +15,7 @@ from datetime import timedelta
 from django.contrib.auth.base_user import BaseUserManager
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from ..models import RequestInvite, Transfer
@@ -64,20 +65,42 @@ def resend_invite(
     _require_not_held(transfer)
     if transfer.owner is not None:
         check_not_blocked(email=transfer.owner.email, ip=ip)
-    if invite.last_sent_at is not None:
-        wait = invite.last_sent_at + RESEND_COOLDOWN - timezone.now()
-        if wait > timedelta(0):
-            minutes = max(1, math.ceil(wait.total_seconds() / 60))
-            unit = 'minute' if minutes == 1 else 'minutes'
-            raise ValidationError(
-                f'This person was emailed recently; you can resend in {minutes} {unit}.'
-            )
+    wait = _cooldown_wait(invite)
+    if wait is not None:
+        raise ValidationError(_cooldown_message(wait))
     if charge is not None:
         charge(1)
-    invite.last_sent_at = timezone.now()
-    invite.save(update_fields=['last_sent_at'])
+    # Claimed with one conditional write, so two quick clicks that both passed the check above
+    # email the invitee once: the loser re-reads and gets the cooldown message.
+    now = timezone.now()
+    claimed = (
+        RequestInvite.objects.filter(pk=invite.pk)
+        .filter(Q(last_sent_at__isnull=True) | Q(last_sent_at__lte=now - RESEND_COOLDOWN))
+        .update(last_sent_at=now)
+    )
+    if not claimed:
+        try:
+            invite.refresh_from_db()
+        except RequestInvite.DoesNotExist:
+            raise ValidationError('This person is no longer invited.') from None
+        raise ValidationError(_cooldown_message(_cooldown_wait(invite) or RESEND_COOLDOWN))
+    invite.last_sent_at = now
     send_request_invite.enqueue(str(transfer.id), invite.email)
     return invite
+
+
+def _cooldown_wait(invite: RequestInvite) -> timedelta | None:
+    """How long until `invite` may be emailed again, or `None` when it may be now."""
+    if invite.last_sent_at is None:
+        return None
+    wait = invite.last_sent_at + RESEND_COOLDOWN - timezone.now()
+    return wait if wait > timedelta(0) else None
+
+
+def _cooldown_message(wait: timedelta) -> str:
+    minutes = max(1, math.ceil(wait.total_seconds() / 60))
+    unit = 'minute' if minutes == 1 else 'minutes'
+    return f'This person was emailed recently; you can resend in {minutes} {unit}.'
 
 
 def invite_emails(transfer: Transfer) -> list[str]:

@@ -2647,7 +2647,8 @@ from the dashboard at any time. Only signed-in users create requests.
   every request page and endpoint (upload, remove, done, download, zip, unlock): the owner, signed in, passes
   everything (never asked for the password); a **password**, if set, is the existing unlock page and rules
   (`FT_UNLOCK_IP` / `FT_UNLOCK_TRANSFER`); then the **audience**: `anyone` needs nothing, `signed_in` a session
-  (`NEEDS_SIGN_IN` redirects to the login page with `next=/t/<slug>/`, the terms gate not applying to `/t/`), `selected`
+  (`NEEDS_SIGN_IN` redirects to the login page with `next=/t/<slug>/` -- always the page, built with `reverse`, never
+  the POST-only URL being answered, e.g. `/t/<slug>/upload/done/` --, the terms gate not applying to `/t/`), `selected`
   a session whose account's email matches an invite ignoring case **and** is confirmed (a matching unconfirmed
   account is `NEEDS_CONFIRMED_EMAIL`: "Confirm your email address to use this link." with the resend link; anyone
   else `NOT_INVITED`: "This link is for specific people." and a Sign out button, naming no invitee). The same
@@ -2664,20 +2665,43 @@ from the dashboard at any time. Only signed-in users create requests.
 - **Uploading** (`services/request_upload.py`, JSON endpoints `/t/<slug>/upload/files/...` in
   `views/request_upload.py`: add, `parts/`, `resume/`, `complete/`, `remove/`, the same shape as the anonymous send
   ones, driven by `resumable_upload.js`, whose options gained `formId`, `confirmSubmit`, `confirmRemove` and
-  `extraAddBody`). Each call spends `FT_REQUEST_UPLOAD_IP` (90/min) and, once the request is found,
-  `FT_REQUEST_UPLOAD_TRANSFER` (600/hour per request across IPs; a made-up slug creates no key); a signed-in
-  uploader also spends `FT_UPLOAD_USER`. `add_file` and `complete_file` run **under the request's row lock**: the
-  request must be open and available (`NOT_ACCEPTING_MESSAGE`, "This link is not accepting files right now."),
+  `extraAddBody`). Each call spends `FT_REQUEST_UPLOAD_IP` (90/min) first; only once the request is found **and the access check
+  passed** does it spend `FT_REQUEST_UPLOAD_TRANSFER` (3,000/hour per request across IPs, sized for a ~200-photo
+  batch at about three calls a file; a made-up slug, or a visitor without the password or not invited, creates no
+  key and spends none of it, so they cannot lock real uploaders out), then, signed in, `FT_UPLOAD_USER`.
+  `add_file` runs **under the request's row lock** and `complete_file` / removal take it only for their database
+  write (below): the request must be open, available and its owner's account able to sign in
+  (`request_upload.require_accepting`, `NOT_ACCEPTING_MESSAGE`, "This link is not accepting files right now."; a
+  deactivated owner's request takes no uploads),
   the per-file limit is the site's, `max_files` and `max_total_size_bytes` count **every** file of the request
   (every uploader's, finished or in progress; messages "This request accepts at most 10 files." / "... at most 2.0
   GB in total."), the block list is checked (the uploader's IP and, signed in, the account email: 403, the neutral
   message). `complete_file` also recomputes `size_bytes`, forgets a stale zip (`invalidate_zip`) and, unless the
-  owner uploaded it, starts or pushes back the notice debounce (`uploaded_at` is the batch's clock). An **uploader
+  owner uploaded it, starts or pushes back the notice debounce (`uploaded_at` is the batch's clock).
+  **S3 round trips stay out of the lock where they can** (review of #308): `complete_file` runs
+  `CompleteMultipartUpload` + `HeadObject` (`uploads.finish_upload_in_storage`) outside any lock, then locks the
+  request, re-checks `require_accepting` and flips the row with a conditional `UPDATE ... WHERE uploaded = false
+  AND upload_id = <the one completed>`; if the request was closed (done, disabled, expired) or the file removed
+  meanwhile, the object S3 just assembled is deleted again (and an unfinished row of a closed request dropped) and
+  the upload is refused, so finishing and Done still resolve one way. A wrong size deletes the object, clears the
+  row's `upload_id` and **persists** (the S3 step is outside the transaction); `resume_file` then starts the file
+  over (`restart_upload`) instead of leaving it with no upload. Removal (`_remove`) locks, re-checks the request is
+  open (uploader path), **re-reads the file row** (so a file that finished meanwhile is deleted, not aborted),
+  deletes the row and refreshes `size_bytes`, and only after the commit aborts the upload or deletes the object,
+  best effort and logged (a failure leaves an unbilled orphan the prefix sweep removes when the request ends).
+  **Trade-off, accepted:** `add_file` still creates the multipart upload inside the lock, so the limits are decided
+  under it (one cheap S3 call; creating it first would let a refused caller spend S3 calls). S3 error text never
+  reaches an uploader: `ClientError`s on completing or listing parts are logged and shown as "Could not complete
+  the upload. Please try again." (all send flows share `uploads.py`). An **uploader
   only ever sees and removes their own files** (`request_uploader.own_files`: this account, or this browser's
   token, which is made on the first upload and kept in the session as a raw token with only its digest stored;
-  another person's file id is a 404); the typed name is remembered in the session. An unfinished upload older than
-  a day is deleted by `cleanup_drafts` (`requests.cleanup_abandoned_files`): they count toward the limits, so a
-  closed browser would otherwise use up the request for good.
+  another person's file id is a 404); the typed name is remembered in the session. Unfinished uploads (`uploaded=False`) count toward the
+  limits at their declared size, so on a link anyone can use a caller could otherwise hold the request's capacity
+  without sending a byte: `cleanup_drafts` (`requests.cleanup_abandoned_files`) deletes one with **no part in S3
+  yet after `ABANDONED_EMPTY_UPLOAD_AGE` (2 hours)** (a `list_parts` per such file; `NoSuchUpload` counts as no
+  parts; an S3 error leaves it for the next run) and any older than `ABANDONED_UPLOAD_AGE` (24 hours). The owner's
+  dashboard row lists pending files ("Upload in progress", no Download) with a Remove button, so a griefing file
+  can be cancelled at once (`remove_file_as_owner`).
 - **Done and reopen** (`requests.mark_done`, `owner_mark_done`, `reopen`). `mark_done` is one conditional `UPDATE ...
   WHERE done_at IS NULL AND status = ACTIVE` under the row lock; losing the race is a no-op answered as success. An
   uploader needs at least one uploaded file in the request ("Upload at least one file first."); the owner may do it
@@ -2693,7 +2717,7 @@ from the dashboard at any time. Only signed-in users create requests.
   if the batch has not started; the job **`file_transfer.send_request_notices`** (every minute, lease 5 minutes,
   `jobs.send_request_notices` -> `request_notices.send_due_notices`) claims each due open request with a conditional
   `UPDATE` clearing `upload_notice_due_at`, counts the files uploaded since `upload_notice_since` (removed ones
-  are not counted), resets it and writes one notification `3 new files in "Title"` (title cut to stay within 140;
+  and the owner's own are not counted), resets it and writes one notification `3 new files in "Title"` (title cut to stay within 140;
   body "From Jane, john@example.com and 1 other"; url the dashboard's Requests tab; key
   `transfer_request_uploads:<id>`, `delete_for_key` then `notify`); an inactive owner is not told. *Done*:
   `transfer_request_done:<id>`, body `7 files, 1.2 GB. Marked done by Jane.` (`by someone` when anonymous without a
@@ -2702,11 +2726,15 @@ from the dashboard at any time. Only signed-in users create requests.
   fixed subject "You've been asked to upload files", title and message in the autoescaped body.
 - **Invites** (`services/request_invites.py`): sent at creation and when an address is added; **Resend** per invitee
   has the same `actions.RESEND_COOLDOWN` and `FT_RECIPIENT_EMAIL_USER` budget as a transfer recipient's and the same
-  refusals before the charge (actionable, not held, owner not blocked, cooldown). Removing an invitee stops their
+  refusals before the charge (actionable, not held, owner not blocked, cooldown); the send itself is claimed by a
+  conditional `UPDATE ... WHERE last_sent_at IS NULL OR last_sent_at <= now - cooldown`, so two quick clicks email
+  the invitee once (the loser gets the cooldown message). Removing an invitee stops their
   access; files they uploaded stay. The settings form's textarea is the whole invitee list (new addresses are invited,
   missing ones removed); invitees are kept while the audience is not "Only these people".
-- **Changing** (`requests.update_request(transfer, data, ip=, charge=)`, one transaction with the row locked): only the
-  keys in `data`; limits never below what is already uploaded ("Already N files uploaded; choose at least N.",
+- **Changing** (`requests.update_request(transfer, data, ip=, charge=)`, the row locked for the write only): only the
+  keys in `data`; the invite emails are validated and **charged before the lock** (`_plan_update` runs once to count
+  new invitees, then again under the lock to decide; invitees a concurrent edit removed in between are charged for
+  there, rarely), so a rate-limit write never joins the locked transaction; limits never below what is already uploaded ("Already N files uploaded; choose at least N.",
   "Already X uploaded; choose at least X."); switching to "Only these people" needs an address; the web form posts
   every field (a blank limit clears it, a blank password keeps it, `remove_password` clears it). A held request is
   frozen except disabling it (`TransferHeldError`: 409 on the API).
@@ -7059,7 +7087,8 @@ suspension grace period),
 `Transfer.last_activity_at`, which `uploads.touch_draft` bumps on add/presign/resume/complete/remove
 file -- a column with a `db_default`, so an old container keeps inserting; `abort_draft`'s claim
 re-checks the idleness via `only_if`, so a draft touched after the job's snapshot is kept; it also deletes the
-unfinished uploads of file requests older than a day, `requests.cleanup_abandoned_files`),
+abandoned unfinished uploads of file requests -- 2 hours with no part in S3, a day otherwise --,
+`requests.cleanup_abandoned_files`),
 `purge_download_ips` (daily; also nulls a file request's `TransferFile.uploader_ip` after 90 days) and
 `send_request_notices` (every minute). Each wraps its
 per-transfer work in

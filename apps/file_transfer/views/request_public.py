@@ -86,7 +86,8 @@ def render_request_page(
     link is unavailable; the callers handled that already."""
     access = check_access(transfer, request.user, request.session)
     if access == Access.NEEDS_SIGN_IN:
-        return redirect_to_login(request.get_full_path())
+        # Always the page, never the URL being answered (a POST-only one would land on a 405).
+        return redirect_to_login(reverse('t:download', args=[transfer.slug]))
     if access != Access.OK:
         return _gate(request, transfer, access, password_form, status)
 
@@ -144,7 +145,7 @@ def request_done(request: PublicHttpRequest, slug: str) -> HttpResponse:
         return _became_unavailable(request)
     access = check_access(transfer, request.user, request.session)
     if access == Access.NEEDS_SIGN_IN:
-        return redirect_to_login(request.get_full_path())
+        return redirect_to_login(reverse('t:download', args=[slug]))
     if access != Access.OK:
         return _became_unavailable(request)
 

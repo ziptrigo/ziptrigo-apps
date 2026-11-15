@@ -9,11 +9,18 @@ done or unavailable (expired, disabled, suspended, deleted, taken down, on hold)
 `NOT_ACCEPTING_MESSAGE`. The block list is checked at upload (the uploader's IP, and the account
 email when signed in).
 
+**S3 round trips stay out of the request's row lock** where they can: completing an upload
+(`CompleteMultipartUpload` + `HeadObject`) and the S3 side of a removal run outside it; the lock is
+taken only to re-check that the request is still open and that the file row is still there, and to
+write the database (`complete_file`, `_remove`). A file that finishes in S3 while the request is
+closed meanwhile has its object deleted again.
+
 `Transfer.size_bytes` is kept equal to the sum of the uploaded files, so the owner is billed for
 what is stored. A finished upload by anyone but the owner also pushes back the debounced "new
 files" notice (`services.request_notices`).
 """
 
+import logging
 from datetime import timedelta
 
 from django.core.exceptions import ValidationError
@@ -28,8 +35,10 @@ from .actions import _require_actionable, _require_not_held
 from .blocklist import check_not_blocked
 from .downloads import is_available
 from .request_uploader import Uploader, own_files
-from .requests import NOT_ACCEPTING_MESSAGE, invalidate_zip, refresh_size
+from .requests import NOT_ACCEPTING_MESSAGE, invalidate_zip, owner_can_be_told, refresh_size
 from .storage import PART_SIZE_BYTES, S3Storage, get_storage, storage_key
+
+logger = logging.getLogger(__name__)
 
 #: How long after the last completed upload the owner's "new files" notice is sent: every finished
 #: upload resets it, so one batch of files is one notice.
@@ -38,8 +47,11 @@ NOTICE_DEBOUNCE = timedelta(minutes=15)
 
 def require_accepting(transfer: Transfer) -> None:
     """Raise `ValidationError(NOT_ACCEPTING_MESSAGE)` unless `transfer` is an open request whose
-    link works right now."""
+    link works right now and whose owner's account can still sign in (a deactivated owner's
+    request neither takes uploads nor keeps being billed for them)."""
     if not transfer.is_open or not is_available(transfer):
+        raise ValidationError(NOT_ACCEPTING_MESSAGE)
+    if not owner_can_be_told(transfer.owner):
         raise ValidationError(NOT_ACCEPTING_MESSAGE)
 
 
@@ -140,6 +152,10 @@ def resume_file(
     """What S3 already has of an interrupted upload: `(file, parts, restarted)`, restarting the
     upload transparently when S3 no longer knows it. Refused once the request is done."""
     require_accepting(transfer)
+    if not file.upload_id and not file.uploaded:
+        # A completion that found the wrong size deleted the object and cleared the upload id:
+        # start the file over rather than leave it with no way to continue.
+        return uploads.restart_upload(file, storage=storage), [], True
     try:
         return file, uploads.list_uploaded_parts(file, storage=storage), False
     except uploads.UploadExpired:
@@ -155,45 +171,77 @@ def complete_file(
     ip: str | None = None,
     storage: S3Storage | None = None,
 ) -> TransferFile:
-    """Complete an upload (S3 assembles the parts and the size is verified), then, in the same
-    transaction under the request's lock: keep `size_bytes` equal to what is uploaded, forget a
-    stale zip and -- unless the owner uploaded it -- start or push back the debounced notice.
+    """Complete an upload: S3 assembles the parts and the size is verified **outside any lock**;
+    then, under the request's row lock, the request must still be open and the file row still
+    there, and the row is flipped to uploaded, `size_bytes` is kept equal to what is uploaded, a
+    stale zip is forgotten and -- unless the owner uploaded it -- the debounced notice starts or is
+    pushed back.
 
     The lock is why finishing and marking the request done take turns: a file that finishes first
-    is kept, one that finishes after is refused (and `mark_done` has already deleted its row).
+    is kept, one that finishes after is refused. If the request was closed (done, disabled,
+    expired...) or the file removed while S3 was working, the object S3 just assembled is deleted
+    again and the upload is refused.
     """
     require_accepting(transfer)
     check_not_blocked(email=uploader.email or None, ip=ip)
     storage = storage or get_storage()
 
+    fresh = TransferFile.objects.filter(pk=file.pk, transfer=transfer, uploaded=False).first()
+    if fresh is None:
+        raise ValidationError('This file is no longer being uploaded.')
+    upload_id = fresh.upload_id
+    info = uploads.finish_upload_in_storage(fresh, parts, storage=storage)
+
+    gone = False
+    refused: ValidationError | None = None
     with transaction.atomic():
         locked = Transfer.objects.select_for_update().get(pk=transfer.pk)
-        require_accepting(locked)
-        fresh = TransferFile.objects.filter(pk=file.pk, transfer=locked, uploaded=False).first()
-        if fresh is None:
-            raise ValidationError('This file is no longer being uploaded.')
-        uploads.complete_file_upload(fresh, parts, storage=storage)
-        refresh_size(locked)
-        invalidate_zip(locked, storage=storage)
-        is_owner = uploader.user is not None and uploader.user.pk == locked.owner_id
-        if not is_owner:
-            uploaded_at = fresh.uploaded_at or timezone.now()
-            Transfer.objects.filter(pk=locked.pk).update(
-                upload_notice_due_at=uploaded_at + NOTICE_DEBOUNCE,
-                upload_notice_since=Coalesce(
-                    'upload_notice_since', Value(uploaded_at, DateTimeField())
-                ),
-            )
+        try:
+            require_accepting(locked)
+        except ValidationError as exc:
+            refused = exc
+        if refused is None:
+            now = timezone.now()
+            done = TransferFile.objects.filter(
+                pk=fresh.pk, transfer=locked, uploaded=False, upload_id=upload_id
+            ).update(checksum=info.checksum_sha256, uploaded=True, uploaded_at=now, upload_id='')
+            if not done:
+                gone = True
+            else:
+                fresh.checksum = info.checksum_sha256
+                fresh.uploaded = True
+                fresh.uploaded_at = now
+                fresh.upload_id = ''
+                refresh_size(locked)
+                invalidate_zip(locked, storage=storage)
+                is_owner = uploader.user is not None and uploader.user.pk == locked.owner_id
+                if not is_owner:
+                    Transfer.objects.filter(pk=locked.pk).update(
+                        upload_notice_due_at=now + NOTICE_DEBOUNCE,
+                        upload_notice_since=Coalesce(
+                            'upload_notice_since', Value(now, DateTimeField())
+                        ),
+                    )
+        else:
+            # Closed meanwhile: the unfinished row would never be uploaded; drop it with the object.
+            TransferFile.objects.filter(pk=fresh.pk, transfer=locked, uploaded=False).delete()
+
+    if refused is not None or gone:
+        _delete_object(fresh.storage_key, storage)
+        if refused is not None:
+            raise refused
+        raise ValidationError('This file is no longer being uploaded.')
     return fresh
 
 
 def remove_own_file(
     transfer: Transfer, file: TransferFile, *, storage: S3Storage | None = None
 ) -> None:
-    """An uploader removes one of their own files (only while the request is open): the S3 object
-    (or unfinished upload) and the row are deleted and `size_bytes` drops. No notice is sent."""
+    """An uploader removes one of their own files (only while the request is open -- checked
+    again under the lock): the S3 object (or unfinished upload) and the row are deleted and
+    `size_bytes` drops. No notice is sent."""
     require_accepting(transfer)
-    _remove(transfer, file, storage)
+    _remove(transfer, file, storage, uploader=True)
 
 
 def remove_file_as_owner(
@@ -202,16 +250,41 @@ def remove_file_as_owner(
     """The owner removes any file of their request, open or done (dashboard, API)."""
     _require_actionable(transfer)
     _require_not_held(transfer)
-    _remove(transfer, file, storage)
+    _remove(transfer, file, storage, uploader=False)
 
 
-def _remove(transfer: Transfer, file: TransferFile, storage: S3Storage | None) -> None:
+def _delete_object(key: str, storage: S3Storage) -> None:
+    try:
+        storage.delete_object(key)
+    except Exception:
+        logger.exception('Could not delete the object %s', key)
+
+
+def _remove(
+    transfer: Transfer, file: TransferFile, storage: S3Storage | None, *, uploader: bool
+) -> None:
+    """Delete the file's row under the request's lock (re-reading it there, and re-checking that
+    the request is still open for an uploader), then its S3 side after the commit: the unfinished
+    multipart upload is aborted or the object deleted, best effort and logged. A failure leaves an
+    unbilled orphan that the request's prefix sweep removes when it ends (and the bucket's
+    lifecycle rule aborts unfinished uploads); the row is already gone, so the limits are freed."""
     storage = storage or get_storage()
     with transaction.atomic():
         locked = Transfer.objects.select_for_update().get(pk=transfer.pk)
-        if not TransferFile.objects.filter(pk=file.pk, transfer=locked).exists():
+        if uploader:
+            require_accepting(locked)
+        fresh = TransferFile.objects.filter(pk=file.pk, transfer=locked).first()
+        if fresh is None:
             return
-        uploads.remove_file(file, storage=storage)
+        key, upload_id, uploaded = fresh.storage_key, fresh.upload_id, fresh.uploaded
+        fresh.delete()
         refresh_size(locked)
         invalidate_zip(locked, storage=storage)
     transfer.size_bytes = locked.size_bytes
+    if upload_id:
+        try:
+            storage.abort_multipart_upload(key, upload_id)
+        except Exception:
+            logger.exception('Could not abort the unfinished upload of %s', key)
+    if uploaded:
+        _delete_object(key, storage)

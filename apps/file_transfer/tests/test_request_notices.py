@@ -315,6 +315,7 @@ def test_resend_is_charged_one_hit_after_every_other_check(make_request):
     assert charged == []
 
     invite.last_sent_at = None
+    invite.save()
     services.request_invites.resend_invite(invite, charge=charged.append)
     assert charged == [1]
 

@@ -3,9 +3,10 @@ URLs, resume, complete and remove, under `/t/<slug>/upload/files/...`. The same 
 anonymous send endpoints (`views.anonymous`), against an open request instead of a session-owned
 draft, for an uploader the access check (`services.request_access`) let through.
 
-Every call spends `FT_REQUEST_UPLOAD_IP` and, once the request is found, `FT_REQUEST_UPLOAD_TRANSFER`
-(a made-up slug creates no key); a signed-in uploader also spends `FT_UPLOAD_USER`, shared with
-sending. **An uploader only ever reaches their own files**: another person's file id is a 404.
+Every call spends `FT_REQUEST_UPLOAD_IP`; only once the request is found **and the access check
+passed** does it spend `FT_REQUEST_UPLOAD_TRANSFER` (a made-up slug, or a visitor who may not use
+the link, creates no key and spends none of it); a signed-in uploader then also spends
+`FT_UPLOAD_USER`, shared with sending. **An uploader only ever reaches their own files**: another person's file id is a 404.
 Block-listed uploaders (their IP, and their account email when signed in) get the neutral refusal
 (403).
 """
@@ -61,6 +62,15 @@ def _prelude(
     if transfer is None or not services.is_available(transfer):
         return _not_found()
 
+    # The access check is a cheap lookup and comes before the per-request and per-user budgets:
+    # someone who may not use the link (no password, not invited) must not be able to spend what
+    # the real uploaders need. Only the per-IP rule above is charged for them.
+    access = check_access(transfer, request.user, request.session)
+    if access != Access.OK:
+        return JsonResponse(
+            {'error': 'You cannot upload to this link.', 'access': access.value}, status=403
+        )
+
     result = ratelimit.hit_value(transfer.slug, 'FT_REQUEST_UPLOAD_TRANSFER')
     if not result.allowed:
         return ratelimit.json_response(result)
@@ -68,12 +78,6 @@ def _prelude(
         result = ratelimit.hit_user(request.user, 'FT_UPLOAD_USER')
         if not result.allowed:
             return ratelimit.json_response(result)
-
-    access = check_access(transfer, request.user, request.session)
-    if access != Access.OK:
-        return JsonResponse(
-            {'error': 'You cannot upload to this link.', 'access': access.value}, status=403
-        )
     return transfer, identify(request.session, request.user, create=create_identity)
 
 

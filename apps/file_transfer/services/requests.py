@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from botocore.exceptions import ClientError
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
@@ -263,6 +264,65 @@ def _require_request(transfer: Transfer) -> None:
         raise ValidationError('This is not a file request.')
 
 
+def _plan_update(
+    row: Transfer, data: dict, settings_row: FileTransferSettings
+) -> tuple[dict, list[str], list[RequestInvite]]:
+    """Validate `data` against `row` and work out what it changes: `(changes, to_add, to_remove)`,
+    the column changes, the new invitee addresses and the invites to drop. Reads only. Run once
+    before the lock (to charge for the invite emails) and once under it (to decide for good)."""
+    changes: dict = {}
+    if 'title' in data:
+        changes['title'] = clean_title(data['title'])
+    if 'message' in data:
+        changes['message'] = clean_message(data['message'])
+    audience = row.upload_audience
+    if 'upload_audience' in data:
+        audience = clean_audience(data['upload_audience'])
+        changes['upload_audience'] = audience
+
+    existing = list(row.invites.all())
+    to_add: list[str] = []
+    to_remove: list[RequestInvite] = []
+    if audience == UploadAudience.SELECTED and ('emails' in data or not existing):
+        if 'emails' in data:
+            wanted = _clean_invitees(data['emails'], settings_row)
+        else:
+            raise ValidationError({'emails': 'Add at least one email address.'})
+        have = {invite.email.lower() for invite in existing}
+        keep = {email.lower() for email in wanted}
+        to_add = [email for email in wanted if email.lower() not in have]
+        to_remove = [invite for invite in existing if invite.email.lower() not in keep]
+
+    if 'max_files' in data:
+        max_files = clean_max_files(data['max_files'], settings_row)
+        have_files = row.files.count()
+        if max_files is not None and max_files < have_files:
+            raise ValidationError(
+                {
+                    'max_files': f'Already {have_files} '
+                    f'{"file" if have_files == 1 else "files"} uploaded; '
+                    f'choose at least {have_files}.'
+                }
+            )
+        changes['max_files'] = max_files
+    if 'max_total_size_bytes' in data:
+        max_total = clean_max_total_size(data['max_total_size_bytes'], settings_row)
+        have_bytes = row.files.aggregate(total=Sum('size'))['total'] or 0
+        if max_total is not None and max_total < have_bytes:
+            text = limits.size_text(have_bytes)
+            raise ValidationError(
+                {'max_total_size_bytes': f'Already {text} uploaded; choose at least {text}.'}
+            )
+        changes['max_total_size_bytes'] = max_total
+    if 'expiry_choice' in data:
+        changes['expires_at'] = resolve_expiry(data['expiry_choice'], data.get('expiry_date'))
+    if data.get('remove_password'):
+        changes['password_hash'] = ''
+    elif data.get('password'):
+        changes['password_hash'] = hash_password(data['password'])
+    return changes, to_add, to_remove
+
+
 def update_request(
     transfer: Transfer,
     data: dict,
@@ -281,73 +341,33 @@ def update_request(
     "Only these people" (the invitees are kept for when it is).
 
     `charge` is called with the number of new invitees after every check has passed and before
-    anything is written, as `create_request` does.
+    the lock is taken, as `create_request` does, so the rate-limit write never joins the locked
+    transaction. Everything is then validated again under the lock; should a concurrent edit have
+    added invitees in between, the difference is charged there (rare).
     """
     _require_request(transfer)
     _require_actionable(transfer)
     _require_not_held(transfer)
     settings_row = FileTransferSettings.load()
+    owner_email = transfer.owner.email if transfer.owner else None
+
+    _, planned_add, _ = _plan_update(transfer, data, settings_row)
+    charged = 0
+    if planned_add:
+        check_not_blocked(email=owner_email, ip=ip)
+        if charge is not None:
+            charge(len(planned_add))
+            charged = len(planned_add)
 
     with transaction.atomic():
         locked = Transfer.objects.select_for_update().get(pk=transfer.pk)
         _require_actionable(locked)
         _require_not_held(locked)
-
-        changes: dict = {}
-        if 'title' in data:
-            changes['title'] = clean_title(data['title'])
-        if 'message' in data:
-            changes['message'] = clean_message(data['message'])
-        audience = locked.upload_audience
-        if 'upload_audience' in data:
-            audience = clean_audience(data['upload_audience'])
-            changes['upload_audience'] = audience
-
-        existing = list(locked.invites.all())
-        to_add: list[str] = []
-        to_remove: list[RequestInvite] = []
-        if audience == UploadAudience.SELECTED and ('emails' in data or not existing):
-            if 'emails' in data:
-                wanted = _clean_invitees(data['emails'], settings_row)
-            else:
-                raise ValidationError({'emails': 'Add at least one email address.'})
-            have = {invite.email.lower() for invite in existing}
-            keep = {email.lower() for email in wanted}
-            to_add = [email for email in wanted if email.lower() not in have]
-            to_remove = [invite for invite in existing if invite.email.lower() not in keep]
-
-        if 'max_files' in data:
-            max_files = clean_max_files(data['max_files'], settings_row)
-            have_files = locked.files.count()
-            if max_files is not None and max_files < have_files:
-                raise ValidationError(
-                    {
-                        'max_files': f'Already {have_files} '
-                        f'{"file" if have_files == 1 else "files"} uploaded; '
-                        f'choose at least {have_files}.'
-                    }
-                )
-            changes['max_files'] = max_files
-        if 'max_total_size_bytes' in data:
-            max_total = clean_max_total_size(data['max_total_size_bytes'], settings_row)
-            have_bytes = locked.files.aggregate(total=Sum('size'))['total'] or 0
-            if max_total is not None and max_total < have_bytes:
-                text = limits.size_text(have_bytes)
-                raise ValidationError(
-                    {'max_total_size_bytes': f'Already {text} uploaded; choose at least {text}.'}
-                )
-            changes['max_total_size_bytes'] = max_total
-        if 'expiry_choice' in data:
-            changes['expires_at'] = resolve_expiry(data['expiry_choice'], data.get('expiry_date'))
-        if data.get('remove_password'):
-            changes['password_hash'] = ''
-        elif data.get('password'):
-            changes['password_hash'] = hash_password(data['password'])
-
+        changes, to_add, to_remove = _plan_update(locked, data, settings_row)
         if to_add:
-            check_not_blocked(email=locked.owner.email if locked.owner else None, ip=ip)
-            if charge is not None:
-                charge(len(to_add))
+            check_not_blocked(email=owner_email, ip=ip)
+            if charge is not None and len(to_add) > charged:
+                charge(len(to_add) - charged)
 
         if changes:
             Transfer.objects.filter(pk=locked.pk).update(**changes)
@@ -569,24 +589,48 @@ def invalidate_zip(transfer: Transfer, *, storage: S3Storage | None = None) -> N
         transaction.on_commit(_delete)
 
 
-def abandoned_file_age_hours() -> int:
-    """How old a request's unfinished upload must be before `cleanup_abandoned_files` deletes it."""
-    return 24
+#: An unfinished request upload older than this is deleted whatever it has uploaded so far.
+ABANDONED_UPLOAD_AGE = timedelta(hours=24)
+
+#: An unfinished request upload with **no part in S3 yet** is deleted after this much shorter time.
+#: Pending files count toward the request's limits at their declared size, so on a link anyone
+#: can use, an upload that never sent a byte must not hold capacity for a day. Two hours is far
+#: longer than the first 64 MB part of a file takes on any real connection.
+ABANDONED_EMPTY_UPLOAD_AGE = timedelta(hours=2)
+
+
+def _has_parts(file: TransferFile, storage: S3Storage) -> bool:
+    """Whether S3 holds at least one part of the file's unfinished upload. An upload S3 no longer
+    knows (`NoSuchUpload`) or a row with no upload id has none."""
+    if not file.upload_id:
+        return False
+    try:
+        return bool(storage.list_parts(file.storage_key, file.upload_id))
+    except ClientError as exc:
+        if exc.response.get('Error', {}).get('Code') == 'NoSuchUpload':
+            return False
+        raise
 
 
 def cleanup_abandoned_files(*, storage: S3Storage | None = None) -> int:
-    """Delete the unfinished uploads (`uploaded=False`) of requests that are older than a day,
-    aborting their multipart uploads. They count toward a request's limits (every uploader's
-    files, finished or not), so without this a browser closed mid-upload would use up the
-    request's capacity for good. Returns how many were deleted."""
+    """Delete the abandoned unfinished uploads (`uploaded=False`) of requests, aborting their
+    multipart uploads: those older than `ABANDONED_UPLOAD_AGE`, and those older than
+    `ABANDONED_EMPTY_UPLOAD_AGE` that have no part in S3 yet. They count toward a request's limits
+    (every uploader's files, finished or not), so without this a browser closed mid-upload, or a
+    caller who only registered files, would use up the request's capacity. An upload whose parts
+    cannot be listed (an S3 error) is left for the next run. Returns how many were deleted."""
     storage = storage or get_storage()
-    cutoff = timezone.now() - timedelta(hours=abandoned_file_age_hours())
+    now = timezone.now()
+    old_cutoff = now - ABANDONED_UPLOAD_AGE
+    empty_cutoff = now - ABANDONED_EMPTY_UPLOAD_AGE
     count = 0
     stale = TransferFile.objects.filter(
-        transfer__kind=TransferKind.REQUEST, uploaded=False, created_at__lte=cutoff
+        transfer__kind=TransferKind.REQUEST, uploaded=False, created_at__lte=empty_cutoff
     ).select_related('transfer')
     for file in stale:
         try:
+            if file.created_at > old_cutoff and _has_parts(file, storage):
+                continue
             if file.upload_id:
                 storage.abort_multipart_upload(file.storage_key, file.upload_id)
             if TransferFile.objects.filter(pk=file.pk, uploaded=False).delete()[0]:

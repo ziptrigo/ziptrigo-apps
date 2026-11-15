@@ -608,9 +608,12 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # legitimately calls it often in a short span, a part batch at a time).
     'FT_REQUEST_UPLOAD_IP': (90, 60),
     # The same calls, per request across every IP, so one link can't be hammered from many
-    # addresses at once (an anyone-with-the-link request has no other gate). Far above what a
-    # real group of uploaders produces, since a part batch is one call per eight parts.
-    'FT_REQUEST_UPLOAD_TRANSFER': (600, 60 * 60),
+    # addresses at once (an anyone-with-the-link request has no other gate). Charged only after
+    # the access check passed, so someone who may not use the link can't spend it. Sized for a
+    # large batch: a small file is about three calls (add, part URLs, complete), so a 200-photo
+    # wedding upload by a few guests in an hour is under 1,000 calls; 3,000 leaves room for
+    # retries, resumes and several guests at once while still bounding one link.
+    'FT_REQUEST_UPLOAD_TRANSFER': (3000, 60 * 60),
     # -- feedback (issue #82) --
     # Logged-in only, so keyed per user. Every submission emails every superuser, so without a cap
     # one account could flood the admins' inboxes; a real user sends a message or two, ever.

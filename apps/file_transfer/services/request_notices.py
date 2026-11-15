@@ -5,7 +5,7 @@ Every upload that finishes (by anyone but the owner) pushes `Transfer.upload_not
 `upload_notice_since`. The scheduler job `file_transfer.send_request_notices` (every minute) calls
 `send_due_notices`: for each open request whose notice is due it claims the batch with one
 conditional `UPDATE` (clearing `upload_notice_due_at`, so a concurrent or repeated run sends
-nothing), counts the files uploaded since `upload_notice_since`, resets that column and, when the
+nothing), counts the files uploaded since `upload_notice_since` (the owner's own uploads are not counted), resets that column and, when the
 count is above 0, writes one notification -- `3 new files in "Wedding photos"`, naming who they
 are from -- with the key `transfer_request_uploads:<id>`, replacing the previous one (`delete_for_key`
 then `notify`), so the bell has one, the latest.
@@ -96,7 +96,11 @@ def _send_one(pk: object, now) -> bool:
         Transfer.objects.filter(pk=pk).update(upload_notice_since=None)
         if since is None or not owner_can_be_told(transfer.owner):
             return False
-        files = list(transfer.files.filter(uploaded=True, uploaded_at__gte=since))
+        files = list(
+            transfer.files.filter(uploaded=True, uploaded_at__gte=since).exclude(
+                uploader_user_id=transfer.owner_id
+            )
+        )
         if not files:
             return False
         key = uploads_notice_key(transfer.pk)
