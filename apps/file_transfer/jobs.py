@@ -12,7 +12,14 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.billing.services import get_storage_price_per_gb_per_day
 
-from .models import ENDED_STATUSES, DownloadEvent, FileTransferSettings, Transfer, TransferStatus
+from .models import (
+    ENDED_STATUSES,
+    DownloadEvent,
+    FileTransferSettings,
+    Transfer,
+    TransferFile,
+    TransferStatus,
+)
 from .services.emails import send_expires_soon_notification
 from .services.lifecycle import end_transfer, finish_deferred_deletion
 from .services.metering import (
@@ -20,6 +27,8 @@ from .services.metering import (
     meter_transfer,
     reenable_suspended_transfers_for_user,
 )
+from .services.request_notices import send_due_notices
+from .services.requests import cleanup_abandoned_files
 from .services.storage import GET_URL_EXPIRES_SECONDS
 from .services.uploads import abort_draft
 
@@ -199,8 +208,26 @@ def cleanup_drafts() -> None:
         except Exception:
             logger.exception('Failed to abort draft transfer %s', transfer.pk)
 
+    # File requests (issue #306): an upload nobody finished within a day (a browser closed
+    # mid-upload) would otherwise keep using up the request's file and size limits for good.
+    try:
+        cleanup_abandoned_files()
+    except Exception:
+        logger.exception('Failed to clean up abandoned request uploads')
+
 
 def purge_download_ips() -> None:
-    """Daily: null out the IP on download events older than 90 days (spec section 12)."""
+    """Daily: null out the IP on download events older than 90 days (spec section 12), and, on the
+    same schedule, the IP a file request's uploaders uploaded from (issue #306)."""
     cutoff = timezone.now() - _DOWNLOAD_IP_MAX_AGE
     DownloadEvent.objects.filter(created_at__lte=cutoff, ip__isnull=False).update(ip=None)
+    TransferFile.objects.filter(created_at__lte=cutoff, uploader_ip__isnull=False).update(
+        uploader_ip=None
+    )
+
+
+def send_request_notices() -> None:
+    """Every minute: send the debounced "new files" notice of each file request whose last
+    completed upload was 15 minutes ago (issue #306). Errors are logged per request inside
+    `send_due_notices`; an unexpected one propagates to `ScheduledJob.last_error`."""
+    send_due_notices()

@@ -23,7 +23,7 @@ from apps.core import ratelimit
 from apps.core.services.client_ip import client_ip
 
 from .. import services
-from ..models import ENDED_STATUSES, Transfer, TransferRecipient, TransferStatus
+from ..models import ENDED_STATUSES, Transfer, TransferKind, TransferRecipient, TransferStatus
 from ..schemas import (
     AddRecipientsSchema,
     FinalizeTransferSchema,
@@ -50,7 +50,8 @@ _VALID_FILTERS = (ACTIVE_FILTER, ENDED_FILTER, ALL_FILTER)
 
 
 def _owned_transfer(request, transfer_id: UUID, *, include_drafts: bool = False) -> Transfer:
-    qs = Transfer.objects.filter(owner=request.auth)
+    # Sends only (issue #306): a file request is `/api/ft/requests`, never a transfer here.
+    qs = Transfer.objects.filter(owner=request.auth, kind=TransferKind.SEND)
     if not include_drafts:
         qs = qs.exclude(status__in=_UNLISTED_STATUSES)
     return get_object_or_404(
@@ -99,7 +100,7 @@ def list_transfers(
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     qs = (
-        Transfer.objects.filter(owner=request.auth)
+        Transfer.objects.filter(owner=request.auth, kind=TransferKind.SEND)
         .exclude(status__in=_UNLISTED_STATUSES)
         .annotate(download_events_count=Count('download_events', distinct=True))
         .prefetch_related('recipients', 'files')

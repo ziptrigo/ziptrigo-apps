@@ -27,6 +27,7 @@ from .models import (
     BlockedSender,
     DownloadEvent,
     FileTransferSettings,
+    RequestInvite,
     Transfer,
     TransferFile,
     TransferRecipient,
@@ -72,6 +73,17 @@ _TRANSFER_FIELDS = [
     'takedown_reason',
     'takedown_internal_note',
     'takedown_notify',
+    # File requests (issue #306).
+    'kind',
+    'title',
+    'upload_audience',
+    'max_files',
+    'max_total_size_bytes',
+    'done_at',
+    'done_by_user',
+    'done_by_name',
+    'upload_notice_due_at',
+    'upload_notice_since',
 ]
 
 
@@ -79,7 +91,21 @@ class TransferFileInline(admin.TabularInline):
     model = TransferFile
     extra = 0
     can_delete = False
-    fields = ['name', 'size', 'storage_key', 'checksum', 'uploaded', 'created_at']
+    # The uploader columns are a file request's (issue #306): who uploaded each file, and the IP
+    # they uploaded from, which only staff ever see (it is purged on the download IPs' schedule).
+    fields = [
+        'name',
+        'size',
+        'storage_key',
+        'checksum',
+        'uploaded',
+        'uploaded_at',
+        'created_at',
+        'uploader_name',
+        'uploader_email',
+        'uploader_user',
+        'uploader_ip',
+    ]
     readonly_fields = fields
 
     def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
@@ -91,6 +117,17 @@ class TransferRecipientInline(admin.TabularInline):
     extra = 0
     can_delete = False
     fields = ['email', 'last_sent_at']
+    readonly_fields = fields
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
+class RequestInviteInline(admin.TabularInline):
+    model = RequestInvite
+    extra = 0
+    can_delete = False
+    fields = ['email', 'last_sent_at', 'created_at']
     readonly_fields = fields
 
     def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
@@ -354,17 +391,21 @@ class TransferAdmin(_AbuseActionPermissionMixin, admin.ModelAdmin):
 
     list_display = [
         'id',
+        'kind',
+        'title',
         'owner',
         'status',
+        'upload_audience',
+        'done_at',
         'held_for_review_at',
         'size_bytes',
         'credits_charged',
         'created_at',
         'expires_at',
     ]
-    list_filter = ['status', 'created_at']
-    search_fields = ['id', 'slug', 'owner__email', 'sender_email']
-    inlines = [TransferFileInline, TransferRecipientInline]
+    list_filter = ['kind', 'status', 'upload_audience', 'created_at']
+    search_fields = ['id', 'slug', 'title', 'owner__email', 'sender_email']
+    inlines = [TransferFileInline, TransferRecipientInline, RequestInviteInline]
     readonly_fields = _TRANSFER_FIELDS
     actions = ['take_down_action', 'release_hold_action', 'block_sender_action']
 

@@ -9,6 +9,7 @@ from .dashboard_actions import (
 )
 from .download import DownloadPasswordForm
 from .report import AbuseReportForm
+from .request import FileRequestForm, RequestSettingsForm, add_service_errors
 from .send import SendOptionsForm
 
 __all__ = [
@@ -18,8 +19,11 @@ __all__ = [
     'ConfirmCodeForm',
     'DownloadPasswordForm',
     'ExpiryActionForm',
+    'FileRequestForm',
     'MaxDownloadsActionForm',
     'PasswordActionForm',
+    'RequestSettingsForm',
     'SendOptionsForm',
     'TransferSettingsActionForm',
+    'add_service_errors',
 ]

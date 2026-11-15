@@ -14,6 +14,13 @@
  * the row has one) -- a match resumes that row (asking the server which parts of its multipart
  * upload S3 already has, via `.../resume/`, then PUTting only the rest) instead of adding a
  * duplicate new file.
+ *
+ * File requests (issue #306, `request_upload.html`) use the same driver against
+ * `/t/<slug>/upload/...` with these optional `options`: `formId` (the form whose submit is held
+ * back for `confirmSubmit`, default `send-form`), `confirmSubmit(unfinishedCount)` (a promise of
+ * whether to go on; replaces the "paused files" prompt), `confirmRemove(name)` (a promise of
+ * whether to remove a file) and `extraAddBody()` (fields added to the add-file JSON body, such as
+ * the uploader's typed name). `submitBtn` may be null (nothing to enable).
  */
 function getCookie(name) {
     const value = `; ${document.cookie}`;
@@ -48,7 +55,7 @@ function initFileTransferUpload(options) {
     // The hint under Send (`options.hintEl`) explains why it is disabled, so it goes with it.
     function updateSubmitState() {
         const anyUploaded = Array.from(files.values()).some(function (f) { return f.uploaded; });
-        submitBtn.disabled = !anyUploaded;
+        if (submitBtn) submitBtn.disabled = !anyUploaded;
         if (options.hintEl) options.hintEl.hidden = anyUploaded;
     }
 
@@ -309,11 +316,11 @@ function initFileTransferUpload(options) {
         const addResp = await fetch(base + '/files/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-            body: JSON.stringify({
+            body: JSON.stringify(Object.assign({
                 name: file.name,
                 size: file.size,
                 client_last_modified: file.lastModified,
-            }),
+            }, typeof options.extraAddBody === 'function' ? options.extraAddBody() : {})),
         });
         if (!addResp.ok) {
             const err = await addResp.json().catch(function () { return {}; });
@@ -459,10 +466,20 @@ function initFileTransferUpload(options) {
         const btn = e.target.closest('button[data-remove]');
         if (!btn) return;
         const fileId = btn.getAttribute('data-remove');
-        await fetch(base + '/files/' + fileId + '/remove/', {
+        const entry = files.get(fileId);
+        if (typeof options.confirmRemove === 'function') {
+            const ok = await options.confirmRemove(entry ? entry.name : '');
+            if (!ok) return;
+        }
+        const removeResp = await fetch(base + '/files/' + fileId + '/remove/', {
             method: 'POST',
             headers: { 'X-CSRFToken': csrftoken },
         });
+        if (!removeResp.ok && removeResp.status !== 404) {
+            const err = await removeResp.json().catch(function () { return {}; });
+            showPageError('Could not remove the file: ' + (err.error || removeResp.status));
+            return;
+        }
         files.delete(fileId);
         const row = document.getElementById('file-row-' + fileId);
         if (row) row.remove();
@@ -475,8 +492,20 @@ function initFileTransferUpload(options) {
     // ask for confirmation before letting the request through if any row is still paused --
     // `htmx:confirm` is htmx's own extensibility point for exactly this (see its docs), fired
     // before every request that element makes.
-    const formEl = document.getElementById('send-form');
-    if (formEl) {
+    const formEl = document.getElementById(options.formId || 'send-form');
+    if (formEl && typeof options.confirmSubmit === 'function') {
+        // A file request's "Mark as done": always asks, saying when files are still uploading
+        // (the server deletes them when it is done).
+        formEl.addEventListener('htmx:confirm', function (e) {
+            e.preventDefault();
+            const unfinished = Array.from(files.values()).filter(function (f) {
+                return !f.uploaded;
+            }).length;
+            Promise.resolve(options.confirmSubmit(unfinished)).then(function (proceed) {
+                if (proceed) e.detail.issueRequest(true);
+            });
+        });
+    } else if (formEl) {
         formEl.addEventListener('htmx:confirm', function (e) {
             if (!hasPausedFiles()) return;
             e.preventDefault();

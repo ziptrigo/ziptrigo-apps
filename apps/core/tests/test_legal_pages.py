@@ -80,3 +80,4 @@ def test_documents_cover_notes_and_the_world_clock(client):
     assert 'notes and a world clock' in terms
     assert 'shared World Time event' in privacy
     assert 'a shared note' in terms
+    assert 'a file request' in terms
