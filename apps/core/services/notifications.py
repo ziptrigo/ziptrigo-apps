@@ -25,7 +25,7 @@ from collections.abc import Iterable
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import Model, QuerySet
+from django.db.models import Model, Q, QuerySet
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -169,6 +169,26 @@ def mark_opened(user: Model, notification_id: UUID | str) -> Notification:
     notification.opened_at = notification.opened_at or now
     notification.read_at = notification.read_at or now
     return notification
+
+
+def mark_opened_for_urls(
+    user: Model | UUID | str, urls: Iterable[str], *, source: str | None = None
+) -> int:
+    """Mark the user's notifications that point at one of `urls` (and, when given, were created
+    by `source`) as opened and read, as if the user had followed them: they leave the dropdown and
+    the badge but stay on the notifications page. For a product whose subject needs no more
+    attention (a task was closed). Returns how many changed."""
+    urls = [url for url in urls if url]
+    if not urls:
+        return 0
+    user_pk = user.pk if isinstance(user, Model) else user
+    queryset = Notification.objects.filter(user_id=user_pk, url__in=urls).filter(
+        Q(opened_at__isnull=True) | Q(read_at__isnull=True)
+    )
+    if source is not None:
+        queryset = queryset.filter(source=source)
+    now = timezone.now()
+    return queryset.update(opened_at=Coalesce('opened_at', now), read_at=Coalesce('read_at', now))
 
 
 def dismiss(user: Model, notification_id: UUID | str) -> None:
