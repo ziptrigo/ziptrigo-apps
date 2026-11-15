@@ -7,13 +7,12 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from apps.accounts.tests.factories import UserFactory
-
 from .. import services
 from ..models import BlockedSender, BlockedSenderKind, Transfer, TransferFile, TransferStatus
 from ..services import request_upload
 from ..services.blocklist import BlockedSenderError
 from ..services.request_uploader import Uploader, clean_name, identify, own_files, remember_name
+from .support import new_session, new_user
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -292,7 +291,7 @@ def test_a_signed_in_visitor_still_sees_what_their_browser_uploaded_anonymously(
 ):
     transfer = make_request()
     earlier = upload_to_request(transfer, anon_uploader, 'earlier.txt', 10)
-    account = UserFactory(email='x@example.com')
+    account = new_user(email='x@example.com')
     signed_in = Uploader(
         user=account, token_hash=anon_uploader.token_hash, name='X', email='x@example.com'
     )
@@ -311,14 +310,10 @@ def test_nothing_matches_an_uploader_with_no_identity(
 # -- The session identity --
 
 
-class FakeSession(dict):
-    pass
-
-
 def test_an_anonymous_uploader_gets_one_stable_browser_token():
     from django.contrib.auth.models import AnonymousUser
 
-    session = FakeSession()
+    session = new_session()
     assert identify(session, AnonymousUser()).token_hash == ''  # reading creates nothing
     first = identify(session, AnonymousUser(), create=True)
     again = identify(session, AnonymousUser(), create=True)
@@ -329,14 +324,14 @@ def test_an_anonymous_uploader_gets_one_stable_browser_token():
 
 
 def test_a_signed_in_uploader_is_their_account():
-    account = UserFactory(name='Jane Doe', email='jane@example.com')
-    uploader = identify(FakeSession(), account)
+    account = new_user(name='Jane Doe', email='jane@example.com')
+    uploader = identify(new_session(), account)
     assert uploader.is_signed_in and uploader.user == account
     assert (uploader.name, uploader.email) == ('Jane Doe', 'jane@example.com')
 
 
 def test_the_typed_name_is_remembered_and_cleaned():
-    session = FakeSession()
+    session = new_session()
     assert remember_name(session, '  Jane\x00   Doe\n') == 'Jane Doe'
     assert remember_name(session, 'x' * 300) == 'x' * 100
     assert remember_name(session, '') == ''

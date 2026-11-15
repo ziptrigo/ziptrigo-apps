@@ -18,6 +18,7 @@ from ..services.actions import RESEND_COOLDOWN, TransferHeldError
 from ..services.blocklist import BlockedSenderError
 from ..services.request_uploader import Uploader
 from ..services.requests import uploads_notice_key
+from .support import new_user
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -110,9 +111,8 @@ def test_the_body_says_how_many_others_there_were(funded_user, make_request, upl
 def test_the_body_names_a_signed_in_uploader_by_email_when_they_have_no_name(
     funded_user, make_request, upload_to_request
 ):
-    from apps.accounts.tests.factories import UserFactory
 
-    account = UserFactory(name='', email='john@example.com')
+    account = new_user(name='', email='john@example.com')
     transfer = make_request()
     upload_to_request(
         transfer,
@@ -233,6 +233,7 @@ def test_the_job_is_registered_with_a_description():
     from apps.core.scheduler import registry
 
     spec = registry.get_job('file_transfer.send_request_notices')
+    assert spec is not None
     assert spec.func is jobs.send_request_notices
     assert spec.interval == timedelta(minutes=1) and spec.lease == timedelta(minutes=5)
     assert spec.description

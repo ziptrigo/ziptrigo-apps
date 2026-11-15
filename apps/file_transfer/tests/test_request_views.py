@@ -9,9 +9,8 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.accounts.tests.factories import UserFactory
-
 from ..models import BlockedSender, BlockedSenderKind, Transfer, TransferFile, TransferStatus
+from .support import new_user
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -104,7 +103,7 @@ def test_limits_shown_are_the_requests_own(client, make_request):
 
 def test_signed_in_uploaders_see_no_name_field(client, make_request):
     transfer = make_request(upload_audience='signed_in')
-    client.force_login(UserFactory())
+    client.force_login(new_user())
     content = _page(client, transfer).content.decode()
     assert 'The owner will see your name and email next to your files.' in content
     assert 'Your name (optional)' not in content
@@ -112,7 +111,7 @@ def test_signed_in_uploaders_see_no_name_field(client, make_request):
 
 def test_signed_in_visitors_of_an_anyone_request_are_identified_too(client, make_request):
     transfer = make_request()
-    client.force_login(UserFactory())
+    client.force_login(new_user())
     content = _page(client, transfer).content.decode()
     assert 'The owner will see your name and email' in content
 
@@ -188,7 +187,7 @@ def test_the_password_comes_before_the_sign_in_redirect(client, make_request):
 
 def test_an_account_that_is_not_invited_is_told_without_names(client, make_request):
     transfer = make_request(upload_audience='selected', emails=['secret.invitee@example.com'])
-    client.force_login(UserFactory(email='stranger@example.com', email_confirmed=True))
+    client.force_login(new_user(email='stranger@example.com', email_confirmed=True))
     response = _page(client, transfer)
     content = response.content.decode()
     assert response.status_code == 403
@@ -200,7 +199,7 @@ def test_an_account_that_is_not_invited_is_told_without_names(client, make_reque
 
 def test_an_invited_but_unconfirmed_account_is_asked_to_confirm(client, make_request):
     transfer = make_request(upload_audience='selected', emails=['ann@example.com'])
-    client.force_login(UserFactory(email='ann@example.com', email_confirmed=False))
+    client.force_login(new_user(email='ann@example.com', email_confirmed=False))
     response = _page(client, transfer)
     content = response.content.decode()
     assert response.status_code == 403
@@ -211,7 +210,7 @@ def test_an_invited_but_unconfirmed_account_is_asked_to_confirm(client, make_req
 
 def test_an_invited_confirmed_account_gets_the_upload_page(client, make_request):
     transfer = make_request(upload_audience='selected', emails=['Ann@Example.com'])
-    client.force_login(UserFactory(email='ann@example.com', email_confirmed=True))
+    client.force_login(new_user(email='ann@example.com', email_confirmed=True))
     assert 'Mark as done' in _page(client, transfer).content.decode()
 
 
@@ -260,7 +259,7 @@ def test_the_typed_name_is_remembered_in_the_session(client, make_request, fake_
 
 def test_a_signed_in_uploader_is_stored_with_name_and_email(client, make_request, fake_storage):
     transfer = make_request(upload_audience='signed_in')
-    account = UserFactory(name='John Doe', email='john@example.com')
+    account = new_user(name='John Doe', email='john@example.com')
     client.force_login(account)
     _upload(client, transfer, fake_storage, 'a.txt')
     file = transfer.files.get()
@@ -370,7 +369,7 @@ def test_upload_endpoints_enforce_the_audience(client, make_request, audience, e
     response = _post_json(client, _api('add-file', transfer), {'name': 'a', 'size': 1})
     assert response.status_code == 403 and response.json()['access'] == 'needs_sign_in'
 
-    client.force_login(UserFactory(email='stranger@example.com', email_confirmed=True))
+    client.force_login(new_user(email='stranger@example.com', email_confirmed=True))
     expected = 403 if audience == 'selected' else 201
     assert (
         _post_json(client, _api('add-file', transfer), {'name': 'a', 'size': 1}).status_code
@@ -396,7 +395,7 @@ def test_a_blocked_ip_is_refused_with_the_neutral_message(client, make_request):
 def test_a_blocked_account_email_is_refused(client, make_request):
     BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value='bad@example.com')
     transfer = make_request(upload_audience='signed_in')
-    client.force_login(UserFactory(email='bad@example.com'))
+    client.force_login(new_user(email='bad@example.com'))
     assert (
         _post_json(client, _api('add-file', transfer), {'name': 'a', 'size': 1}).status_code == 403
     )
@@ -444,7 +443,7 @@ def test_a_signed_in_uploader_also_spends_the_shared_upload_budget(make_request,
 
     settings.RATELIMIT_ENABLE = True
     transfer = make_request(upload_audience='signed_in')
-    account = UserFactory()
+    account = new_user()
     client = Client()
     client.force_login(account)
     _post_json(client, _api('add-file', transfer), {'name': 'a', 'size': 1})
@@ -507,7 +506,7 @@ def test_anyone_with_access_may_mark_done_even_without_uploading(
 
 def test_done_by_a_signed_in_uploader_records_the_account(client, make_request, fake_storage):
     transfer = make_request(upload_audience='signed_in')
-    account = UserFactory(name='Sam')
+    account = new_user(name='Sam')
     client.force_login(account)
     _upload(client, transfer, fake_storage)
     client.post(_api('done', transfer))
@@ -566,7 +565,7 @@ def _done_request(make_request, fake_storage, **options):
     if options.get('password'):
         uploader.post(reverse('t:unlock', args=[transfer.slug]), {'password': options['password']})
     if options.get('upload_audience', 'anyone') != 'anyone':
-        uploader.force_login(UserFactory(email='up@example.com', email_confirmed=True))
+        uploader.force_login(new_user(email='up@example.com', email_confirmed=True))
     _upload(uploader, transfer, fake_storage, 'photo.jpg', uploader_name='Jane')
     uploader.post(_api('done', transfer))
     transfer.refresh_from_db()
@@ -618,7 +617,7 @@ def test_download_after_done_follows_the_audience(client, make_request, fake_sto
     assert _page(client, transfer)['Location'].startswith(reverse('accounts:login'))
     assert client.get(url)['Location'] == reverse('t:download', args=[transfer.slug])
 
-    client.force_login(UserFactory())
+    client.force_login(new_user())
     assert 'fake-s3' in client.get(url)['Location']
 
 
@@ -632,12 +631,12 @@ def test_download_after_done_follows_the_invite_list(client, make_request, fake_
     url = reverse('t:download-file', args=[transfer.slug, file.id])
 
     stranger = Client()
-    stranger.force_login(UserFactory(email='stranger@example.com', email_confirmed=True))
+    stranger.force_login(new_user(email='stranger@example.com', email_confirmed=True))
     assert _page(stranger, transfer).status_code == 403
     assert stranger.get(url)['Location'] == reverse('t:download', args=[transfer.slug])
 
     invited = Client()
-    invited.force_login(UserFactory(email='dl@example.com', email_confirmed=True))
+    invited.force_login(new_user(email='dl@example.com', email_confirmed=True))
     assert 'photo.jpg' in _page(invited, transfer).content.decode()
     assert 'fake-s3' in invited.get(url)['Location']
 

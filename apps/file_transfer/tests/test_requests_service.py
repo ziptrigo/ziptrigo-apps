@@ -8,7 +8,6 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from apps.accounts.tests.factories import UserFactory
 from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
 from apps.core.models import Notification
@@ -502,7 +501,6 @@ def test_done_deletes_the_notice_about_new_files(
     upload_to_request(transfer, anon_uploader, 'a.txt', 10)
     transfer.refresh_from_db()
     assert transfer.upload_notice_due_at is not None
-    services.requests.request_notices_key = None  # (just a reminder that the key is the module's)
     from ..services.request_notices import send_due_notices
 
     send_due_notices(now=timezone.now() + timedelta(hours=1))
@@ -692,4 +690,3 @@ def test_a_user_can_be_the_owner_of_many_requests(funded_user, make_request):
     first, second = make_request(title='A'), make_request(title='B')
     assert first.slug != second.slug
     assert RequestInvite.objects.count() == 0
-    assert UserFactory  # (kept import used by other tests in this module)

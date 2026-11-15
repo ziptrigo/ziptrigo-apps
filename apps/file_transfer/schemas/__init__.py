@@ -12,6 +12,15 @@ from .file import (
     ResumeResponseSchema,
     UploadedPartSchema,
 )
+from .request import (
+    FileRequestCreateSchema,
+    FileRequestFileSchema,
+    FileRequestFileUrlSchema,
+    FileRequestInviteSchema,
+    FileRequestListSchema,
+    FileRequestSchema,
+    FileRequestUpdateSchema,
+)
 from .transfer import (
     AddRecipientsSchema,
     FinalizeTransferSchema,
@@ -28,6 +37,13 @@ __all__ = [
     'AddRecipientsSchema',
     'CompleteFileSchema',
     'CompletedPartSchema',
+    'FileRequestCreateSchema',
+    'FileRequestFileSchema',
+    'FileRequestFileUrlSchema',
+    'FileRequestInviteSchema',
+    'FileRequestListSchema',
+    'FileRequestSchema',
+    'FileRequestUpdateSchema',
     'FinalizeTransferSchema',
     'OkSchema',
     'PartRequestSchema',

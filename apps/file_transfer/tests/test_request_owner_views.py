@@ -6,7 +6,6 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.accounts.tests.factories import UserFactory
 from apps.billing.services import add_credits
 from apps.core.models import Notification
 
@@ -19,6 +18,7 @@ from ..models import (
     TransferStatus,
 )
 from ..services.request_uploader import Uploader
+from .support import new_user
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -113,7 +113,7 @@ def test_the_created_page_shows_the_link_copy_and_qr(owner_client, make_request)
 
 def test_the_created_page_is_the_owners_only(client, make_request):
     transfer = make_request()
-    client.force_login(UserFactory())
+    client.force_login(new_user())
     assert (
         client.get(reverse('file_transfer:request-created', args=[transfer.id])).status_code == 404
     )
@@ -237,7 +237,7 @@ def test_the_list_partial_takes_the_kind(owner_client, make_request):
 
 
 def test_other_owners_requests_are_not_listed(owner_client, make_request):
-    stranger = UserFactory()
+    stranger = new_user()
     add_credits(stranger, 10, description='t', source='t')
     make_request(owner=stranger, title='Not mine')
     assert (
@@ -497,7 +497,7 @@ def test_the_owner_removes_a_file_whenever(
 def test_the_owner_cannot_touch_another_owners_file(
     owner_client, make_request, upload_to_request, anon_uploader
 ):
-    stranger = UserFactory()
+    stranger = new_user()
     add_credits(stranger, 10, description='t', source='t')
     other = make_request(owner=stranger)
     file = upload_to_request(other, anon_uploader, 'a.jpg', 10)
@@ -543,7 +543,7 @@ def test_resend_is_limited_by_the_shared_email_budget(owner_client, make_request
 
 def test_actions_on_another_users_request_are_a_404(client, make_request):
     transfer = make_request()
-    client.force_login(UserFactory())
+    client.force_login(new_user())
     for name in ('request-done', 'request-reopen', 'request-settings', 'disable', 'delete'):
         assert client.post(_url(name, transfer), {}).status_code == 404, name
 

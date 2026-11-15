@@ -35,6 +35,10 @@ def cost_section(user: User) -> CostSection:
             unit='per day',
         ),
         free('"Download all" as a zip'),
+        free(
+            'Request files from others',
+            "Free to create; what they upload is billed to you per day like a transfer's storage.",
+        ),
     ]
     if config.anonymous_enabled:
         lines.append(free('Send without an account', 'Smaller limits, no credits involved.'))
@@ -52,15 +56,19 @@ def cost_section(user: User) -> CostSection:
         size = totals['size'] or 0
         rate = daily_storage_rate(size, get_storage_price_per_gb_per_day())
         usage = [
-            f'You have {plural(totals["billed"], "active transfer")} ({filesizeformat(size)}): '
+            f'You have {plural(totals["billed"], "active transfer or request", "active transfers and requests")} '
+            f'({filesizeformat(size)}): '
             f'{daily_rate_text(rate)}.'
         ]
     else:
-        usage = ['You have no active transfers, so nothing is charged for them.']
+        usage = ['You have no active transfers or requests, so nothing is charged for them.']
     suspended = totals['suspended']
     if suspended:
         verb = 'is' if suspended == 1 else 'are'
-        usage.append(f'{plural(suspended, "transfer")} {verb} suspended until you top up.')
+        usage.append(
+            f'{plural(suspended, "transfer or request", "transfers and requests")} {verb} '
+            'suspended until you top up.'
+        )
 
     return CostSection(
         lines=lines,

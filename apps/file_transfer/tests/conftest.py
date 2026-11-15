@@ -90,11 +90,11 @@ def anon_uploader():
 
 @pytest.fixture
 def user_uploader():
-    from apps.accounts.tests.factories import UserFactory
 
     from ..services.request_uploader import Uploader
+    from .support import new_user
 
-    account = UserFactory(name='John', email='john@example.com', email_confirmed=True)
+    account = new_user(name='John', email='john@example.com', email_confirmed=True)
     return Uploader(user=account, token_hash='', name=account.name, email=account.email)
 
 

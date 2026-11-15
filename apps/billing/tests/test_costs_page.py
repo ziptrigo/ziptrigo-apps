@@ -194,7 +194,7 @@ def test_storage_usage_lines(page, user):
     text = _text(page())
     assert 'You store 5.0 GB: about 0.5 credits a day.' in text
     assert 'Storage is paused until you top up.' in text
-    assert 'You have no active transfers, so nothing is charged for them.' in text
+    assert 'You have no active transfers or requests, so nothing is charged for them.' in text
 
 
 def test_opening_the_page_creates_no_product_account(page, user):
@@ -229,15 +229,15 @@ def test_file_transfer_shows_the_accrued_rate_not_the_one_credit_minimum(page, u
     ):
         Transfer.objects.create(owner=user, status=status, size_bytes=size)
     text = _text(page())
-    assert 'You have 2 active transfers (50.0 MB): less than 0.01 credits a day.' in text
-    assert '1 transfer is suspended until you top up.' in text
+    assert 'You have 2 active transfers and requests (50.0 MB): less than 0.01 credits a day.' in text
+    assert '1 transfer or request is suspended until you top up.' in text
     assert 'at least 1 credit a day' not in text
     assert 'once your balance covers a day of its storage (at least 1 credit)' in text
 
 
 def test_file_transfer_rate_for_a_large_transfer(page, user):
     Transfer.objects.create(owner=user, status=TransferStatus.ACTIVE, size_bytes=25 * 1024**3)
-    assert 'You have 1 active transfer (25.0 GB): about 2.5 credits a day.' in _text(page())
+    assert 'You have 1 active transfer or request (25.0 GB): about 2.5 credits a day.' in _text(page())
 
 
 def test_each_charge_says_whether_it_is_confirmed_first(page):
