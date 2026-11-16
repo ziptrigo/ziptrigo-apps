@@ -29,6 +29,7 @@
 {% include 'core/partials/sortable_script.html' %}
 {% comment %} Comments take files on a completed task too, and the comment forms appear when a trashed task is restored, so these two are
    not tied to `attachments_can_upload`. {% endcomment %}
+<script src="{% static 'core/js/clipboard_paste.js' %}"></script>
 <script src="{% static 'todo/js/uploader.js' %}"></script>
 <script src="{% static 'todo/js/comment_files.js' %}"></script>
 {% if attachments_can_upload %}

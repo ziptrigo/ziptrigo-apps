@@ -21,6 +21,13 @@ def _assert_upload_controls(html: str) -> None:
     # `initDropZone` lives in core's shared script, which must load before the page's own.
     assert 'core/js/drop_zone.js' in html
     assert html.index('core/js/drop_zone.js') < html.index('file_transfer/js/resumable_upload.js')
+    # Pasting an image (issue #313): the same callback as the drop zone, with its hint in the zone.
+    assert 'core/js/clipboard_paste.js' in html
+    assert html.index('core/js/clipboard_paste.js') < html.index('initClipboardPaste(')
+    assert 'initClipboardPaste(upload.handleFileSelection' in html
+    assert (
+        html.index('id="drop-zone"') < html.index('data-paste-hint') < html.index('id="file-list"')
+    )
 
 
 def test_send_page_has_drop_zone_and_pickers(client, funded_user):

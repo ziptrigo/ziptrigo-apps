@@ -22,6 +22,7 @@
                 {% if attachments_frozen %}disabled{% endif %}>
             <i class="fas fa-paperclip mr-2" aria-hidden="true"></i>Add files
         </button>
+        {% include 'core/partials/paste_hint.html' with id='attachment-paste-hint' %}
         <p class="text-xs text-gray-500 dark:text-gray-400">Up to {{ attachments_max_bytes|filesizeformat }} each, {{ attachments_max_files }} per task. Stored files are billed by size, daily.</p>
         {% if attachments_frozen %}
         <p class="text-sm text-amber-700 dark:text-amber-400">Uploads are paused until you add credits. <a href="{% url 'billing:credits-history' %}" class="underline">Top up</a></p>

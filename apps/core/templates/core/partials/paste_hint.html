@@ -1,0 +1,4 @@
+{% comment %} The hint under an upload drop zone (issue #313): "You can also paste an image: Ctrl+V". `hidden` until
+   `core/js/clipboard_paste.js` (`initClipboardPaste(..., {hint: el})`) shows it, so it appears only where pasting works (not
+   while uploads are paused, not on a touch-only device) and says ⌘V on a Mac. Optional: `id`, `text`, `class`. {% endcomment %}
+<p {% if id %}id="{{ id }}" {% endif %}class="hidden text-xs text-gray-500 dark:text-gray-400{% if class %} {{ class }}{% endif %}" data-paste-hint><i class="fas fa-paste mr-1" aria-hidden="true"></i>{{ text|default:'You can also paste an image:' }} <kbd class="font-mono text-[0.7rem] rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5" data-paste-key>Ctrl+V</kbd></p>
