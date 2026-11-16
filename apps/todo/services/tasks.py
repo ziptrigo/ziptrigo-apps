@@ -463,6 +463,15 @@ def create_task(
             if cleaned_parent is not None:
                 cleaned.project = cleaned_parent.project  # as it is now
                 cleaned.section = cleaned_parent.section
+        if cleaned_parent is None and cleaned.section is not None:
+            # As it is now: a section deleted since the fields were checked is a refusal, not a
+            # foreign-key error; the next occurrence of a repeating task goes to no section then.
+            try:
+                cleaned.section = projects.clean_section(cleaned.project, cleaned.section.pk)
+            except ValidationError:
+                if not allow_archived_project:
+                    raise
+                cleaned.section = None
         if (
             dates.open_tasks(user).count() >= settings.max_open_tasks_per_user
         ):  # under the lock, so racing creations can't pass the cap together

@@ -4976,7 +4976,10 @@ line says so).
     project, section | None, ids)` writes `project_position` 0, 1, 2... for the rows of **one list**
     in the order sent (ids that are not the user's non-trashed tasks of the project are ignored); a
     row listed that is in another section **joins this one**, with its subtasks, and that move is
-    logged; a subtask listed alone in another section is skipped (it stays with its parent).
+    logged, and its subtasks take its place in the order (so they stay next to it); a subtask listed
+    alone in another section is skipped (it stays with its parent). The section is read again under
+    the account lock, as it is in `create_task` (a section deleted meanwhile is "Unknown section.",
+    never a foreign-key error; the next occurrence of a repeating task then goes to no section).
   - *Activity log.* `EventKind.SECTION` (`from`, `to`, `via`, `reason: 'deleted'`): "Moved to the
     section X", "Moved from the section X to Y", "Removed from the section X", "The section X was
     deleted: the task is in no section" (automatic). Reordering inside a list records nothing.
@@ -4990,18 +4993,22 @@ line says so).
     with sections the lists share `data-sort-group`, so a row is **dragged into another section**
     (core's `initSortableList` gained `group` and `canLeave`: the list a row lands in posts its
     order; a subtask row, `data-subtask`, can't leave its list). The arrow keys move a row inside its
-    list; changing section by keyboard is the task page's select. A section's header has its own
+    list; changing section by keyboard is the task page's select. **After a row lands in another
+    list the page reloads** (`fromOtherList` in `onReorder`: its subtasks moved with it and both counts
+    changed). **A list cut at the cap is not dragged** (numbering only the rows shown would let the
+    hidden ones land among them). A section's header has its own
     handle (`.section-handle`, `data-handle`; `todo:section-reorder`), a collapse button (remembered
-    in the browser's `localStorage`, key `todo-section-<id>`), the count of its open tasks (as
-    rendered: it is not updated by a drag until the page reloads), rename in place and delete (the
+    in the browser's `localStorage`, key `todo-section-<id>`; **its Alpine state is `expanded`, never
+    `open`**, which would shadow the confirmation modal's and stop it opening from inside a section), the count of its open tasks, rename in place and delete (the
     confirmation modal), and each section ends with a one-line "Add a task to <name>" form. **Add
     section** is below the last one. `section-add`, `section-edit`, `section-delete`,
     `section-reorder` under `/todo/projects/<id>/sections/`: `HX-Redirect` back with a flash, 422
     into `#todo-msg`, 404 for another user's project or a section of another project; all spend
     `TODO_EDIT_USER`, validated first.
   - *The task page.* A **Section** select next to Project when the project has sections (posted with
-    `project` to `todo:move`, which applies the section only when the request has the key, in one
-    transaction with the move); the top line reads "In X / Design". The Move dialog on rows chooses
+    `project` to `todo:move`, which applies the section only when the request has the key **and the
+    project stays the same** (the two selects are one form, so a new project arrives with the old
+    project's section), in one transaction with the move); the top line reads "In X / Design". The Move dialog on rows chooses
     a project only.
   - *Not in part 2:* a section filter in search, sections in the API (part 3), a board view.
 - **Not done:** the API and CLI (part 3),

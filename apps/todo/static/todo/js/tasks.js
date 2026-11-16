@@ -81,7 +81,10 @@
         if (slot) slot.innerHTML = html;
     }
 
-    function postOrder(list) {
+    function postOrder(list, items, info) {
+        // A row dragged in from another section takes its subtasks with it and changes both counts:
+        // the page is reloaded once the move is saved, instead of patching all of that here.
+        const reloadAfter = !!(info && info.fromOtherList);
         const body = new URLSearchParams();
         list.querySelectorAll(':scope > [data-task-id]').forEach(function (row) {
             body.append('ids[]', row.dataset.taskId);
@@ -106,6 +109,7 @@
         }).then(function (response) {
             if (!response.ok) return response.text().then(function (html) { showProblem(list, html); });
             showProblem(list, '');
+            if (reloadAfter) { window.location.reload(); return; }
             const url = list.dataset.afterReorderUrl;
             const target = list.dataset.afterReorderTarget;
             if (url && target && document.querySelector(target)) {

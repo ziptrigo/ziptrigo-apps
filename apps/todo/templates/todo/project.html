@@ -147,19 +147,21 @@
      {% if sortable %}data-sortable data-handle=".section-handle" data-reorder-url="{% url 'todo:section-reorder' project.pk %}"{% endif %}>
     {% for section, section_tasks in section_groups %}
     {% comment %}`data-task-id` is what the shared reorder script posts as `ids[]` (here: the section's id). Collapsed
-       sections are remembered in this browser (localStorage), not on the account.{% endcomment %}
+       sections are remembered in this browser (localStorage), not on the account. The state is `expanded`, never `open`:
+       the confirmation modal around the page has its own `open`, which a section's would shadow (the modal would not
+       open from a button inside the section).{% endcomment %}
     <section data-task-id="{{ section.pk }}" data-section-id="{{ section.pk }}" aria-labelledby="section-title-{{ section.pk }}" class="mt-6"
-             x-data="{ open: localStorage.getItem('todo-section-{{ section.pk }}') !== '0', editing: false,
-                       toggle() { this.open = !this.open; localStorage.setItem('todo-section-{{ section.pk }}', this.open ? '1' : '0') } }">
+             x-data="{ expanded: localStorage.getItem('todo-section-{{ section.pk }}') !== '0', editing: false,
+                       toggle() { this.expanded = !this.expanded; localStorage.setItem('todo-section-{{ section.pk }}', this.expanded ? '1' : '0') } }">
         <div class="flex items-center gap-2 px-1">
             {% if sortable %}
             <span class="section-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
                   data-name="{{ section.name }}" aria-label="Reorder the section {{ section.name }}: use the up and down arrow keys" title="Drag to reorder sections, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
             {% endif %}
             <div x-show="!editing" class="flex min-w-0 flex-1 items-center gap-2">
-                <button type="button" @click="toggle()" :aria-expanded="open" aria-controls="section-body-{{ section.pk }}"
+                <button type="button" @click="toggle()" :aria-expanded="expanded" aria-controls="section-body-{{ section.pk }}"
                         class="btn flex min-w-0 items-center gap-2 rounded-md text-left">
-                    <i class="fas fa-chevron-right text-xs text-gray-500 dark:text-gray-400 transition-transform" :class="open ? 'rotate-90' : ''" aria-hidden="true"></i>
+                    <i class="fas fa-chevron-right text-xs text-gray-500 dark:text-gray-400 transition-transform" :class="expanded ? 'rotate-90' : ''" aria-hidden="true"></i>
                     <h2 id="section-title-{{ section.pk }}" class="min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100">{{ section.name }}</h2>
                 </button>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ section_tasks|length }}<span class="sr-only"> open task{{ section_tasks|length|pluralize }}</span></span>
@@ -192,7 +194,7 @@
             </div>
             {% endif %}
         </div>
-        <div id="section-body-{{ section.pk }}" x-show="open" class="mt-2 bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+        <div id="section-body-{{ section.pk }}" x-show="expanded" class="mt-2 bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
             <ul class="min-h-[2.75rem] divide-y divide-gray-200 dark:divide-gray-700"
                 {% if sortable %}data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="project" data-project="{{ project.pk }}" data-section="{{ section.pk }}" data-sort-group="project-{{ project.pk }}"{% endif %}>
                 {% for task in section_tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False sortable=sortable %}{% endfor %}

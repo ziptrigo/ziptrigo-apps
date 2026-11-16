@@ -1024,6 +1024,25 @@ class TestSections:
 
         assert reload(task).section is None and not Section.objects.exists()
 
+    def test_a_section_deleted_before_the_write_is_refused_not_a_database_error(
+        self, funded_user, project, design, monkeypatch
+    ):
+        """`create_task` reads the section again under the lock."""
+        from ..services import tasks as task_service
+
+        real = task_service.allocate_number
+
+        def delete_then_allocate(account):
+            Section.objects.filter(pk=design.pk).delete()  # as a concurrent request would
+            return real(account)
+
+        monkeypatch.setattr(task_service, 'allocate_number', delete_then_allocate)
+
+        assert errors(create_task, funded_user, title='A', project=project, section=design) == {
+            'section': ['Unknown section.']
+        }
+        assert not Task.objects.exists()
+
     def test_the_next_occurrence_keeps_the_section(self, funded_user, project, design, wednesday):
         task = create_task(
             funded_user,
@@ -1069,7 +1088,7 @@ class TestManualOrder:
 
         projects.reorder_tasks(funded_user, project, design, [moved.pk, there.pk])
 
-        assert self.order(project, design)[:2] == ['Moved', 'There']
+        assert self.order(project, design) == ['Moved', 'Sub', 'There']  # the subtask next to it
         assert reload(sub).section == design
         assert log(moved)[0] == 'Moved to the section Design'
 
@@ -1241,6 +1260,56 @@ class TestSectionPages:
             url, {'project': str(project.pk), 'section': 'nope', 'ctx': 'page'}, **HTMX
         )
         assert refused.status_code == 422 and 'Section: Unknown section.' in text(refused)
+
+    def test_changing_the_project_drops_the_old_projects_section(
+        self, web, funded_user, project, design
+    ):
+        """The Project and Section selects are one form: a new project arrives with the section
+        of the project being left, which must not refuse the move."""
+        other = projects.create_project(funded_user, 'Other')
+        task = create_task(funded_user, title='A', project=project, section=design)
+
+        response = web.post(
+            reverse('todo:move', args=[task.number]),
+            {'project': str(other.pk), 'section': str(design.pk), 'ctx': 'page'},
+            **HTMX,
+        )
+
+        assert response.status_code == 200
+        fresh = reload(task)
+        assert fresh.project == other and fresh.section is None
+
+    def test_a_sections_state_never_shadows_the_confirmation_modal(self, web, project, design):
+        """The modal's Alpine state is `open`; a section that had its own `open` would swallow
+        `show()` from its Delete button and from the rows inside it."""
+        page = text(web.get(self.url(project)))
+
+        block = page.split('id="project-sections"')[1]
+        assert 'expanded:' in block and 'x-data="{ open' not in block
+        assert 'x-show="expanded"' in block
+
+    def test_a_cut_list_is_not_dragged(self, web, funded_user, project, design, monkeypatch):
+        from ..views import projects as project_views
+
+        monkeypatch.setattr(project_views, 'PROJECT_PAGE_LIMIT', 2)
+        for title in 'ABC':
+            create_task(funded_user, title=title, project=project)
+
+        page = text(web.get(self.url(project)))
+
+        assert 'Showing the first 2 open tasks.' in page
+        assert 'data-scope="project"' not in page
+
+    def test_refused_section_writes_spend_no_budget(self, web, project, design, settings):
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'TODO_EDIT_USER': (1, 60)}
+        reorder = reverse('todo:reorder')
+        bad = {'scope': 'project', 'project': str(project.pk), 'section': 'nope'}
+
+        assert web.post(reorder, bad, **HTMX).status_code == 422
+        assert web.post(reorder, {'scope': 'project', 'project': 'nope'}, **HTMX).status_code == 422
+        good = {'scope': 'project', 'project': str(project.pk), 'section': str(design.pk)}
+        assert web.post(reorder, good).status_code == 204
 
     def test_another_users_sections_are_404(self, stranger, project, design):
         for name, args in (

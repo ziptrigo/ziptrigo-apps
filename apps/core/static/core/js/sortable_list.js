@@ -6,7 +6,8 @@
 //     handle: '.drag-handle',         // selector of the drag handle inside an item (a focusable
 //                                     //   role="button" element, not a <button>: Firefox won't drag from one)
 //     item: '[data-task-id]',         // selector of the items, direct children of `container`
-//     onReorder(container, items, {viaKeyboard}) {},  // save the new order; `items` are the elements in order
+//     onReorder(container, items, {viaKeyboard, fromOtherList}) {},  // save the new order; `items` are the elements
+//                                     //   in order; `fromOtherList`: an item was just dragged in from another list
 //     label(handle, item) { return 'Item'; },          // the name announced ("<name> moved to position ...")
 //     liveRegion: element | (container) => element,    // the polite live region (default: one in <body>)
 //     horizontalKeys: false,          // also let Left/Right (earlier/later) move an item (a grid)
@@ -52,8 +53,11 @@
     window.setTimeout(function () { live.textContent = text; }, 30);
   }
 
-  function reorder(container, config, viaKeyboard) {
-    config.onReorder(container, itemsOf(container, config), { viaKeyboard: viaKeyboard });
+  function reorder(container, config, viaKeyboard, fromOtherList) {
+    config.onReorder(container, itemsOf(container, config), {
+      viaKeyboard: viaKeyboard,
+      fromOtherList: fromOtherList === true,
+    });
   }
 
   function initSortableList(container, options) {
@@ -87,7 +91,7 @@
         if (event.to !== event.from) {
           // Dropped in another list of the group: that list saves its new order (and takes the item).
           const other = configs.get(event.to);
-          if (other) reorder(event.to, other, false);
+          if (other) reorder(event.to, other, false, true);
         } else if (event.oldIndex !== event.newIndex) {
           reorder(container, config, false);
         }

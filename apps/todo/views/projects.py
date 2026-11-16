@@ -297,14 +297,15 @@ def project_page(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpRes
         'unsectioned': by_section.get(None, []),
         'section_groups': [(section, by_section.get(section.pk, [])) for section in sections],
         'has_sections': bool(sections),
-        'open_shown': len(open_rows),
         'truncated': truncated,
         'page_limit': PROJECT_PAGE_LIMIT,
         'today': today,
         'view': 'project',
         'sort_links': _sort_links(sort, direction, show_closed),
         # Rows are dragged only in the hand-made order of a project that is not archived.
-        'sortable': manual and not project.is_archived,
+        # (nor while the list is cut at the cap: numbering only the rows shown would let the hidden
+        # ones land among them)
+        'sortable': manual and not project.is_archived and not truncated,
         'show_closed': show_closed,
         'closed_toggle_query': _query(**base, closed='' if show_closed else '1'),
         'page_url': _project_url(project),
@@ -402,6 +403,10 @@ def section_delete(
     """Delete a section (from the confirmation modal, a plain POST); its tasks stay in the project."""
     project = _owned(request, project_id)
     section = _section(project, section_id)
+    try:
+        projects.require_active(project)  # a refusal spends no budget
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), fallback=_project_url(project))
     if (response := limited(request, 'TODO_EDIT_USER')) is not None:
         return response
     name = section.name
@@ -453,10 +458,13 @@ def task_move(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     if not form.is_valid():
         return refuse(request, form_error_lines(form), retarget=slot, fallback=fallback)
     # `section` (only when the request has it: the task page's Section select) puts the task in a
-    # section of the project it ends up in; a move to another project alone leaves it in none.
-    with_section = 'section' in request.POST
+    # section of its project; a move to another project always leaves it in none.
     try:
         target = projects.check_move(task, form.cleaned_data['project'])
+        # The Project and Section selects are one form, so a change of project also posts the
+        # section of the project being left: it only counts while the project stays the same.
+        same_project = (target.pk if target is not None else None) == task.project_id
+        with_section = 'section' in request.POST and same_project
         if with_section:
             projects.clean_section(target, form.cleaned_data['section'])
     except ValidationError as exc:

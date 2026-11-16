@@ -445,7 +445,7 @@ def _check_section_unique(project: Project, name: str, *, exclude: Section | Non
         raise _error('name', SECTION_DUPLICATE_MESSAGE)
 
 
-def _require_active(project: Project) -> None:
+def require_active(project: Project) -> None:
     if project.is_archived:
         raise _error(NON_FIELD_ERRORS, ARCHIVED_SECTIONS_MESSAGE)
 
@@ -489,7 +489,7 @@ def create_section(project: Project, name: str) -> Section:
     """Add a section at the end of the project's. Names are unique in a project, ignoring case; at
     most `MAX_SECTIONS_PER_PROJECT`. An archived project's sections can't be changed."""
     cleaned = clean_section_name(name)
-    _require_active(project)
+    require_active(project)
     with transaction.atomic():
         lock_account(project.user_id)
         existing = Section.objects.filter(project=project)
@@ -508,11 +508,13 @@ def create_section(project: Project, name: str) -> Section:
 
 def rename_section(section: Section, name: str) -> Section:
     cleaned = clean_section_name(name)
-    _require_active(section.project)
+    require_active(section.project)
     _check_section_unique(section.project, cleaned, exclude=section)
-    section.name = cleaned
     try:
         with transaction.atomic():
+            lock_account(section.project.user_id)
+            _check_section_unique(section.project, cleaned, exclude=section)
+            section.name = cleaned
             section.save(update_fields=['name'])
     except IntegrityError:
         raise _error('name', SECTION_DUPLICATE_MESSAGE) from None
@@ -522,7 +524,7 @@ def rename_section(section: Section, name: str) -> Section:
 def delete_section(section: Section) -> int:
     """Delete the section and keep its tasks, which stay in the project with no section, at the end
     of that group (each gets an automatic log entry). Returns how many tasks were in it."""
-    _require_active(section.project)
+    require_active(section.project)
     now = timezone.now()
     with transaction.atomic():
         lock_account(section.project.user_id)
@@ -535,10 +537,14 @@ def delete_section(section: Section) -> int:
             .values_list('pk', 'user_id')
         )
         start = next_position(current.project, None)
-        for index, (pk, _) in enumerate(rows):
-            Task.objects.filter(pk=pk).update(
-                section=None, project_position=start + index, updated_at=now
-            )
+        Task.objects.bulk_update(
+            [
+                Task(pk=pk, section=None, project_position=start + index, updated_at=now)
+                for index, (pk, _) in enumerate(rows)
+            ],
+            ['section', 'project_position', 'updated_at'],
+            batch_size=500,
+        )
         data = {'from': current.name, 'to': None, 'reason': 'deleted'}
         events.record_many(
             events.Entry(pk, user_id, EventKind.SECTION, dict(data), True) for pk, user_id in rows
@@ -557,6 +563,7 @@ def reorder_sections(project: Project, ids: Sequence[UUID]) -> int:
             section.position = index
             changed.append(section)
     with transaction.atomic():
+        lock_account(project.user_id)
         Section.objects.bulk_update(changed, ['position'])
     return len(changed)
 
@@ -642,12 +649,15 @@ def reorder_tasks(
     were positioned."""
     if project.user_id != user.pk:
         raise _error('project', UNKNOWN_MESSAGE)
-    _require_active(project)
-    section = clean_section(project, section)
-    section_id = section.pk if section is not None else None
+    require_active(project)
+    wanted = clean_section(project, section)
     now = timezone.now()
     with transaction.atomic():
         lock_account(user.pk)
+        # Read again under the lock (by id): a section deleted meanwhile is "Unknown section.",
+        # not a foreign-key error.
+        section = clean_section(project, wanted.pk if wanted is not None else None)
+        section_id = section.pk if section is not None else None
         rows = {
             task.pk: task
             for task in Task.objects.filter(
@@ -666,8 +676,10 @@ def reorder_tasks(
                 old = (
                     Section.objects.filter(pk=task.section_id).first() if task.section_id else None
                 )
+                # The subtasks take the parent's place too (the default order then keeps them
+                # after it), instead of the places they held in the list they left.
                 Task.objects.filter(pk__in=[task.pk, *family]).update(
-                    section=section, updated_at=now
+                    section=section, project_position=index, updated_at=now
                 )
                 _record_section(
                     {task.pk: task, **family}, task.pk, old, section, events.task_ref(task)
