@@ -1,3 +1,4 @@
+from ._service_errors import add_service_errors
 from .anonymous_send import AnonymousSendOptionsForm
 from .confirm import ConfirmCodeForm
 from .dashboard_actions import (
@@ -9,7 +10,7 @@ from .dashboard_actions import (
 )
 from .download import DownloadPasswordForm
 from .report import AbuseReportForm
-from .request import FileRequestForm, RequestSettingsForm, add_service_errors
+from .request import FileRequestForm, RequestSettingsForm
 from .send import SendOptionsForm
 
 __all__ = [

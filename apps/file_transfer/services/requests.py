@@ -12,8 +12,8 @@ apply unchanged. What is different, and lives here:
 - **Open vs Done** is `Transfer.done_at`, not a status. `mark_done` closes it to uploads (and
   switches the link to the download view); `reopen` is the owner undoing that. Uploading itself is
   `services.request_upload`; who may use the link is `services.request_access`.
-- **Changing one** (`update_request`): title (optional since issue #318), message, audience and invitees, the limits, expiry
-  and password, all or nothing.
+- **Changing one** (`update_request`): title (optional since issue #318), message, audience and
+  invitees, the limits, expiry and password, all or nothing.
 
 Every owner action here goes through the same refusals a transfer's dashboard action has: the
 request must be actionable (not ended), and a request on hold for abuse review is frozen except
@@ -60,21 +60,12 @@ from .storage import S3Storage, get_storage
 
 logger = logging.getLogger(__name__)
 
-#: A request's title: optional, at most this many characters (issue #318; `limits.clean_title`).
-TITLE_MAX_LENGTH = limits.TITLE_MAX_LENGTH
-
 NOT_ACCEPTING_MESSAGE = 'This link is not accepting files right now.'
 
 _GB = 1024**3
 
 
 # -- Validation helpers --------------------------------------------------------------------------
-
-
-def clean_title(raw: object) -> str:
-    """A request's title: optional (issue #318), control characters removed, stripped, at most
-    100 characters. Blank is "no title"."""
-    return limits.clean_title(raw)
 
 
 def clean_message(message: str) -> str:
@@ -168,7 +159,7 @@ def validate_request_options(
 
 
 def _validate(options: RequestOptions, settings_row: FileTransferSettings) -> _Validated:
-    title = clean_title(options.title)
+    title = limits.clean_title(options.title)
     message = clean_message(options.message)
     audience = clean_audience(options.upload_audience)
     invitees = (
@@ -265,7 +256,7 @@ def _plan_update(
     before the lock (to charge for the invite emails) and once under it (to decide for good)."""
     changes: dict = {}
     if 'title' in data:
-        changes['title'] = clean_title(data['title'])
+        changes['title'] = limits.clean_title(data['title'])
     if 'message' in data:
         changes['message'] = clean_message(data['message'])
     audience = row.upload_audience

@@ -126,8 +126,8 @@ class FileRequestUpdateSchema(Schema):
     """Body for `PATCH /requests/{id}`. Every field is optional and only the ones present are
     applied, all or nothing (`payload.dict(exclude_unset=True)`): omitting a field leaves it as it
     is, an explicit `null` clears `max_files` and `max_total_size_bytes` (the site's maximum
-    again). `title` may be blank to remove it. `emails` replaces the whole invitee list (new addresses are emailed). A blank
-    `password` is a no-op; `remove_password: true` clears it."""
+    again). `title` may be blank to remove it. `emails` replaces the whole invitee list (new
+    addresses are emailed). A blank `password` is a no-op; `remove_password: true` clears it."""
 
     title: str | None = None
     message: str | None = None

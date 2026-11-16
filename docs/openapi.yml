@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.10.0
+  version: 2.10.1
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -6753,9 +6753,9 @@ components:
 
         is, an explicit `null` clears `max_files` and `max_total_size_bytes` (the site''s maximum
 
-        again). `title` may be blank to remove it. `emails` replaces the whole invitee list (new addresses are emailed). A blank
+        again). `title` may be blank to remove it. `emails` replaces the whole invitee list (new
 
-        `password` is a no-op; `remove_password: true` clears it.'
+        addresses are emailed). A blank `password` is a no-op; `remove_password: true` clears it.'
       properties:
         title:
           anyOf:

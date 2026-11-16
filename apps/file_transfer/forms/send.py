@@ -24,7 +24,8 @@ class SendOptionsForm(StyledFormMixin, forms.Form):
     title = forms.CharField(
         label='Title',
         required=False,
-        max_length=TITLE_MAX_LENGTH,
+        # No `max_length`: `limits.clean_title` judges the length (after cleaning), the HTML
+        # attribute is only a hint.
         widget=forms.TextInput(attrs={'maxlength': str(TITLE_MAX_LENGTH)}),
         help_text='Optional. Shown on the download page and in your dashboard.',
     )

@@ -1,5 +1,5 @@
 """The optional title of a send and of a request (issue #318): the services, the send and request
-forms, the pages, the emails (a title is never in a subject) and the JWT API."""
+forms, the pages, the emails (a send's title is never in a subject) and the JWT API."""
 
 import json
 import re
@@ -40,6 +40,9 @@ def _send(draft, **options) -> Transfer:
         ('   ', ''),
         ('\x00\x07', ''),
         ('  Q3\x00 report  ', 'Q3 report'),
+        ('\u200b\u202e', ''),  # zero-width space, right-to-left override: nothing visible
+        ('Q3\u202e report\u200b', 'Q3 report'),
+        ('Q3\n  report\t2', 'Q3 report 2'),
         ('x' * 100, 'x' * 100),
     ],
 )
@@ -122,6 +125,32 @@ def test_the_send_form_refuses_a_long_title(client, draft_transfer, uploaded_fil
     assert draft_transfer.status == TransferStatus.DRAFT
 
 
+def test_a_long_title_is_shown_under_the_title_field(client, draft_transfer, uploaded_file):
+    client.force_login(draft_transfer.owner)
+    response = client.post(
+        reverse('file_transfer:send-submit', args=[draft_transfer.id]),
+        data={'recipients': '', 'title': 'x' * 101, 'expiry_choice': 'none'},
+        HTTP_HX_REQUEST='true',
+    )
+    html = response.content.decode()
+    assert 'Title: Keep the title to 100 characters or fewer.' in html
+    assert 'data-field-error="title"' in html
+
+
+def test_the_send_form_leaves_the_length_to_the_service(client, draft_transfer, uploaded_file):
+    # 100 visible characters plus invisible ones: a raw count would refuse what the service accepts.
+    client.force_login(draft_transfer.owner)
+    title = 'x' * 100 + '\u200b' * 5
+    response = client.post(
+        reverse('file_transfer:send-submit', args=[draft_transfer.id]),
+        data={'recipients': '', 'title': title, 'expiry_choice': 'none'},
+        HTTP_HX_REQUEST='true',
+    )
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.title == 'x' * 100
+
+
 def test_the_send_page_has_an_optional_title_field(client, funded_user):
     client.force_login(funded_user)
     html = client.get(reverse('file_transfer:send')).content.decode()
@@ -154,6 +183,36 @@ def test_a_title_stays_out_of_every_subject(
     assert recipient['text_body'].startswith('Title: Secret plans\n')
     sender = next(e for e in sent_emails if e['to'] != 'a@example.com')
     assert 'Your transfer "Secret plans"' in sender['text_body']
+
+
+def test_the_recipient_email_lists_every_file_under_the_title(
+    draft_transfer,
+    uploaded_file,
+    fake_storage,
+    sent_emails,
+    django_capture_on_commit_callbacks,
+):
+    from .. import services
+
+    second = services.add_file(draft_transfer, 'notes.txt', 10, storage=fake_storage)
+    fake_storage.seed_object(second.storage_key, 10)
+    services.complete_file_upload(
+        second, [{'PartNumber': 1, 'ETag': 'etag-2'}], storage=fake_storage
+    )
+    with django_capture_on_commit_callbacks(execute=True):
+        _send(draft_transfer, title='Secret plans', message='Hello there')
+    recipient = next(e for e in sent_emails if e['to'] == 'a@example.com')
+    assert recipient['subject'] == 'report.pdf and 1 more file were sent to you via ZipTrigo'
+    lines = recipient['text_body'].split('\n')
+    assert lines[:7] == [
+        'Title: Secret plans',
+        '',
+        'You have received 2 files:',
+        '- report.pdf',
+        '- notes.txt',
+        '',
+        'Hello there',
+    ]
 
 
 def test_the_later_emails_keep_the_title_out_of_subjects_too(

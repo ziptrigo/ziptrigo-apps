@@ -2583,8 +2583,10 @@ AI cases FT-06 and FT-66.
 
 **Titles** (issue #318). A send and a request can both have an optional title: `Transfer.title` (100, blank
 for none; the column came with requests, #306, and only its `help_text` changed, migration `0012`). One cleaner for both,
-`services.limits.clean_title` (control characters removed, stripped, at most 100: `ValidationError({'title': ...})`
-over it; blank is fine; `requests.clean_title` is the same call). **Sends**: `SendOptions.title` /
+`services.limits.clean_title` (control and format characters removed -- zero-width, bidi overrides --, white space collapsed,
+stripped, at most 100: `ValidationError({'title': ...})` over it; blank is fine). The forms have **no `max_length`** on the title (the HTML `maxlength` is
+only a hint): the service alone judges the length after cleaning, and the send views show its `title` error under the Title field
+(`forms.add_service_errors`, shared with the request views). **Sends**: `SendOptions.title` /
 `AnonymousSendOptions.title` (set by `finalize_send` / `start_confirmation`, validated first), a **Title (optional)** field on
 the send and anonymous send forms (`SendOptionsForm.title`, first on the logged-in form), `title` in the body of `POST /api/ft/transfers/{id}/send`
 (`FinalizeTransferSchema`, default `''`; a long one is a 400) and `inv filetransfer send --title/-t`; `TransferSchema` now returns `title` next to
@@ -2600,7 +2602,7 @@ the title (free text; MAIL-12), and the recipient's email starts with `Title: <t
 (suspension, expiry, deleted) still name it by its title in the subject, as before (a request has no file to name it by; they are
 `file_label`). The two request emails (invite, done) show the title only when there is one (no "Untitled request" to an invitee).
 Not done: editing the title of a *sent* transfer from the dashboard or `PATCH /transfers/{id}` (a request's title is editable).
-Tests: `apps/file_transfer/tests/test_titles.py`, `admin/tests/test_filetransfer.py` and `test_filetransfer_requests.py`; AI cases FT-02, FT-54, FT-70 and MAIL-12, MAIL-27. OpenAPI 2.10.0.
+Tests: `apps/file_transfer/tests/test_titles.py`, `admin/tests/test_filetransfer.py` and `test_filetransfer_requests.py`; AI cases FT-02, FT-54, FT-70 and MAIL-12, MAIL-27. OpenAPI 2.10.1.
 
 **Abuse reports, takedown and the block list** (issue #59, deferred from #55's phase 3 spec
 section 16): the download page has a "Report this transfer" link (an htmx-collapsed

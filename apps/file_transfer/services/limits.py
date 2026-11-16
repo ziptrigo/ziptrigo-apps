@@ -38,10 +38,18 @@ def validate_message(message: str) -> None:
 
 
 def clean_title(raw: object) -> str:
-    """A transfer's or request's optional title (issue #318): control characters removed, stripped,
-    at most 100 characters. Blank is fine and means "no title". A refusal is a `ValidationError`
-    keyed `title`."""
-    text = ''.join(ch for ch in str(raw or '') if unicodedata.category(ch) != 'Cc').strip()
+    """A transfer's or request's optional title (issue #318) as one line of visible text: control
+    and format characters dropped (zero-width spaces, bidirectional overrides: a title made of them
+    would look empty, or read backwards, on a page other people open), white space collapsed and
+    trimmed, at most 100 characters. Blank is fine and means "no title". A refusal is a
+    `ValidationError` keyed `title`; this is the one place the length is judged (the forms leave it
+    to the service, so a raw count can't refuse what the service would accept)."""
+    text = ''.join(
+        ' ' if ch.isspace() else ch
+        for ch in str(raw or '')
+        if ch.isspace() or unicodedata.category(ch) not in ('Cc', 'Cf')
+    )
+    text = ' '.join(text.split())
     if len(text) > TITLE_MAX_LENGTH:
         raise ValidationError(
             {'title': f'Keep the title to {TITLE_MAX_LENGTH} characters or fewer.'}
