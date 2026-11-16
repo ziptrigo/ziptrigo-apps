@@ -21,6 +21,10 @@
             <i class="fas fa-store" aria-hidden="true"></i>Vendors
             {% if vendors_to_vet %}<span class="rounded-full px-2 py-0.5 text-xs font-medium tabular-nums bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300">{{ vendors_to_vet }} to vet</span>{% endif %}
         </a>
+        <a href="{% url 'receipts:exports' %}"
+           class="inline-flex items-center rounded-md hover:text-gray-700 dark:hover:text-gray-200">
+            <i class="fas fa-file-zipper mr-1.5" aria-hidden="true"></i>Exports
+        </a>
         <a href="{% url 'receipts:trash' %}"
            class="inline-flex items-center rounded-md hover:text-gray-700 dark:hover:text-gray-200">
             <i class="fas fa-trash mr-1.5" aria-hidden="true"></i>Trash{% if counts.trash %} ({{ counts.trash }}){% endif %}

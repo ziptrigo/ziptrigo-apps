@@ -20,6 +20,7 @@ from uuid import UUID
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.tasks import task
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
@@ -31,9 +32,11 @@ from apps.core.services.queue import enqueue_after_commit
 
 from ..models import (
     IN_PROGRESS_STATUSES,
+    ExportStatus,
     FailureReason,
     InboundEmail,
     Receipt,
+    ReceiptExport,
     ReceiptStatus,
 )
 
@@ -189,4 +192,35 @@ def send_storage_paused_email(user_id: str) -> None:
         subject='Your receipts storage is paused',
         text_body='\n'.join(lines),
         html_body=str(html_body),
+    )
+
+
+EXPORT_READY_SUBJECT = 'Your receipts export is ready'
+
+
+@task(queue_name='receipts')
+def send_export_ready_email(export_id: str) -> None:
+    """ "Your receipts export is ready" -- to the owner, with a link to the export's page (never a
+    link to a file: the page is behind sign-in), to a confirmed address only. Rendered from
+    `receipts/emails/export_ready.{txt,html}`; the HTML is autoescaped. Nothing in the subject."""
+    try:
+        export = ReceiptExport.objects.select_related('user').get(pk=export_id)
+    except ReceiptExport.DoesNotExist, ValidationError:
+        return
+    user = export.user
+    if export.status != ExportStatus.READY or not user.email or not user.email_confirmed:
+        return
+    context = {
+        'file_count': export.file_count - export.skipped_count,
+        'part_count': export.part_count,
+        'expires': format_utc(export.expires_at) if export.expires_at else '',
+        'skipped_count': export.skipped_count,
+        'refunded': export.refunded_credits,
+        'export_url': f'{settings.BASE_URL}{reverse("receipts:export-detail", args=[export.pk])}',
+    }
+    send_email(
+        to=user.email,
+        subject=EXPORT_READY_SUBJECT,
+        text_body=render_to_string('receipts/emails/export_ready.txt', context),
+        html_body=render_to_string('receipts/emails/export_ready.html', context),
     )

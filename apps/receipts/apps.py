@@ -65,8 +65,9 @@ class ReceiptsConfig(AppConfig):
                 func=jobs.retry_due,
                 description=(
                     'Queues receipts whose AI reading is due for a retry, recovers '
-                    'receipts stuck in processing for over 30 minutes, and queues '
-                    'ones nobody picked up.'
+                    'receipts stuck in processing for over 30 minutes, queues '
+                    'ones nobody picked up, and resumes receipt exports whose '
+                    'build stalled.'
                 ),
                 interval=timedelta(minutes=5),
                 lease=timedelta(minutes=10),
@@ -107,6 +108,19 @@ class ReceiptsConfig(AppConfig):
                 ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=30),
+            )
+        )
+        register_job(
+            JobSpec(
+                name='receipts.purge_exports',
+                func=jobs.purge_exports,
+                description=(
+                    'Deletes the zip files of receipt exports once their retention days '
+                    'have passed, and finishes deleting ended exports whose files are '
+                    'still there.'
+                ),
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
             )
         )
         register_job(

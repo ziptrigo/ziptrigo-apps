@@ -1,0 +1,12 @@
+{% autoescape off %}Your receipts export is ready: {{ file_count }} receipt file{{ file_count|pluralize }} in {{ part_count }} zip file{{ part_count|pluralize }}.
+{% if skipped_count %}
+{{ skipped_count }} file{{ skipped_count|pluralize }} {{ skipped_count|pluralize:"was,were" }} no longer there and left out{% if refunded %}; the {{ refunded }} credit{{ refunded|pluralize }} for {{ skipped_count|pluralize:"it,them" }} {{ refunded|pluralize:"was,were" }} refunded{% endif %}.
+{% endif %}
+The zip files are available to download until {{ expires }} UTC. Then they are deleted.
+
+Download them from your exports page (you need to be signed in):
+{{ export_url }}
+
+--
+The ZipTrigo Team
+{% endautoescape %}

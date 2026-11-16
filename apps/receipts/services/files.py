@@ -30,12 +30,14 @@ def _require_available(receipt: Receipt) -> None:
         raise ValidationError('There is no file for this receipt.')
 
 
-def _default_name(receipt: Receipt) -> str:
+def default_name_for(content_type: str) -> str:
     """A name for a file that has none (an email body): `email.html` / `email.txt`, else
     `receipt`, so it opens in the right program when saved."""
-    return {'text/html': 'email.html', 'text/plain': 'email.txt'}.get(
-        receipt.content_type, 'receipt'
-    )
+    return {'text/html': 'email.html', 'text/plain': 'email.txt'}.get(content_type, 'receipt')
+
+
+def _default_name(receipt: Receipt) -> str:
+    return default_name_for(receipt.content_type)
 
 
 def file_name(receipt: Receipt) -> str:

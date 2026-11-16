@@ -7,7 +7,7 @@ from django import template
 
 from apps.core.templatetags.core_ui import pill_html
 
-from ..models import FailureReason, ReceiptStatus
+from ..models import ExportStatus, FailureReason, ReceiptStatus
 
 register = template.Library()
 
@@ -25,6 +25,24 @@ _PILLS = {
 def status_pill(status: str) -> str:
     """The pill for a receipt status (`receipt.status`)."""
     label, icon, tone = _PILLS.get(status, (str(status).replace('_', ' ').capitalize(), '', 'gray'))
+    return pill_html(tone, label, icon=icon)
+
+
+_EXPORT_PILLS = {
+    ExportStatus.BUILDING: ('Preparing', 'fas fa-spinner fa-spin', 'blue'),
+    ExportStatus.READY: ('Ready', 'fas fa-check', 'green'),
+    ExportStatus.FAILED: ('Failed', 'fas fa-circle-xmark', 'red'),
+    ExportStatus.EXPIRED: ('Expired', 'fas fa-clock', 'gray'),
+    ExportStatus.DELETED: ('Deleted', 'fas fa-trash', 'gray'),
+}
+
+
+@register.simple_tag
+def export_status_pill(status: str) -> str:
+    """The pill for an export's status (`export.status`)."""
+    label, icon, tone = _EXPORT_PILLS.get(
+        status, (str(status).replace('_', ' ').capitalize(), '', 'gray')
+    )
     return pill_html(tone, label, icon=icon)
 
 

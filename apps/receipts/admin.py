@@ -17,6 +17,8 @@ from .models import (
     InboundMessage,
     InboxCode,
     Receipt,
+    ReceiptExport,
+    ReceiptExportPart,
     ReceiptsAccount,
     ReceiptsSettings,
     Vendor,
@@ -70,6 +72,42 @@ class ReceiptAdmin(ReadOnlyModelAdmin):
     ]
     list_select_related = ['user']
     date_hierarchy = 'created_at'
+
+
+class ReceiptExportPartInline(admin.TabularInline):
+    model = ReceiptExportPart
+    extra = 0
+    can_delete = False
+    fields = ['number', 'key', 'size_bytes', 'file_count', 'built_at']
+    readonly_fields = fields
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
+class ReceiptExportAdmin(ReadOnlyModelAdmin):
+    """Download-files exports (issue #315): who asked for what, the credits charged and refunded,
+    and why a build failed. Read-only: an export's files and rows go through
+    `services.exports` (deleting a row here would orphan its S3 objects)."""
+
+    list_display = [
+        'id',
+        'user',
+        'status',
+        'layout',
+        'file_count',
+        'part_count',
+        'skipped_count',
+        'charged_credits',
+        'refunded_credits',
+        'created_at',
+        'expires_at',
+    ]
+    list_filter = ['status', 'layout', 'created_at']
+    search_fields = ['id', 'user__email', 'last_error']
+    list_select_related = ['user']
+    date_hierarchy = 'created_at'
+    inlines = [ReceiptExportPartInline]
 
 
 class VendorAliasInline(admin.TabularInline):
@@ -177,6 +215,7 @@ class ReceiptsAccountAdmin(ReadOnlyModelAdmin):
 
 custom_admin_site.register(ReceiptsSettings, ReceiptsSettingsAdmin)
 custom_admin_site.register(Receipt, ReceiptAdmin)
+custom_admin_site.register(ReceiptExport, ReceiptExportAdmin)
 custom_admin_site.register(Vendor, VendorAdmin)
 custom_admin_site.register(InboundMessage, InboundMessageAdmin)
 custom_admin_site.register(InboundEmail, InboundEmailAdmin)

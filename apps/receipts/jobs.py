@@ -1,4 +1,4 @@
-"""The seven jobs `receipts` registers with `apps.core.scheduler`, wired up from
+"""The eight jobs `receipts` registers with `apps.core.scheduler`, wired up from
 `apps/receipts/apps.py`. The scheduler is at-least-once, so every job is idempotent, and each does
 its per-row work in a `try`/`except` that logs and carries on, so one bad row can't abort the rest
 of a run.
@@ -17,6 +17,8 @@ of a run.
 - `link_vendors` (hourly): link receipts that have a vendor text and no vendor (ones a container
   of the previous release processed during the deploy that added vendors); a no-op once none are
   left. See `services.vendors.link_unlinked_receipts`.
+- `purge_exports` (daily): delete the zip files of exports past their retention days, and finish
+  deleting any ended export whose files are still there (issue #315). See `services.exports`.
 """
 
 import logging
@@ -27,7 +29,7 @@ from django.utils import timezone
 from apps.billing.services import get_storage_price_per_gb_per_day
 
 from .models import Receipt, ReceiptsAccount, ReceiptsSettings, ReceiptStatus
-from .services import inbound, vendors
+from .services import exports, inbound, vendors
 from .services.lifecycle import purge_receipt
 from .services.metering import meter_account, resume
 from .services.processing import enqueue_processing, requeue_stuck
@@ -90,7 +92,7 @@ def purge_trash() -> None:
 
 def retry_due() -> None:
     """Every 5 minutes: queue receipts waiting for a retry, recover receipts stuck in
-    `processing`, and queue ones that were never picked up."""
+    `processing`, queue ones that were never picked up, and resume stalled exports."""
     now = timezone.now()
     base = Receipt.objects.filter(uploaded=True, deleted_at__isnull=True)
 
@@ -106,6 +108,12 @@ def retry_due() -> None:
         except Exception:
             logger.exception('Failed to queue receipt %s', receipt_id)
 
+    try:
+        # Exports being built that nobody is working on (a dead worker, a retry that is due).
+        exports.resume_stalled(now)
+    except Exception:
+        logger.exception('Failed to resume stalled exports')
+
     stuck = base.filter(
         status=ReceiptStatus.PROCESSING, processing_started_at__lt=now - STUCK_AFTER
     ).values_list('pk', flat=True)
@@ -115,6 +123,14 @@ def retry_due() -> None:
                 logger.warning('Receipt %s was stuck processing; requeued', receipt_id)
         except Exception:
             logger.exception('Failed to recover stuck receipt %s', receipt_id)
+
+
+def purge_exports() -> None:
+    """Daily: expire exports past `expires_at` (their zip files are deleted) and finish deleting
+    ended ones whose files are still there. See `services.exports.expire_exports`."""
+    expired = exports.expire_exports()
+    if expired:
+        logger.info('Expired %s receipt exports', expired)
 
 
 def cleanup_uploads() -> None:

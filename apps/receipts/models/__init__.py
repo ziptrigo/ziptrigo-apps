@@ -4,6 +4,13 @@ from .category import (
     MAX_CATEGORY_NAME_LENGTH,
     ReceiptCategory,
 )
+from .export import (
+    ExportLayout,
+    ExportStatus,
+    ReceiptExport,
+    ReceiptExportItem,
+    ReceiptExportPart,
+)
 from .inbound import (
     InboundEmail,
     InboundEmailStatus,
@@ -39,6 +46,8 @@ __all__ = [
     'REQUIRED_FIELDS',
     'SETTLED_STATUSES',
     'DocumentType',
+    'ExportLayout',
+    'ExportStatus',
     'FailureReason',
     'InboundEmail',
     'InboundEmailStatus',
@@ -47,6 +56,9 @@ __all__ = [
     'InboxCode',
     'Receipt',
     'ReceiptCategory',
+    'ReceiptExport',
+    'ReceiptExportItem',
+    'ReceiptExportPart',
     'ReceiptSource',
     'ReceiptStatus',
     'ReceiptsAccount',

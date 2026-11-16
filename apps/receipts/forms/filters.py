@@ -7,6 +7,7 @@ hand-edited URL) is dropped and the default applies, rather than showing an erro
 
 import re
 from calendar import monthrange
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import urlencode
@@ -127,8 +128,10 @@ class ParsedFilters:
         )
 
 
-def parse_filters(request: HttpRequest) -> ParsedFilters:
-    form = ReceiptFilterForm(request.GET)
+def parse_filters(request: HttpRequest, data: Mapping[str, str] | None = None) -> ParsedFilters:
+    """The filters of `request.GET`, or of `data` (a POST's `request.POST` that carries them as
+    hidden fields, like the "Download files" dialog's)."""
+    form = ReceiptFilterForm(request.GET if data is None else data)
     form.is_valid()  # leniently: `cleaned_data` keeps the valid fields
     data = form.cleaned_data
 

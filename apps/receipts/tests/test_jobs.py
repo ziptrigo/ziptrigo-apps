@@ -41,6 +41,7 @@ def test_the_jobs_are_registered_with_the_scheduler():
         'receipts.poll_inbound',
         'receipts.link_vendors',
         'receipts.purge_inbound_messages',
+        'receipts.purge_exports',
     }
     assert specs['receipts.meter_storage'].interval == timedelta(hours=24)
     assert specs['receipts.purge_trash'].interval == timedelta(hours=24)
@@ -48,6 +49,8 @@ def test_the_jobs_are_registered_with_the_scheduler():
     assert specs['receipts.cleanup_uploads'].interval == timedelta(hours=1)
     assert specs['receipts.poll_inbound'].interval == timedelta(minutes=1)
     assert specs['receipts.link_vendors'].interval == timedelta(hours=1)
+    assert specs['receipts.purge_exports'].interval == timedelta(hours=24)
+    assert specs['receipts.purge_exports'].func is jobs.purge_exports
     assert specs['receipts.poll_inbound'].lease == timedelta(minutes=2)
     assert specs['receipts.poll_inbound'].func is jobs.poll_inbound
     assert specs['receipts.meter_storage'].func is jobs.meter_storage

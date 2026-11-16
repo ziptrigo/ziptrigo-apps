@@ -38,12 +38,17 @@ class TestSettings:
                 'trash_days': 10,
                 'max_pdf_pages_to_ai': 2,
                 'max_ai_attempts': 4,
+                'export_price_per_file': 5,
+                'export_retention_days': 14,
+                'export_part_bytes': 50 * 1024**2,
             },
         )
 
         assert response.status_code == 302
         row.refresh_from_db()
         assert (row.price_per_file, row.trash_days, row.max_ai_attempts) == (3, 10, 4)
+        assert (row.export_price_per_file, row.export_retention_days) == (5, 14)
+        assert row.export_part_bytes == 50 * 1024**2
         assert row.max_inbound_rows_per_day == 50
 
     def test_an_unsupported_type_is_refused(self, client, admin_user):
@@ -62,6 +67,9 @@ class TestSettings:
                 'trash_days': 10,
                 'max_pdf_pages_to_ai': 2,
                 'max_ai_attempts': 4,
+                'export_price_per_file': 3,
+                'export_retention_days': 30,
+                'export_part_bytes': 100 * 1024**2,
             },
         )
 
@@ -338,3 +346,46 @@ def test_a_user_with_receipts_can_be_deleted_from_the_admin(admin_client, fake_s
 
     assert response.status_code == 302
     assert not User.objects.filter(pk=owner.pk).exists()
+
+
+class TestExports:
+    def test_the_settings_page_labels_the_price_export_per_receipt(self, client, admin_user):
+        client.force_login(admin_user)
+        row = ReceiptsSettings.load()
+
+        content = client.get(url('receipts_receiptssettings_change', row.pk)).content.decode()
+
+        assert 'Export per receipt' in content
+        assert 'name="export_price_per_file"' in content and 'value="3"' in content
+        assert 'name="export_retention_days"' in content and 'name="export_part_bytes"' in content
+
+    def test_the_default_price_is_three_credits_a_receipt(self):
+        field = ReceiptsSettings._meta.get_field('export_price_per_file')  # ty: ignore[missing-attribute]
+        assert field.default == 3 and field.verbose_name == 'Export per receipt'
+
+    def test_the_exports_are_listed_read_only(self, client, admin_user, funded_user, make_receipt):
+        from ..services.exports import create_export
+
+        make_receipt()
+        export = create_export(funded_user, None, 'year_vendor')
+        client.force_login(admin_user)
+
+        listing = client.get(url('receipts_receiptexport_changelist'))
+        detail = client.get(url('receipts_receiptexport_change', export.pk))
+
+        assert listing.status_code == 200 and str(funded_user.email) in listing.content.decode()
+        assert detail.status_code == 200
+        assert 'part-01.zip' in detail.content.decode()
+        assert b'name="_save"' not in detail.content
+        assert client.get(url('receipts_receiptexport_add')).status_code == 403
+        assert (
+            client.post(
+                url('receipts_receiptexport_delete', export.pk), {'post': 'yes'}
+            ).status_code
+            == 403
+        )
+
+    def test_filters_by_status(self, client, admin_user):
+        client.force_login(admin_user)
+        response = client.get(url('receipts_receiptexport_changelist') + '?status__exact=ready')
+        assert response.status_code == 200

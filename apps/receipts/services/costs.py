@@ -17,6 +17,12 @@ def cost_section(user: User) -> CostSection:
             "Charged when a file is uploaded or emailed in. A file that can't be read is refunded.",
         ),
         charge('Re-run a receipt', config.price_per_file, 'per run', 'You confirm the cost first.'),
+        charge(
+            'Download all files as zip',
+            config.export_price_per_file,
+            'per file',
+            f'You confirm the cost first. Kept for {config.export_retention_days} days.',
+        ),
         storage(
             'Store receipts',
             'Originals, previews and the emails they came in, receipts in the Trash included.',
