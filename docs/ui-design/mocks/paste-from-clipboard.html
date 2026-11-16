@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paste from the clipboard - ZipTrigo (mock)</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="../reference/assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../../../apps/core/static/core/css/site.css">
+</head>
+<!--
+  MOCK for review (issue #313), not wired to anything. Pasting an image from the clipboard is one more
+  way to add a file, next to "Choose files" and drag & drop, on four upload surfaces:
+    1. File transfer: the send page's drop zone (also the anonymous send page and a file request's upload page).
+    2. Receipts: the upload page's drop zone.
+    3. To-do: the task page's Attachments block.
+    4. To-do: the comment form's "Attach files".
+
+  THE RULES (what the real script, core/js/clipboard_paste.js, does):
+    - Only an IMAGE is taken. Text, HTML, a file path copied as text, or a non-image file in the
+      clipboard: the paste is ignored (nothing is prevented, so pasting text into a field still works).
+    - In a text field the text wins: if the clipboard holds text as well as an image (copying cells from
+      a spreadsheet does), the paste goes to the field as usual and nothing is uploaded.
+    - Name: the local time of the paste, YYYY-MM-DD-HH-mm-SS.<ext>. Two in the same second get "-2", "-3".
+    - Format: the browser hands over a re-encoded copy (a screenshot is always a PNG), so the original
+      format is not available. A PNG is saved as WebP at 85% quality (much smaller); a JPEG, WebP or GIF
+      is kept as it is (a GIF keeps its animation). A browser that cannot write WebP keeps the PNG.
+    - From then on it is exactly a picked file: same checks (size, type), same upload, same progress
+      row, same error line.
+    - No permission prompt: the paste event hands the clipboard to the page because the user pressed the
+      keys (only a "Paste" button reading the clipboard on its own would need one; there is none).
+    - To-do task page: paste while the focus is inside a comment form -> a file of that comment;
+      anywhere else on the page -> an attachment of the task.
+    - The hint under the drop zone is shown only where pasting works (not while uploads are paused) and
+      not on a phone or tablet (touch-only), where there is no Ctrl+V. On a Mac it says "⌘V".
+
+  In this mock the four "Paste an image" buttons stand in for the keys; a real Ctrl+V / ⌘V with an image
+  in the clipboard also works on this page, and a text paste is ignored.
+-->
+<body class="min-h-screen flex flex-col bg-page text-gray-900 dark:text-gray-100 font-sans">
+
+    <!-- Mock switcher (not part of the design) -->
+    <div class="bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100 text-sm">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-3">
+            <span class="font-semibold"><i class="fas fa-flask mr-1"></i>Mock</span>
+            <button type="button" data-screen="ft" class="underline">1. File transfer</button>
+            <button type="button" data-screen="receipts" class="underline">2. Receipts</button>
+            <button type="button" data-screen="task" class="underline">3. To-do attachments</button>
+            <button type="button" data-screen="comment" class="underline">4. To-do comment</button>
+            <button type="button" data-screen="rules" class="underline">5. What is ignored</button>
+            <span class="ml-auto opacity-80">Theme toggle is in the header</span>
+        </div>
+    </div>
+
+    <header class="bg-gray-100 dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <a href="#" class="text-lg font-semibold hover:text-sage-300">
+                <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+            </a>
+            <button id="theme-toggle" type="button" class="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
+                     src="../../../apps/core/static/core/images/theme-system_128x128.png"
+                     data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
+                     data-light="../../../apps/core/static/core/images/theme-light_128x128.png"
+                     data-dark="../../../apps/core/static/core/images/theme-dark_128x128.png">
+            </button>
+        </nav>
+    </header>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 1: file transfer                                      -->
+    <!-- ============================================================ -->
+    <main id="screen-ft" class="screen flex-grow">
+        <div class="container mx-auto px-4 py-8 max-w-2xl">
+            <h1 class="text-2xl font-semibold tracking-tight mb-4">Send files</h1>
+            <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 mb-6 border border-gray-200 dark:border-gray-700">
+                <p class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Files</p>
+                <div class="flex flex-col items-center justify-center gap-3 text-center rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-8">
+                    <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 dark:text-gray-500" aria-hidden="true"></i>
+                    <p class="text-sm text-gray-700 dark:text-gray-300">Drag &amp; drop files or folders here, or</p>
+                    <div class="flex items-center gap-3">
+                        <button type="button" class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap"><i class="fas fa-file mr-1"></i>Choose files</button>
+                        <button type="button" class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap"><i class="fas fa-folder-open mr-1"></i>Add folder</button>
+                    </div>
+                    <!-- NEW: the hint -->
+                    <p class="paste-hint text-xs text-gray-500 dark:text-gray-400"><i class="fas fa-paste mr-1" aria-hidden="true"></i>You can also paste an image: <kbd class="key" data-paste-key>Ctrl+V</kbd></p>
+                </div>
+                <ul class="mt-4 space-y-2" data-rows="ft">
+                    <li class="flex flex-wrap items-center justify-between text-sm gap-2">
+                        <span class="truncate flex-1">holiday-plan.pdf (412 KB)</span>
+                        <span class="w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden"><span class="block h-2 bg-brand-primary" style="width:100%"></span></span>
+                        <span class="w-20 text-right"><i class="fa-solid fa-check text-green-600" title="Done"></i></span>
+                        <button type="button" class="text-red-500 hover:text-red-600" aria-label="Remove holiday-plan.pdf"><i class="fa-solid fa-trash-can"></i></button>
+                    </li>
+                </ul>
+                <button type="button" data-paste="ft" class="mt-4 text-xs underline text-gray-500"><i class="fas fa-flask mr-1"></i>Mock: paste an image</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 2: receipts                                           -->
+    <!-- ============================================================ -->
+    <main id="screen-receipts" class="screen hidden flex-grow">
+        <div class="container mx-auto px-4 py-8 max-w-3xl">
+            <h1 class="text-3xl font-semibold tracking-tight mb-6">Upload receipts</h1>
+            <div class="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-10 text-center">
+                <i class="fas fa-cloud-arrow-up text-3xl text-gray-400" aria-hidden="true"></i>
+                <p class="text-sm text-gray-700 dark:text-gray-300">Drop files here, or</p>
+                <div class="flex flex-wrap items-center justify-center gap-3">
+                    <button type="button" class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400"><i class="fas fa-file mr-2" aria-hidden="true"></i>Choose files</button>
+                    <button type="button" class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"><i class="fas fa-camera mr-2" aria-hidden="true"></i>Take photo</button>
+                </div>
+                <p class="paste-hint text-xs text-gray-500 dark:text-gray-400"><i class="fas fa-paste mr-1" aria-hidden="true"></i>You can also paste an image: <kbd class="key" data-paste-key>Ctrl+V</kbd></p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">PDF, JPG, PNG, HEIC, WebP &middot; up to 15 MB &middot; 1 credit each</p>
+            </div>
+            <ul class="mt-6 space-y-3" data-rows="receipts" aria-live="polite"></ul>
+            <button type="button" data-paste="receipts" class="mt-4 text-xs underline text-gray-500"><i class="fas fa-flask mr-1"></i>Mock: paste an image</button>
+        </div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 3: to-do attachments                                  -->
+    <!-- ============================================================ -->
+    <main id="screen-task" class="screen hidden flex-grow">
+        <div class="container mx-auto px-4 py-8 max-w-3xl">
+            <h1 class="text-2xl font-semibold tracking-tight mb-1">#1204 Send the signed lease</h1>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Paste with the focus anywhere on the page except in a comment box: the image becomes an attachment of the task.</p>
+            <section class="mt-8 mb-8">
+                <h2 class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Attachments</h2>
+                <div class="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-6 text-center">
+                    <i class="fas fa-cloud-arrow-up text-2xl text-gray-400" aria-hidden="true"></i>
+                    <p class="text-sm text-gray-700 dark:text-gray-300">Drop files here, or</p>
+                    <button type="button" class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"><i class="fas fa-paperclip mr-2" aria-hidden="true"></i>Add files</button>
+                    <p class="paste-hint text-xs text-gray-500 dark:text-gray-400"><i class="fas fa-paste mr-1" aria-hidden="true"></i>You can also paste an image: <kbd class="key" data-paste-key>Ctrl+V</kbd></p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Up to 50 MB each, 20 per task. Stored files are billed by size, daily.</p>
+                </div>
+                <ul class="mt-4 space-y-3" data-rows="task" aria-live="polite"></ul>
+                <button type="button" data-paste="task" class="mt-4 text-xs underline text-gray-500"><i class="fas fa-flask mr-1"></i>Mock: paste an image</button>
+            </section>
+        </div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 4: to-do comment                                      -->
+    <!-- ============================================================ -->
+    <main id="screen-comment" class="screen hidden flex-grow">
+        <div class="container mx-auto px-4 py-8 max-w-3xl">
+            <h1 class="text-2xl font-semibold tracking-tight mb-6">Comments</h1>
+            <form class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4" onsubmit="return false">
+                <label for="c-body" class="sr-only">Add a comment</label>
+                <textarea id="c-body" rows="3" class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm" placeholder="Write a comment. Markdown works."></textarea>
+                <div class="mt-3">
+                    <ul class="space-y-1 empty:hidden" data-chips="comment"></ul>
+                    <ul class="mt-2 space-y-2 empty:mt-0" data-rows="comment" aria-live="polite"></ul>
+                    <button type="button" class="btn inline-flex items-center px-3 py-1 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"><i class="fas fa-paperclip mr-2" aria-hidden="true"></i>Attach files</button>
+                    <span class="ml-2 text-xs text-gray-500 dark:text-gray-400">Up to 50 MB each; they count toward the task's 20 files and are billed by size, daily.</span>
+                    <!-- NEW: a paste with the focus in this form (the text box included) goes to the comment -->
+                    <p class="paste-hint mt-1 text-xs text-gray-500 dark:text-gray-400"><i class="fas fa-paste mr-1" aria-hidden="true"></i>Paste an image here to attach it: <kbd class="key" data-paste-key>Ctrl+V</kbd></p>
+                </div>
+                <div class="mt-3 flex justify-end"><button type="submit" class="btn px-4 py-2 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400">Comment</button></div>
+            </form>
+            <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">Try it: type some text in the box and paste text (it is inserted as usual), then paste an image (it becomes a chip; nothing is added to the text).</p>
+            <button type="button" data-paste="comment" class="mt-4 text-xs underline text-gray-500"><i class="fas fa-flask mr-1"></i>Mock: paste an image</button>
+        </div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 5: rules                                              -->
+    <!-- ============================================================ -->
+    <main id="screen-rules" class="screen hidden flex-grow">
+        <div class="container mx-auto px-4 py-8 max-w-3xl">
+            <h1 class="text-2xl font-semibold tracking-tight mb-4">What a paste does</h1>
+            <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-100 dark:bg-gray-800 text-left"><tr><th class="px-4 py-2">In the clipboard</th><th class="px-4 py-2">Result</th></tr></thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <tr><td class="px-4 py-2">A screenshot or an image copied from a page or an app</td><td class="px-4 py-2">Uploaded as <code class="font-mono">2026-11-15-21-03-07.webp</code> (PNG becomes WebP, 85%)</td></tr>
+                        <tr><td class="px-4 py-2">A JPEG, WebP or GIF file</td><td class="px-4 py-2">Uploaded as it is, with the time as its name (<code class="font-mono">.jpg</code>, <code class="font-mono">.webp</code>, <code class="font-mono">.gif</code>)</td></tr>
+                        <tr><td class="px-4 py-2">Two images in the same second</td><td class="px-4 py-2"><code class="font-mono">...-07.webp</code> and <code class="font-mono">...-07-2.webp</code></td></tr>
+                        <tr><td class="px-4 py-2">Text, HTML, or the path of a file as text</td><td class="px-4 py-2">Ignored: the page does nothing, and a text field gets its text as usual</td></tr>
+                        <tr><td class="px-4 py-2">An image and text together, pasted into a text field</td><td class="px-4 py-2">The text is pasted; no upload</td></tr>
+                        <tr><td class="px-4 py-2">A PDF or another non-image file</td><td class="px-4 py-2">Ignored (use Choose files or drag it in)</td></tr>
+                        <tr><td class="px-4 py-2">An image, while uploads are paused or the task is closed</td><td class="px-4 py-2">Ignored, like a drop</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="mt-4 text-sm text-gray-600 dark:text-gray-300">An image the page then refuses (too large, a type Receipts does not read) shows the same error line as a picked file.</p>
+        </div>
+    </main>
+
+    <style type="text/tailwindcss">
+        .key { @apply font-mono text-[0.7rem] rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5; }
+    </style>
+    <script>
+        const names = {};
+        function stamp() {
+            const d = new Date(), p = (n) => String(n).padStart(2, '0');
+            const base = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + p(d.getHours()) + '-' + p(d.getMinutes()) + '-' + p(d.getSeconds());
+            names[base] = (names[base] || 0) + 1;
+            return base + (names[base] > 1 ? '-' + names[base] : '');
+        }
+        function addRow(kind, label, size) {
+            const list = document.querySelector('[data-rows="' + kind + '"]');
+            const li = document.createElement('li');
+            if (kind === 'ft') {
+                li.className = 'flex flex-wrap items-center justify-between text-sm gap-2';
+                li.innerHTML = '<span class="truncate flex-1"></span><span class="w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden"><span class="block h-2 bg-brand-primary" style="width:100%"></span></span><span class="w-20 text-right"><i class="fa-solid fa-check text-green-600"></i></span>';
+                li.firstChild.textContent = label + ' (' + size + ')';
+                list.appendChild(li);
+            } else if (kind === 'comment') {
+                li.className = 'flex items-center gap-2 text-sm';
+                li.innerHTML = '<i class="fas fa-paperclip w-4 text-center text-sage-400"></i><span class="min-w-0 flex-1 truncate"></span><span class="text-xs text-gray-500 dark:text-gray-400">' + size + '</span><button type="button" class="text-xs text-red-600 dark:text-red-400 hover:underline">Remove</button>';
+                li.children[1].textContent = label;
+                document.querySelector('[data-chips="comment"]').appendChild(li);
+            } else {
+                li.className = 'rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3';
+                li.innerHTML = '<div class="flex items-center gap-3"><span class="min-w-0 flex-1 truncate text-sm font-medium"></span><span class="text-xs text-gray-500 dark:text-gray-400">' + size + '</span></div><div class="mt-2 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"><div class="h-full bg-brand-primary" style="width:100%"></div></div><p class="mt-1 text-xs text-green-700 dark:text-green-400">&#10003; Uploaded.</p>';
+                li.querySelector('span').textContent = label;
+                list.appendChild(li);
+            }
+        }
+        document.querySelectorAll('[data-paste]').forEach((b) => b.addEventListener('click', () => addRow(b.dataset.paste, stamp() + '.webp', '84 KB')));
+        // A real paste also works in the mock: image -> a row on the visible screen, text -> ignored.
+        document.addEventListener('paste', (e) => {
+            const items = Array.from((e.clipboardData || {}).items || []);
+            const hasImage = items.some((i) => i.kind === 'file' && i.type.startsWith('image/'));
+            const screen = document.querySelector('.screen:not(.hidden)').id.replace('screen-', '');
+            const target = { ft: 'ft', receipts: 'receipts', task: 'task', comment: 'comment' }[screen];
+            if (!hasImage || !target) return;
+            if (e.target.matches('textarea, input') && e.clipboardData.getData('text/plain').trim()) return;
+            e.preventDefault();
+            addRow(target, stamp() + '.webp', '84 KB');
+        });
+        document.querySelectorAll('[data-paste-key]').forEach((k) => { if (/Mac|iPhone|iPad/.test(navigator.platform)) k.textContent = '⌘V'; });
+        function show(name) {
+            document.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
+            document.getElementById('screen-' + name).classList.remove('hidden');
+            window.scrollTo(0, 0);
+        }
+        document.querySelectorAll('[data-screen]').forEach((el) =>
+            el.addEventListener('click', (e) => { e.preventDefault(); show(el.dataset.screen); history.replaceState(null, '', '#' + el.dataset.screen); }));
+        show(['ft', 'receipts', 'task', 'comment', 'rules'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'ft');
+    </script>
+</body>
+</html>
