@@ -108,9 +108,10 @@ class FileRequestCreateSchema(Schema):
     """Body for `POST /requests`: what the web form collects, validated by the same service
     (`services.requests.create_request`). `emails` is the invitee list for the audience
     `selected` (and ignored otherwise); `max_files` and `max_total_size_bytes` left out mean the
-    site's maximum; the expiry is as in `PATCH /transfers`."""
+    site's maximum; the expiry is as in `PATCH /transfers`. `title` is optional (issue #318): up to
+    100 characters, blank for none."""
 
-    title: str
+    title: str = ''
     message: str = ''
     upload_audience: str = 'anyone'
     emails: list[str] = []
@@ -125,8 +126,8 @@ class FileRequestUpdateSchema(Schema):
     """Body for `PATCH /requests/{id}`. Every field is optional and only the ones present are
     applied, all or nothing (`payload.dict(exclude_unset=True)`): omitting a field leaves it as it
     is, an explicit `null` clears `max_files` and `max_total_size_bytes` (the site's maximum
-    again). `emails` replaces the whole invitee list (new addresses are emailed). A blank
-    `password` is a no-op; `remove_password: true` clears it."""
+    again). `title` may be blank to remove it. `emails` replaces the whole invitee list (new
+    addresses are emailed). A blank `password` is a no-op; `remove_password: true` clears it."""
 
     title: str | None = None
     message: str | None = None

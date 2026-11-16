@@ -8,7 +8,7 @@
     <i class="fas fa-check-circle text-5xl text-sage-500 dark:text-sage-300 mb-4"></i>
     <h1 class="text-3xl font-semibold tracking-tight mb-4 text-gray-900 dark:text-gray-100">Your request is ready</h1>
     <p class="text-gray-600 dark:text-gray-400 mb-2">
-        Share this link with the people you want files from: <span class="font-medium">{{ transfer.title }}</span>.
+        Share this link with the people you want files from{% if transfer.title %}: <span class="font-medium">{{ transfer.title }}</span>{% endif %}.
     </p>
     {% if invite_count %}
     <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">We emailed {{ invite_count }} {% if invite_count == 1 %}person{% else %}people{% endif %} the link.</p>

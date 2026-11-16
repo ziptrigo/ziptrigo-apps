@@ -103,8 +103,8 @@ inv pip sync                  # uv sync --frozen, all groups
 inv api generate [--bump patch|minor|major]   # docs/openapi.yml; bumps the version only if the spec changed
 inv api generate --check      # exit 1 if docs/openapi.yml is out of date; writes nothing
 inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/, /api/receipts/, /api/s/, /api/todo/, /api/notes/, /api/time/
-inv filetransfer send local report.pdf --to a@example.com
-inv filetransfer request-create local "Wedding photos" [--message ... --anyone | --signed-in | --to a@x --to b@y --max-files N --max-gb N --expires 30|none|2026-12-31 --password]   # file requests (issue #306); the password via FILETRANSFER_LINK_PASSWORD or a hidden prompt
+inv filetransfer send local report.pdf --to a@example.com [--title "Q3 report"]
+inv filetransfer request-create local ["Wedding photos"] [--message ... --anyone | --signed-in | --to a@x --to b@y --max-files N --max-gb N --expires 30|none|2026-12-31 --password]   # file requests (issue #306); the password via FILETRANSFER_LINK_PASSWORD or a hidden prompt
 inv filetransfer requests local [--filter active|ended|all] | request-get local <id> | request-edit local <id> [--title ... --to a@x --clear-max-files ...]
 inv filetransfer request-done local <id> | request-reopen local <id> | request-download local <id> --out ./photos [--force] | request-delete local <id> [--yes]
 inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
@@ -2589,6 +2589,29 @@ as decided: with an unconfirmed sender and no account, a recipient-less link has
 the only trail; revisit if anonymous users ask. Tests: `test_send_service.py`, `test_send_views.py`, `test_api.py`, `admin/tests/test_filetransfer.py`;
 AI cases FT-06 and FT-66.
 
+**Titles** (issue #318). A send and a request can both have an optional title: `Transfer.title` (100, blank
+for none; the column came with requests, #306, and only its `help_text` changed, migration `0012`). One cleaner for both,
+`services.limits.clean_title` (control and format characters removed -- zero-width, bidi overrides --, white space collapsed,
+stripped, at most 100: `ValidationError({'title': ...})` over it; blank is fine). The forms have **no `max_length`** on the title (the HTML `maxlength` is
+only a hint): the service alone judges the length after cleaning, and the send views show its `title` error under the Title field
+(`forms.add_service_errors`, shared with the request views). **Sends**: `SendOptions.title` /
+`AnonymousSendOptions.title` (set by `finalize_send` / `start_confirmation`, validated first), a **Title (optional)** field on
+the send and anonymous send forms (`SendOptionsForm.title`, first on the logged-in form), `title` in the body of `POST /api/ft/transfers/{id}/send`
+(`FinalizeTransferSchema`, default `''`; a long one is a 400) and `inv filetransfer send --title/-t`; `TransferSchema` now returns `title` next to
+`display_name`. **Requests**: the title is optional everywhere (the form's field is not `required`, `RequestOptions.title` defaults to `''`,
+`FileRequestCreateSchema.title` too, `inv filetransfer request-create [TITLE]` takes it as an optional argument, an empty
+`title` in `request-edit` / `PATCH /requests/{id}` / the dashboard settings form clears it). **Naming**:
+`Transfer.display_name` is the title, else `Transfer.file_label`: a send's first file name ("Untitled transfer" with no file), a request's
+"Untitled request". The dashboard rows, the sent page (a title line above the heading, escaped), the download page and notices use
+`display_name`; a public request page without a title says **Upload files** (heading and browser title) and the
+password gate **File request**, never "Untitled request". **Emails**: bodies name the transfer by `display_name`
+(`services.naming.transfer_display_name`); **subjects of a send keep naming the first file** (`transfer_file_label`), never
+the title (free text; MAIL-12), and the recipient's email starts with `Title: <title>` when there is one. A request's owner-only emails
+(suspension, expiry, deleted) still name it by its title in the subject, as before (a request has no file to name it by; they are
+`file_label`). The two request emails (invite, done) show the title only when there is one (no "Untitled request" to an invitee).
+Not done: editing the title of a *sent* transfer from the dashboard or `PATCH /transfers/{id}` (a request's title is editable).
+Tests: `apps/file_transfer/tests/test_titles.py`, `admin/tests/test_filetransfer.py` and `test_filetransfer_requests.py`; AI cases FT-02, FT-54, FT-71 and MAIL-12, MAIL-27. OpenAPI 2.10.1.
+
 **Abuse reports, takedown and the block list** (issue #59, deferred from #55's phase 3 spec
 section 16): the download page has a "Report this transfer" link (an htmx-collapsed
 `AbuseReportForm`, `views.download.report_transfer`, `POST /t/<slug>/report/`) -- reason, optional
@@ -2766,7 +2789,7 @@ from the dashboard at any time. Only signed-in users create requests.
   column, not a status**), `done_by_user` / `done_by_name`, `upload_notice_due_at` / `upload_notice_since`
   (the debounce, below; a partial index on the first). A request is `ACTIVE` from creation (no draft),
   `completed_at` and `last_billed_at` set then, `max_downloads` null and `notify_on_download` false.
-  `Transfer.display_name` is the title for a request, so the emails and the metering line that name a transfer
+  `Transfer.display_name` is the title (see "Titles" below), so the emails and the metering line that name a transfer
   name it. `TransferFile` gained `uploaded_at` (set for **both** kinds by `complete_file_upload`),
   `uploader_user` (SET_NULL), `uploader_name`, `uploader_email` (copies at upload time),
   `uploader_token_hash` (an anonymous uploader's browser, the `anon_session` HMAC pattern) and
@@ -2777,7 +2800,7 @@ from the dashboard at any time. Only signed-in users create requests.
   and the transfers endpoints by id filter `kind='send'`, and `update_settings`, `add_recipients` and
   `resend_recipient` 404 a request.
 - **Creating** (`services.requests.create_request(owner, RequestOptions, ip=, charge=)`, shared by the form and
-  `POST /api/ft/requests`): the title (control characters removed, stripped, 1 to 100), the message
+  `POST /api/ft/requests`): the title (optional since issue #318: control characters removed, stripped, at most 100, blank for none; `limits.clean_title`), the message
   (`validate_message`), the audience, the invitees (the `limits.validate_recipients` rules, at most
   `logged_in_max_recipients`, normalised by `request_invites.normalize_invite_email`: domain lower-cased;
   required for "Only these people", ignored otherwise), `max_files` 1 to the site's, `max_total_size_bytes` 1

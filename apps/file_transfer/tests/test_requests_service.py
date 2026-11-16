@@ -81,16 +81,21 @@ def test_a_blocked_ip_cannot_create_one(funded_user):
 
 @pytest.mark.parametrize(
     ('title', 'message'),
-    [
-        ('', 'Give the request a title.'),
-        ('   ', 'Give the request a title.'),
-        ('x' * 101, 'Keep the title'),
-    ],
+    [('x' * 101, 'Keep the title')],
 )
-def test_the_title_is_required_and_at_most_100_characters(funded_user, title, message):
+def test_the_title_is_at_most_100_characters(funded_user, title, message):
     with pytest.raises(ValidationError) as excinfo:
         create_request(funded_user, RequestOptions(title=title))
     assert message in excinfo.value.message_dict['title'][0]
+
+
+@pytest.mark.parametrize('title', ['', '   ', '\x00\x07'])
+def test_the_title_is_optional(funded_user, title):
+    """Issue #318: a request needs no title; it is stored blank and called "Untitled request"."""
+    transfer = create_request(funded_user, RequestOptions(title=title))
+    assert transfer.title == ''
+    assert transfer.display_name == 'Untitled request'
+    assert create_request(funded_user, RequestOptions()).title == ''
 
 
 def test_control_characters_are_removed_from_the_title(make_request):
@@ -218,7 +223,7 @@ def test_a_refused_request_spends_no_budget_and_creates_nothing(funded_user, set
     with pytest.raises(ValidationError):
         create_request(
             funded_user,
-            RequestOptions(title=''),
+            RequestOptions(title='x' * 101),
             charge=lambda n: services.requests.charge_request_creation(funded_user, n),
         )
     assert limiter.peek(str(funded_user.pk), 'FT_REQUEST_CREATE_USER').remaining == 30

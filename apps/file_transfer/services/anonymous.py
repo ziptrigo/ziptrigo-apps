@@ -47,6 +47,7 @@ from .uploads import DRAFT_REUSE_WINDOW
 class AnonymousSendOptions:
     sender_email: str
     recipients: list[str]
+    title: str = ''
     message: str = ''
     expiry_choice: str = ''
     max_downloads: int | None = None
@@ -112,6 +113,7 @@ def validate_anonymous_send_options(
 ) -> list[str]:
     """Like `services.send.validate_send_options`, against the anonymous limits and the fixed
     expiry list instead. Returns the deduplicated recipient list."""
+    limits.clean_title(options.title)
     limits.validate_message(options.message)
     recipients = limits.validate_recipients_anonymous(options.recipients, settings_row)
     if not recipients:
@@ -178,6 +180,7 @@ def start_confirmation(
 
         locked.sender_email = options.sender_email
         locked.email_verification_id = verification_id
+        locked.title = limits.clean_title(options.title)
         locked.message = options.message
         locked.expires_at = resolve_expiry_anonymous(options.expiry_choice, settings_row)
         locked.max_downloads = options.max_downloads

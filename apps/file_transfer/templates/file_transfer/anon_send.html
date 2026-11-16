@@ -55,6 +55,11 @@
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ form.recipients.help_text }}</p>
         </div>
         <div>
+            <label for="{{ form.title.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Title (optional)</label>
+            {{ form.title }}
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ form.title.help_text }}</p>
+        </div>
+        <div>
             <label for="{{ form.message.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Message</label>
             {{ form.message }}
         </div>

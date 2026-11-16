@@ -24,6 +24,7 @@ The `apps/file_transfer` web UI, against the real local S3 (Floci) and real emai
   FT-64, FT-65, FT-67 to FT-69);
 - sending **without recipients** (issue #310: FT-06 and FT-66);
 - **pasting an image** from the clipboard into the send, anonymous send and request upload pages (issue #313: FT-70);
+- the **optional title** of a send and of a request (issue #318: FT-02, FT-54 and FT-71);
 - the daily jobs' visible effects (metering, suspension and its in-app notification, re-enabling
   on a top-up, the suspension grace period, the expiry reminder, natural expiry, the deferred file
   deletion after the last allowed download), triggered with shell steps because the scheduler does
@@ -265,7 +266,7 @@ read: check it on a real click, where the browser saves the file under that name
 | 1 | On `/transfer/`, click **New transfer**. | `/transfer/send/` opens. Title "Send files - ZipTrigo", heading **Send files**. |
 | 2 | Read the line under the heading. | "Your balance: 100 credits. Sending needs at least 1." -- no "Buy credits" link (the balance is enough). |
 | 3 | Look at the **Files** card. | A dashed drop zone with a cloud icon, "Drag & drop files or folders here, or", and two buttons **Choose files** and **Add folder**. The file list below it is empty. |
-| 4 | Look at the options form. | Fields in order: **Recipients** (textarea, help text "One email address per line (or separated by commas)."), **Message** (textarea), **Expiry** (select), **Max downloads** (number), **Password (optional)** (password input with an eye button), and a checkbox "Email me when a file is downloaded" that is **checked**. |
+| 4 | Look at the options form. | Fields in order: **Title (optional)** (a text box, help text "Optional. Shown on the download page and in your dashboard.", `maxlength` 100, not `required`), **Recipients** (textarea, help text "One email address per line (or separated by commas)."), **Message** (textarea), **Expiry** (select), **Max downloads** (number), **Password (optional)** (password input with an eye button), and a checkbox "Email me when a file is downloaded" that is **checked**. |
 | 5 | Open the **Expiry** select. | Options: "1 day", "5 days", "15 days", "30 days", "Set a date", "No expiration"; "No expiration" is selected. No date picker is visible. |
 | 6 | Choose "Set a date". | A date button reading "Select a date" with a calendar icon appears under the select. Click it: a calendar for the current month opens with "Previous month"/"Next month" arrows, weekday headers, days before today greyed out and disabled, and **Clear** / **Today** at the bottom. Press Escape to close it, then set Expiry back to "No expiration" (the date button hides). |
 | 7 | Type `abc` in the password field, click the eye button, then click it again. | The password becomes readable (`abc`, eye-slash icon, button label "Hide password"), then hidden again ("Show password"). Clear the field. |
@@ -1032,9 +1033,9 @@ pay). Use the **Visitor window** for the anonymous uploader and a second private
 |---|---|---|
 | 1 | Open `/transfer/`. | Next to **Send files** (green) a grey **Request files** button. Under the heading two tabs, **Sent** (current) and **Requests**. |
 | 2 | Click **Requests**. | `/transfer/?kind=request`: the **Active | Ended** control, and the empty state "No requests yet" ("Ask anyone to upload files to you with a link.") with a **Request files** button. **Ended** says "No ended requests". |
-| 3 | Click **Request files**. | `/transfer/request/new/`: heading **Request files**, "It is free to create; what they upload is stored on your account and billed to you per day like a transfer's storage." and "Your balance: N credits. A request needs at least 1." Fields: **Title**, **Message (optional)**, **Who can upload** (radios **Anyone with the link** selected, **Anyone signed in to ZipTrigo**, **Only these people**), **Max files** ("Up to 100. Blank: the site maximum."), **Max total size (GB)** ("Blank: the site maximum."), **Expiry** (No expiration selected), **Password (optional)** with a show/hide eye, and **Create the request**. The email box is hidden. |
+| 3 | Click **Request files**. | `/transfer/request/new/`: heading **Request files**, "It is free to create; what they upload is stored on your account and billed to you per day like a transfer's storage." and "Your balance: N credits. A request needs at least 1." Fields: **Title (optional)** ("Optional. Shown to the people you ask, on the upload page."), **Message (optional)**, **Who can upload** (radios **Anyone with the link** selected, **Anyone signed in to ZipTrigo**, **Only these people**), **Max files** ("Up to 100. Blank: the site maximum."), **Max total size (GB)** ("Blank: the site maximum."), **Expiry** (No expiration selected), **Password (optional)** with a show/hide eye, and **Create the request**. The email box is hidden. |
 | 4 | Pick **Only these people**. | A **Their email addresses** box appears ("One email address per line (or separated by commas). They are emailed the link, and need an account with that address to upload."). Back to **Anyone with the link**: it hides again. |
-| 5 | **Create the request** with everything empty. | Red box "Title: This field is required." and the same message under Title (red border). Nothing is created. |
+| 5 | Pick **Only these people** and **Create the request** with everything else empty. | Red box "Their email addresses: Add at least one email address." and the same message under the box. No title error: the title is optional (issue #318; FT-70 creates one without). Nothing is created. Pick **Anyone with the link** again. |
 | 6 | Title of 101 characters (`'T'.repeat(101)` typed or pasted into the box, whose `maxlength` is 100: remove it first with `document.getElementById('id_title').removeAttribute('maxlength')`). | "Title: Keep the title to 100 characters or fewer." |
 | 7 | Title `QA photos`, Max files `0`. | "Max files: Ensure this value is greater than or equal to 1." With `101`: "Max files: Max files must be between 1 and 100." |
 | 8 | Max files empty, Max total size `0`, then `21`. | "Max total size (GB): Ensure this value is greater than or equal to 0.01." then "Max total size (GB): Max total size must be at most 20.0 GB." |
@@ -1350,6 +1351,25 @@ Some **bold** text, a [link](https://example.com) and <script>document.title='PW
 | 5c | In the file manager copy a real image file (`diagram.png`, then a `.jpg`) and paste on the page background. | Rows named `<time>.png` and `<time>.jpg`: the original format and bytes are kept (compare the size with the file's). A screenshot, in contrast, ends in `.webp`. |
 | 5d | Cut the network (DevTools > Offline) in the middle of a pasted image's upload, then go online. | The row is **Paused** with "Upload interrupted by a network error." and a **Retry** button (not "Choose the file"); Retry finishes the upload. |
 | 8 | Open the anonymous send page (`/transfer/send/anon/`, if enabled) and a file request link (FT-54) in the Visitor window and paste an image on each. | Both take it the same way (hint, row, check). On a request that is **Done** (the download page) there is no hint and a paste does nothing. |
+
+### FT-71 Titles: optional on a send and on a request
+
+**Purpose:** a send and a request can have a title; without one the dashboard names a send by its first file and a request "Untitled request", and a title is never in an email subject (issue #318).
+**Preconditions:** signed in as `qa.user@example.com` with credits; the mail page `/__e2e__/mail/` works (emails.md MAIL-01). Uses fresh drafts; each send needs one uploaded file (`titled.txt`, `plain.txt`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/transfer/send/`, upload `titled.txt`. Title `Q3 <b>report</b>`, Recipients `qa.title@example.com`, **Send**. | The sent page shows "Q3 <b>report</b>" as plain text above the heading (no bold) and "Your transfer is on its way". |
+| 2 | `/transfer/` > Sent. | The row is named **Q3 <b>report</b>** (not `titled.txt`), with "1 file". |
+| 3 | Open the transfer's download link in the Visitor window. | The page heading is **Q3 <b>report</b>** (escaped text), the browser title "Q3 <b>report</b> - ZipTrigo", and the file `titled.txt` is listed below. |
+| 4 | `/__e2e__/mail/?to=qa.title@example.com` and `?to=qa.user@example.com`. | Recipient: subject `titled.txt was sent to you via ZipTrigo` (no title), body starting `Title: Q3 <b>report</b>`, a blank line, then "You have received a file: titled.txt." The sender's copy: subject `Your transfer "titled.txt" is on its way`, body `Your transfer "Q3 <b>report</b>" was sent to: ...`. |
+| 5 | New send with `plain.txt` and **no** title. | The row is named `plain.txt`; the download page heading is `plain.txt`; no `Title:` line in the recipient email; the sent page has no title line. |
+| 6 | New send: Title of 101 characters (remove the `maxlength` first, as FT-54 step 6), **Send**. | Red box "Title: Ensure this value has at most 100 characters (it has 101)."; nothing is sent, the file stays listed. |
+| 7 | `/transfer/request/new/`: leave **Title (optional)** empty, **Create the request**. | The created page says "Share this link with the people you want files from." (no title after the colon). The Requests tab names the row **Untitled request**; its Manage > Settings **Title** box is empty and not required. |
+| 8 | Open that request's link in the Visitor window. | The heading is **Upload files** (and the browser title "Upload files - ZipTrigo"); "Untitled request" appears nowhere on the public page. |
+| 9 | Settings of a titled request: clear **Title**, **Save**. | The row becomes **Untitled request**; saving works with an empty title. |
+| 10 | Anonymous sending (`/transfer/send/anon/`, if enabled in FT-31): the form has **Title (optional)** after Recipients; a title typed there shows on the anonymous sent page and the download page after confirmation. | As the logged-in send; the confirmation email subject has no title. |
+| 11 | (API / CLI, shell) With a token from `inv filetransfer login`, `inv filetransfer send local <file> --title "CLI title"` then `inv filetransfer list local`; `inv filetransfer request-create local --signed-in`; `inv filetransfer requests local`. | The send is listed as `CLI title`; the request is created with no title and listed as `(untitled)`. |
 
 ## Out of scope
 

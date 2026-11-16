@@ -9,7 +9,7 @@ from django import forms
 from ..models import FileTransferSettings
 from ..services.anonymous import AnonymousSendOptions
 from ..services.expiry_choices import anonymous_expiry_choices
-from ..services.limits import MAX_MESSAGE_LENGTH
+from ..services.limits import MAX_MESSAGE_LENGTH, TITLE_MAX_LENGTH
 from ._emails import parse_email_list
 from ._styling import StyledFormMixin
 
@@ -19,6 +19,14 @@ class AnonymousSendOptionsForm(StyledFormMixin, forms.Form):
     recipients = forms.CharField(
         widget=forms.Textarea(attrs={'rows': 3}),
         help_text='One email address per line (or separated by commas).',
+    )
+    title = forms.CharField(
+        label='Title',
+        required=False,
+        # No `max_length`: `limits.clean_title` judges the length (after cleaning), the HTML
+        # attribute is only a hint.
+        widget=forms.TextInput(attrs={'maxlength': str(TITLE_MAX_LENGTH)}),
+        help_text='Optional. Shown on the download page.',
     )
     message = forms.CharField(
         required=False,
@@ -46,6 +54,7 @@ class AnonymousSendOptionsForm(StyledFormMixin, forms.Form):
         return AnonymousSendOptions(
             sender_email=data['sender_email'],
             recipients=data['recipients'],
+            title=data.get('title', ''),
             message=data.get('message', ''),
             expiry_choice=data['expiry_choice'],
             max_downloads=data.get('max_downloads'),

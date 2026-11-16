@@ -1,6 +1,6 @@
 <div style="font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: #2c3432; line-height: 1.5;">
   <p style="margin: 0 0 4px; font-size: 18px; font-weight: 600;">Your file request is done</p>
-  <p style="margin: 0 0 16px; color: #475a53;">{{ title }}</p>
+  {% if title %}<p style="margin: 0 0 16px; color: #475a53;">{{ title }}</p>{% endif %}
   <p>{{ file_count }} {{ files_noun }}, {{ size_text }}. Marked done by {{ who }}.</p>
   <p><a href="{{ dashboard_link }}" style="color: #3b4a47;">Open your dashboard</a></p>
 </div>
