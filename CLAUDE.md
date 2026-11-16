@@ -2544,14 +2544,17 @@ download (the owner's decision), but it isn't one: no `DownloadEvent`, nothing a
      session within the window: `_password_gated_transfer(replay_file_id=...)` lets an unavailable transfer through only when `is_replayable`
      (counted in this session, files not deleted, not held, status `ACTIVE` or `EXPIRED`, never disabled, suspended, deleted or taken down), and the
      password / request access gates still apply. Previews of other files are refused then (the transfer is unavailable).
-  After it the dialog says "This counted as a download." The Download buttons hold no request in the Blob path, so a stolen link isn't needed;
+  After it the dialog says "This counted as a download." and offers **Open in new tab** (below). The Download buttons hold no request in the Blob path, so a stolen link isn't needed;
   the session record cannot be forged by a visitor (it is in the server-side session and only set by a request that passed the gates).
-- ***Infra follow-up, not done here*** (the bucket's CORS lives in the `infra` repo): for the Blob path in production the file transfer bucket's CORS
-  needs a rule allowing **`AllowedMethods: GET`** from **`AllowedOrigins: <BASE_URL>`** (the site's origin; `app.ziptrigo.com` and
-  `app-staging.ziptrigo.com`), with no special headers needed (the dialog sends none; `ExposeHeaders` is not needed). The existing rule is
-  documented for uploads only (PUT, `x-amz-checksum-sha256`, `ETag`, issue #60). **Until then the fallback is in force**: the full file is shown from
-  the bucket's URL and the Download that follows is still one download (the guard), at the price of the file being transferred twice. The e2e fake
-  bucket answers `GET, PUT` CORS and the browser test covers both paths.
+- *The bucket's CORS* (the `infra` repo, `apps/ziptrigo-apps/main.tf`) already allows **`GET`** (with `PUT` and `HEAD`) from each
+  environment's origin (`app.ziptrigo.com`, `app-staging.ziptrigo.com`), checked on the live buckets on 2026-11-16, so the Blob path works in
+  both; nothing was changed there. The fallback (the bucket's URL shown directly, the Download after it still one download through the guard,
+  the file transferred twice) only applies if that rule is ever narrowed. The e2e fake bucket answers `GET, PUT` CORS and the browser test
+  covers both paths.
+- *Open in new tab.* Once the whole image or PDF shows, the footer has **Open in new tab** (`#preview-open-tab`, a `target="_blank"
+  rel="noopener"` link to the very address the dialog shows: the `blob:` URL of the fetched file, or in the fallback the bucket's URL), so the
+  new tab costs no request and no second download. Not offered for text. A `blob:` tab stops working on reload once the dialog revokes its URL
+  (moving to another file or closing the dialog); it shows the file until then.
 - *Deploy notes.* After deploying, run **`./manage.py file_transfer_backfill_previews` once** so files uploaded before this shipped get their
   `preview_type` (it reads the first bytes of every active, disabled or suspended transfer's stored file; idempotent; one ranged S3 request per
   file). Until then those files simply have no Preview button. The preview columns have database defaults, so the old container keeps working
