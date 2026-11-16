@@ -1231,6 +1231,7 @@ one`; a second user (Session B) with a task.
 | 4 | Click in the comment box, type "my note", paste text. | The text is inserted as usual. |
 | 5 | Paste a screenshot with the focus in the comment box (and, separately, an image copied together with text, e.g. spreadsheet cells). | The screenshot becomes a chip under the comment form (a file of the comment, not of the task); the text in the box is unchanged. The cells paste as text, and no file is added. **Comment** saves it with the file, listed under that comment, and Attachments still shows only the first pasted file. |
 | 6 | Paste a screenshot while editing an existing comment (Edit, focus in its box). | It is added to that comment when saved. |
+| 6b | Click in the description editor (or the title box, the subtask box) and paste a screenshot alone. | Nothing is added: no row, no attachment (it would be billed storage); the page background still takes a screenshot. |
 | 7 | Complete T (Complete). | The Attachments block and its drop zone are gone: a paste outside a comment box does nothing; a paste into the comment box still attaches a file to a comment. |
 | 8 | Move T to the Trash, open it. | No drop zone, no comment form: pasting does nothing. |
 | 9 | Pause storage (TODO-31, frozen account) and open an open task. | "Uploads are paused until you add credits" and no paste hint; pasting does nothing. |

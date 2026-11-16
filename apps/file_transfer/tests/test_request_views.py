@@ -80,7 +80,7 @@ def test_an_open_request_shows_the_upload_page(client, make_request):
     assert 'Your name (optional)' in content
     assert 'Mark as done' in content and 'Report this link' in content
     # An image can be pasted too (issue #313), the same as a dropped file.
-    assert 'initClipboardPaste(upload.handleFileSelection' in content
+    assert 'upload.handleFileSelection(files, { retain: true })' in content
     assert 'data-paste-hint' in content
 
 

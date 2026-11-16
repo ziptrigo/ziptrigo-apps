@@ -1172,6 +1172,7 @@ Receipt date column and filters, the receipt page, the trash and the vendors pag
 | 3 | Paste a screenshot. | A row `YYYY-MM-DD-HH-mm-SS.webp` (the time of the paste) goes through Waiting, Uploading, Finishing and ends "Uploaded. View receipt"; it is read like any receipt (the fake model answers Staples). |
 | 4 | Open the receipt. | The preview shows the pasted image; **Download** gives a `.webp`. |
 | 5 | Paste a screenshot with the account **frozen** (RCPT-44: storage paused). | The hint is not shown and the paste does nothing, like a drop. |
+| 5b | Copy a real `.png` file in the file manager and paste; then a real `.gif` file. | The PNG is added as `<time>.png` (the original); the GIF, which Receipts cannot read, becomes `<time>.webp`. |
 | 6 | Paste an image with a balance too low to read it (RCPT-42). | Same as an uploaded file: stored, "waiting for credits". |
 
 ## Out of scope

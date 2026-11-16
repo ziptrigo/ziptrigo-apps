@@ -40,7 +40,9 @@ function initFileTransferUpload(options) {
     const submitBtn = options.submitBtn;
     const csrftoken = options.csrftoken;
     const onFirstFileAdded = options.onFirstFileAdded;
-    // file_id -> { name, size, uploaded, progress, clientLastModified, resumable }
+    // file_id -> { name, size, uploaded, progress, clientLastModified, resumable, retained }
+    // (`retained`: the `File` itself, kept only for a pasted image -- issue #313 -- which has no file on
+    // disk to choose again, so its paused row offers "Retry" instead of "Choose the file".)
     const files = new Map();
     // Existing, not-yet-uploaded files from a previous page load, available to be matched against
     // a re-selected `File` (see `findResumeMatch`). `matched` guards against matching the same row
@@ -108,7 +110,9 @@ function initFileTransferUpload(options) {
         }
         setRowError(
             fileId,
-            'Upload interrupted by a network error. Select the same file again to resume.',
+            (entry && entry.retained)
+                ? 'Upload interrupted by a network error.'
+                : 'Upload interrupted by a network error. Select the same file again to resume.',
             true
         );
     }
@@ -195,8 +199,16 @@ function initFileTransferUpload(options) {
                 const pick = document.createElement('button');
                 pick.type = 'button';
                 pick.className = 'underline font-medium';
-                pick.textContent = 'Choose the file';
+                pick.textContent = entry.retained ? 'Retry' : 'Choose the file';
                 pick.addEventListener('click', function () {
+                    if (entry.retained) {
+                        const candidate = resumeCandidates.find(function (c) { return c.fileId === fileId; });
+                        if (candidate) candidate.matched = true;
+                        resumeFile(fileId, entry.retained, candidate).catch(function () {
+                            interrupted(fileId, entry.name);
+                        });
+                        return;
+                    }
                     const input = document.getElementById('file-input');
                     if (input) input.click();
                 });
@@ -311,7 +323,7 @@ function initFileTransferUpload(options) {
         return false;
     }
 
-    async function uploadFile(file) {
+    async function uploadFile(file, retain) {
         const isFirstFile = files.size === 0;
         const addResp = await fetch(base + '/files/', {
             method: 'POST',
@@ -339,6 +351,7 @@ function initFileTransferUpload(options) {
             progress: 0,
             clientLastModified: file.lastModified,
             resumable: false,
+            retained: retain ? file : null,
         });
         renderRow(fileId, files.get(fileId));
         if (isFirstFile && typeof onFirstFileAdded === 'function') onFirstFileAdded();
@@ -418,7 +431,9 @@ function initFileTransferUpload(options) {
         if (!ok && candidate) candidate.matched = false;
     }
 
-    function handleFileSelection(fileList) {
+    // `opts.retain`: keep each `File` in memory so a paused row can be retried (a pasted image).
+    function handleFileSelection(fileList, opts) {
+        const retain = !!(opts && opts.retain);
         const pageError = document.getElementById('upload-error');
         if (pageError) pageError.textContent = '';
         Array.from(fileList).forEach(function (file) {
@@ -429,7 +444,7 @@ function initFileTransferUpload(options) {
                     interrupted(candidate.fileId, file.name);
                 });
             } else {
-                uploadFile(file).catch(function (error) {
+                uploadFile(file, retain).catch(function (error) {
                     // `fetch` rejects with a TypeError when the network fails; anything else (the
                     // file couldn't be read or hashed) gets a neutral message.
                     const why = error instanceof TypeError ? 'network error' : 'something went wrong';

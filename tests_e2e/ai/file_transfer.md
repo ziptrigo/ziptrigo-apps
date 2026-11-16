@@ -1346,6 +1346,9 @@ Some **bold** text, a [link](https://example.com) and <script>document.title='PW
 | 5 | Focus the Message field of the send form, copy some text and paste. | The text goes into the field as usual; no file is added. |
 | 6 | Paste a PDF file copied in the file manager. | Nothing is added (only images are taken); the Choose files button is the way. |
 | 7 | **Send** the transfer with the pasted images and open the link in the Visitor window. | The files are listed and download with their timestamp names; the downloaded `.webp` opens as the image that was pasted. |
+| 5b | Focus the Message (or recipients) box and paste an image alone (a screenshot). | Nothing is added and nothing is uploaded: the browser does what it does with an image in a text box. |
+| 5c | In the file manager copy a real image file (`diagram.png`, then a `.jpg`) and paste on the page background. | Rows named `<time>.png` and `<time>.jpg`: the original format and bytes are kept (compare the size with the file's). A screenshot, in contrast, ends in `.webp`. |
+| 5d | Cut the network (DevTools > Offline) in the middle of a pasted image's upload, then go online. | The row is **Paused** with "Upload interrupted by a network error." and a **Retry** button (not "Choose the file"); Retry finishes the upload. |
 | 8 | Open the anonymous send page (`/transfer/send/anon/`, if enabled) and a file request link (FT-54) in the Visitor window and paste an image on each. | Both take it the same way (hint, row, check). On a request that is **Done** (the download page) there is no hint and a paste does nothing. |
 
 ## Out of scope

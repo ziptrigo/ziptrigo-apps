@@ -294,10 +294,13 @@
         // Core's `drop_zone.js`; an empty drop is ignored here (no alert), as it always was.
         initDropZone(dropZone, addFiles, { onEmpty: function () {} });
         // Core's `clipboard_paste.js`: an image pasted from the clipboard is added like a picked file.
-        // Receipts cannot read a GIF, so only JPEG and WebP are kept as they are (a PNG or a GIF
-        // becomes WebP); the checks of `addFiles` still apply.
+        // Receipts cannot read a GIF: a copied image file keeps its bytes when it is a type Receipts reads
+        // (`accept`), a screenshot-style bitmap keeps only JPEG and WebP (a PNG becomes WebP), and anything
+        // else becomes WebP; the checks of `addFiles` still apply.
         initClipboardPaste(addFiles, {
             keep: ['image/jpeg', 'image/webp'],
+            accept: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'],
+            skipEditable: true,
             hint: document.getElementById('paste-hint'),
         });
     }

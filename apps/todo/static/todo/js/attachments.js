@@ -52,7 +52,12 @@
         // Core's `clipboard_paste.js`: an image pasted anywhere on the page outside a comment form (those
         // register themselves, `comment_files.js`) is attached to the task like a picked file.
         if (window.initClipboardPaste) {
-            initClipboardPaste(uploader.addFiles, { hint: document.getElementById('attachment-paste-hint') });
+            // `skipEditable`: an image pasted into the description or title editor, the subtask or reminder fields
+            // is not an attachment (the comment forms take theirs through their own registration).
+            initClipboardPaste(uploader.addFiles, {
+                hint: document.getElementById('attachment-paste-hint'),
+                skipEditable: true,
+            });
         }
     }
 })();

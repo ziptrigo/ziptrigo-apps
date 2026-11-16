@@ -24,7 +24,7 @@ def _assert_upload_controls(html: str) -> None:
     # Pasting an image (issue #313): the same callback as the drop zone, with its hint in the zone.
     assert 'core/js/clipboard_paste.js' in html
     assert html.index('core/js/clipboard_paste.js') < html.index('initClipboardPaste(')
-    assert 'initClipboardPaste(upload.handleFileSelection' in html
+    assert 'upload.handleFileSelection(files, { retain: true })' in html
     assert (
         html.index('id="drop-zone"') < html.index('data-paste-hint') < html.index('id="file-list"')
     )

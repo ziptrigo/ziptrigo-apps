@@ -18,10 +18,29 @@ from tests_e2e.conftest import ReceiptsServer
 WEBP_NAME = r'\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(-\d+)?\.webp'
 
 # Dispatches a paste on `selector` (the body when empty) and answers whether the page took it
-# (`preventDefault`). `what`: 'image' (a real PNG), 'text', 'pdf' or 'image+text'.
+# (`preventDefault`). `what`: 'image' (a real PNG), 'text', 'pdf', 'image+text', 'two-images', or
+# 'files': then `specs` lists `{name, type}` images (`image/png`, `image/jpeg` or `image/gif`).
 PASTE_JS = """
-async ([selector, what]) => {
+async ([selector, what, specs]) => {
     const dt = new DataTransfer();
+    if (what === 'files') {
+        const GIF = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), (c) => c.charCodeAt(0));
+        for (const spec of specs) {
+            let blob;
+            if (spec.type === 'image/gif') {
+                blob = new Blob([GIF], { type: 'image/gif' });
+            } else {
+                const canvas = document.createElement('canvas');
+                canvas.width = 40;
+                canvas.height = 30;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#336699';
+                ctx.fillRect(0, 0, 40, 30);
+                blob = await new Promise((resolve) => canvas.toBlob(resolve, spec.type));
+            }
+            dt.items.add(new File([blob], spec.name, { type: spec.type }));
+        }
+    }
     if (what === 'image' || what === 'image+text' || what === 'two-images') {
         const count = what === 'two-images' ? 2 : 1;
         for (let i = 0; i < count; i++) {
@@ -49,12 +68,24 @@ async ([selector, what]) => {
 """
 
 
-def _paste(page: Page, what: str, selector: str = '') -> bool:
-    return page.evaluate(PASTE_JS, [selector, what])
+def _paste(page: Page, what: str, selector: str = '', specs: list[dict] | None = None) -> bool:
+    return page.evaluate(PASTE_JS, [selector, what, specs or []])
 
 
-def _open_new_task(page: Page, server: ReceiptsServer, title: str) -> None:
-    server.login(page)
+def _paste_files(page: Page, *specs: tuple[str, str], selector: str = '') -> bool:
+    return _paste(page, 'files', selector, [{'name': n, 'type': t} for n, t in specs])
+
+
+def _row_names(page: Page, rows_selector: str) -> list[str]:
+    rows = page.locator(rows_selector)
+    return [
+        rows.nth(i).locator('span').first.inner_text().split(' ')[0] for i in range(rows.count())
+    ]
+
+
+def _open_new_task(page: Page, server: ReceiptsServer, title: str, *, login: bool = True) -> None:
+    if login:
+        server.login(page)
     page.goto(f'{server.url}/todo/all/')
     page.fill('#quick-title', title)
     page.click('#quick-add-form button[type="submit"]')
@@ -154,3 +185,130 @@ def test_a_paste_without_an_image_adds_nothing_on_the_task_page(
     assert _paste(page, what) is False
     expect(page.locator('#attachment-uploads li')).to_have_count(0)
     expect(page.locator('#attachment-list')).to_contain_text('No files attached.')
+
+
+STAMP = r'\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}'
+
+
+def test_file_transfer_keeps_formats_and_real_files(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/transfer/send/')
+    rows = page.locator('#file-list li')
+
+    # Anonymous bitmaps: a JPEG and a GIF are kept as they are, a PNG becomes WebP.
+    assert _paste_files(page, ('image.jpg', 'image/jpeg')) is True
+    assert _paste_files(page, ('image.gif', 'image/gif')) is True
+    assert _paste_files(page, ('image.png', 'image/png')) is True
+    # A real file copied in the file manager (its own name): the original, whatever the type.
+    assert _paste_files(page, ('diagram.png', 'image/png')) is True
+    expect(rows).to_have_count(4)
+    expect(rows.locator('.fa-check')).to_have_count(4)
+    # Rows are added as each upload starts, so compare the set of extensions, not their order.
+    names = _row_names(page, '#file-list li')
+    assert all(re.fullmatch(STAMP + r'(-\d+)?\.[a-z]+', n) for n in names), names
+    assert sorted(n.rsplit('.', 1)[1] for n in names) == ['gif', 'jpg', 'png', 'webp'], names
+
+
+def test_receipts_converts_a_gif_but_keeps_a_real_png(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/upload/')
+    rows = page.locator('#upload-list li')
+
+    assert _paste_files(page, ('image.gif', 'image/gif')) is True  # not readable: WebP
+    assert _paste_files(page, ('scan.png', 'image/png')) is True  # a real PNG: readable, kept
+    assert _paste_files(page, ('image.jpg', 'image/jpeg')) is True
+    expect(rows).to_have_count(3)
+    names = _row_names(page, '#upload-list li')
+    assert all(re.fullmatch(STAMP + r'(-\d+)?\.[a-z]+', n) for n in names), names
+    assert sorted(n.rsplit('.', 1)[1] for n in names) == ['jpg', 'png', 'webp'], names
+
+
+def test_a_browser_that_cannot_write_webp_keeps_the_png(
+    page: Page, receipts_server: ReceiptsServer
+):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/transfer/send/')
+    # Safari answers a PNG when asked for WebP: stand in for it.
+    page.evaluate(
+        """() => {
+            const original = HTMLCanvasElement.prototype.toBlob;
+            HTMLCanvasElement.prototype.toBlob = function (cb, type, quality) {
+                return original.call(this, cb, type === 'image/webp' ? 'image/png' : type, quality);
+            };
+        }"""
+    )
+    assert _paste_files(page, ('image.png', 'image/png')) is True
+    rows = page.locator('#file-list li')
+    expect(rows).to_have_count(1)
+    expect(rows.first.locator('.fa-check')).to_be_visible()
+    assert re.fullmatch(STAMP + r'\.png', _row_names(page, '#file-list li')[0])
+
+
+def test_the_innermost_within_takes_the_paste(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/upload/')
+    taken = page.evaluate(
+        """async () => {
+            const outer = document.createElement('div');
+            const inner = document.createElement('div');
+            const field = document.createElement('textarea');
+            inner.appendChild(field);
+            outer.appendChild(inner);
+            document.body.appendChild(outer);
+            const got = { outer: [], inner: [] };
+            initClipboardPaste((f) => got.outer.push(...f.map((x) => x.name)), { within: outer });
+            initClipboardPaste((f) => got.inner.push(...f.map((x) => x.name)), { within: inner });
+            const dt = new DataTransfer();
+            dt.items.add(new File([new Uint8Array([1])], 'image.gif', { type: 'image/gif' }));
+            field.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+            await new Promise((r) => setTimeout(r, 300));
+            return got;
+        }"""
+    )
+    assert len(taken['inner']) == 1 and taken['outer'] == []
+
+
+def test_pages_ignore_an_image_pasted_into_a_text_field(
+    page: Page, receipts_server: ReceiptsServer
+):
+    # File transfer: the message / recipients boxes are not an upload target.
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/transfer/send/')
+    field = page.locator('textarea').first
+    expect(field).to_have_count(1)
+    assert _paste_files(page, ('image.png', 'image/png'), selector='textarea') is False
+    expect(page.locator('#file-list li')).to_have_count(0)
+    # ...while the page itself still takes it.
+    assert _paste_files(page, ('image.png', 'image/png')) is True
+    expect(page.locator('#file-list li')).to_have_count(1)
+
+    # To-do: a screenshot pasted into the subtask or title box is not billed as an attachment.
+    _open_new_task(page, receipts_server, 'No attachment from a field', login=False)
+    expect(page.locator('#attachment-paste-hint')).to_be_visible()
+    assert _paste_files(page, ('image.png', 'image/png'), selector='#subtask-title') is False
+    assert _paste_files(page, ('image.png', 'image/png'), selector='#task-title') is False
+    expect(page.locator('#attachment-uploads li')).to_have_count(0)
+    expect(page.locator('#attachment-list')).to_contain_text('No files attached.')
+    # The comment box still takes one (its own registration).
+    form = page.locator('#task-comments form[action*="/comments/"]').last
+    expect(form.locator('[data-comment-files]')).to_have_attribute('data-files-ready', '1')
+    assert _paste_files(page, ('image.png', 'image/png'), selector='textarea[name="body"]') is True
+    expect(form.locator('[data-files-attached] li')).to_have_count(1)
+
+
+def test_a_paused_pasted_upload_can_be_retried(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/transfer/send/')
+    # The network fails once the file is added: the row pauses.
+    page.route('**/files/*/parts/', lambda route: route.abort())
+    assert _paste_files(page, ('image.png', 'image/png')) is True
+    row = page.locator('#file-list li').first
+    expect(row).to_contain_text('Paused')
+    retry = row.get_by_role('button', name='Retry')
+    expect(retry).to_be_visible()
+    expect(row.get_by_role('button', name='Choose the file')).to_have_count(0)
+
+    # The network is back: Retry reuses the pasted file, no picking.
+    page.unroute('**/files/*/parts/')
+    retry.click()
+    expect(row.locator('.fa-check')).to_be_visible()

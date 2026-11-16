@@ -24,9 +24,13 @@
     - In a text field the text wins: if the clipboard holds text as well as an image (copying cells from
       a spreadsheet does), the paste goes to the field as usual and nothing is uploaded.
     - Name: the local time of the paste, YYYY-MM-DD-HH-mm-SS.<ext>. Two in the same second get "-2", "-3".
-    - Format: the browser hands over a re-encoded copy (a screenshot is always a PNG), so the original
-      format is not available. A PNG is saved as WebP at 85% quality (much smaller); a JPEG, WebP or GIF
-      is kept as it is (a GIF keeps its animation). A browser that cannot write WebP keeps the PNG.
+    - Format: a file copied in the file manager arrives with its own name and bytes, so it is the original
+      and is kept as it is (only the name becomes the time, with its own extension). A screenshot or "Copy
+      image" arrives as an anonymous, re-encoded bitmap (always a PNG), so the original format is not
+      available: a PNG is saved as WebP at 85% quality (much smaller); a JPEG, WebP or GIF is kept as it is
+      (a GIF keeps its animation). A browser that cannot write WebP keeps the PNG. A page that cannot read
+      a type (Receipts and a GIF) converts it to WebP.
+    - A paste into a text field of the page (the message box, a description editor) is not an upload.
     - From then on it is exactly a picked file: same checks (size, type), same upload, same progress
       row, same error line.
     - No permission prompt: the paste event hands the clipboard to the page because the user pressed the
@@ -178,7 +182,8 @@
                     <thead class="bg-gray-100 dark:bg-gray-800 text-left"><tr><th class="px-4 py-2">In the clipboard</th><th class="px-4 py-2">Result</th></tr></thead>
                     <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                         <tr><td class="px-4 py-2">A screenshot or an image copied from a page or an app</td><td class="px-4 py-2">Uploaded as <code class="font-mono">2026-11-15-21-03-07.webp</code> (PNG becomes WebP, 85%)</td></tr>
-                        <tr><td class="px-4 py-2">A JPEG, WebP or GIF file</td><td class="px-4 py-2">Uploaded as it is, with the time as its name (<code class="font-mono">.jpg</code>, <code class="font-mono">.webp</code>, <code class="font-mono">.gif</code>)</td></tr>
+                        <tr><td class="px-4 py-2">An image file copied in the file manager (<code class="font-mono">diagram.png</code>)</td><td class="px-4 py-2">The original: same bytes and format, the time as its name (<code class="font-mono">2026-11-15-21-03-07.png</code>)</td></tr>
+                        <tr><td class="px-4 py-2">A JPEG, WebP or GIF copied as an image</td><td class="px-4 py-2">Uploaded as it is, with the time as its name (<code class="font-mono">.jpg</code>, <code class="font-mono">.webp</code>, <code class="font-mono">.gif</code>)</td></tr>
                         <tr><td class="px-4 py-2">Two images in the same second</td><td class="px-4 py-2"><code class="font-mono">...-07.webp</code> and <code class="font-mono">...-07-2.webp</code></td></tr>
                         <tr><td class="px-4 py-2">Text, HTML, or the path of a file as text</td><td class="px-4 py-2">Ignored: the page does nothing, and a text field gets its text as usual</td></tr>
                         <tr><td class="px-4 py-2">An image and text together, pasted into a text field</td><td class="px-4 py-2">The text is pasted; no upload</td></tr>

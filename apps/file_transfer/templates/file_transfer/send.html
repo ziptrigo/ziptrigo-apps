@@ -133,7 +133,11 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     initDropZone(dropZone, upload.handleFileSelection);
     // Paste an image from the clipboard (core's `clipboard_paste.js`): the same path as a picked file.
-    initClipboardPaste(upload.handleFileSelection, { hint: document.getElementById('paste-hint') });
+    // `skipEditable`: an image pasted into the message or recipients box is not an upload. `retain` keeps the
+    // pasted File so a paused row can be retried (there is no file on disk to choose again).
+    initClipboardPaste(function (files) {
+        upload.handleFileSelection(files, { retain: true });
+    }, { hint: document.getElementById('paste-hint'), skipEditable: true });
 });
 </script>
 {% endblock %}
