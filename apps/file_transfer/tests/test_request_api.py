@@ -108,7 +108,7 @@ def test_create_defaults_use_the_site_maximum(client, auth_headers):
 @pytest.mark.parametrize(
     ('payload', 'text'),
     [
-        ({'title': ''}, 'title: Give the request a title.'),
+        ({'title': 'x' * 101}, 'title: Keep the title to 100 characters or fewer.'),
         ({'upload_audience': 'selected'}, 'emails: Add at least one email address.'),
         ({'max_files': 0}, 'max_files: Max files must be between 1 and 100.'),
         (
@@ -172,7 +172,7 @@ def test_a_refused_create_spends_no_budget(client, funded_user, auth_headers, se
     from apps.core.ratelimit import limiter
 
     settings.RATELIMIT_ENABLE = True
-    _create(client, auth_headers, title='')
+    _create(client, auth_headers, title='x' * 101)
     assert limiter.peek(str(funded_user.pk), 'FT_REQUEST_CREATE_USER').remaining == 30
 
 

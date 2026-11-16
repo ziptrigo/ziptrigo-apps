@@ -12,7 +12,7 @@ from apps.core.services.email import send_email
 from apps.core.services.email_verification import EmailVerificationContext
 
 from ..models import Transfer
-from .naming import transfer_display_name
+from .naming import transfer_display_name, transfer_file_label
 
 #: `core.services.email_verification` scopes "only the latest verification is valid" and the
 #: resend cooldown to `(email, purpose)` -- this is file_transfer's own namespace within that,
@@ -98,6 +98,6 @@ def send_anonymous_sender_copy(transfer_id: str) -> None:
     )
     send_email(
         to=transfer.sender_email,
-        subject=f'Your transfer "{name}" is on its way',
+        subject=f'Your transfer "{transfer_file_label(transfer)}" is on its way',
         text_body=body,
     )

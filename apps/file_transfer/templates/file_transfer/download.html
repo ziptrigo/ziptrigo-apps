@@ -1,9 +1,10 @@
 {% extends 'core/base.html' %}
-{% load local_time %}
+{% load local_time static %}
 
 {% block title %}{{ transfer.display_name }} - ZipTrigo{% endblock %}
 
 {% block content %}
+{% if previews %}<script src="{% static 'file_transfer/js/preview.js' %}"></script>{% endif %}
 <div class="container mx-auto px-4 py-8 max-w-2xl" x-data="{ reportOpen: false, qrOpen: false }">
     <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
         <h1 class="text-2xl font-semibold tracking-tight mb-4 text-gray-900 dark:text-gray-100">{{ transfer.display_name }}</h1>
@@ -28,27 +29,61 @@
         </div>
 
         {% comment %}The file list (names and sizes) is always shown -- only the download itself is
-           password-gated (spec section 3).{% endcomment %}
+           password-gated (spec section 3). Previews (issue #311): the line above the list says they
+           exist; each previewable file has a Preview button and its name opens the same dialog
+           (below); nothing opens by itself, even for one file. The type of a file comes from the
+           server, which read it from the file's bytes -- never from its name. While a password is
+           needed the buttons are not rendered and the page carries no preview URL.{% endcomment %}
+        {% if preview_hint %}
+        <p class="text-sm rounded-lg px-3 py-2 mb-2 bg-sage-50 text-sage-800 border border-sage-200 dark:bg-sage-900/40 dark:text-sage-100 dark:border-sage-700" id="preview-hint">
+            <i class="fas fa-eye mr-1.5" aria-hidden="true"></i>{{ preview_hint }}
+        </p>
+        {% endif %}
+        <div{% if previews %} x-data="ftPreview" @keydown.window="onKey($event)"{% endif %}>
         <ul class="divide-y divide-gray-200 dark:divide-gray-700 mb-6">
-            {% for file in files %}
-            <li class="py-3 flex items-center justify-between">
-                <div class="min-w-0">
+            {% for row in rows %}
+            {% with file=row.file %}
+            <li class="py-3 flex items-center gap-3" data-file-id="{{ file.id }}">
+                <span class="h-9 w-9 shrink-0 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300" aria-hidden="true"><i class="{{ row.icon }}"></i></span>
+                <div class="min-w-0 flex-1">
+                    {% if row.previewable and unlocked %}
+                    <button type="button" @click="open('{{ file.id }}')"
+                            class="block max-w-full text-left text-sm font-medium truncate text-gray-900 dark:text-gray-100 hover:underline hover:text-sage-700 dark:hover:text-sage-200">{{ file.name }}</button>
+                    {% else %}
                     <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{{ file.name }}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ file.size|filesizeformat }}{% if show_uploaders %} &middot; {{ file.uploader_label }}{% endif %}</p>
+                    {% endif %}
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ file.size|filesizeformat }}{% if show_uploaders %} &middot; {{ file.uploader_label }}{% endif %}{% if preview_count and not row.previewable %} &middot; no preview{% endif %}</p>
                 </div>
                 {% if unlocked %}
-                <a href="{% url 't:download-file' transfer.slug file.id %}"
-                   class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 whitespace-nowrap hover:bg-sage-400">
-                    <i class="fas fa-download mr-1"></i>Download
-                </a>
+                <div class="flex gap-2 shrink-0">
+                    {% if row.previewable %}
+                    <button type="button" @click="open('{{ file.id }}')" aria-label="Preview {{ file.name }}"
+                            class="btn px-3 py-1.5 rounded-lg text-sm whitespace-nowrap border border-sage-300 text-sage-800 bg-white hover:bg-sage-50 dark:bg-gray-800 dark:text-sage-100 dark:border-sage-600 dark:hover:bg-gray-700">
+                        <i class="fas fa-eye mr-1" aria-hidden="true"></i>Preview
+                    </button>
+                    {% endif %}
+                    {% comment %}After "View full" fetched the file, this saves what the browser already has (no
+                       second request, so no second download); otherwise it is the ordinary link.{% endcomment %}
+                    <a href="{% url 't:download-file' transfer.slug file.id %}"{% if previews %} @click="saveFile($event, '{{ file.id }}')"{% endif %}
+                       class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 whitespace-nowrap hover:bg-sage-400">
+                        <i class="fas fa-download mr-1"></i>Download
+                    </a>
+                </div>
                 {% else %}
                 <span class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 text-gray-400 whitespace-nowrap">
                     <i class="fas fa-lock mr-1"></i>Locked
                 </span>
                 {% endif %}
             </li>
+            {% endwith %}
             {% endfor %}
         </ul>
+
+        {% if previews %}
+        {{ previews|json_script:"ft-previews" }}
+        {% include 'file_transfer/partials/preview_dialog.html' %}
+        {% endif %}
+        </div>
 
         {% if unlocked and files|length > 1 %}
         <div class="mb-6">

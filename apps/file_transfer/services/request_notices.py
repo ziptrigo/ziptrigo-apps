@@ -108,7 +108,7 @@ def _send_one(pk: object, now) -> bool:
         notifications.notify(
             transfer.owner_id,
             source='file_transfer',
-            title=_title(len(files), transfer.title),
+            title=_title(len(files), transfer.display_name),
             body=_uploader_names(files),
             url=requests_dashboard_url(),
             key=key,

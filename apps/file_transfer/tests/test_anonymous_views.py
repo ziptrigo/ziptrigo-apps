@@ -110,6 +110,43 @@ def test_start_confirmation_rejects_an_authenticated_user_even_via_direct_post(
     assert transfer.status == TransferStatus.DRAFT
 
 
+def test_the_anonymous_options_form_still_refuses_an_empty_recipient_list(
+    client, anon_enabled, fake_storage
+):
+    """Recipients became optional for a logged-in sender (issue #310); anonymous sending keeps
+    requiring one, and nothing is started without it."""
+    client.get(reverse('file_transfer:anon-send'))
+    transfer = Transfer.objects.get(owner__isnull=True, status=TransferStatus.DRAFT)
+    added = _post_json(
+        client,
+        reverse('file_transfer:anon-send-add-file', args=[transfer.id]),
+        {'name': 'a.bin', 'size': 10},
+    ).json()
+    from ..models import TransferFile
+
+    file = TransferFile.objects.get(id=added['file_id'])
+    fake_storage.seed_object(file.storage_key, 10)
+    _post_json(
+        client,
+        reverse('file_transfer:anon-send-complete-file', args=[transfer.id, file.id]),
+        {'parts': [{'PartNumber': 1, 'ETag': 'e1'}]},
+    )
+
+    for recipients in ('', '   \n  '):
+        response = client.post(
+            reverse('file_transfer:anon-send-confirm', args=[transfer.id]),
+            data={
+                'sender_email': 'sender@example.com',
+                'recipients': recipients,
+                'expiry_choice': '1',
+            },
+        )
+        assert response.status_code == 422
+        assert 'Recipients: This field is required.' in response.content.decode()
+        transfer.refresh_from_db()
+        assert transfer.status == TransferStatus.DRAFT
+
+
 def test_session_data_survives_login_mid_flow(client, anon_enabled, fake_storage, user):
     """`django.contrib.auth.login()` rotates the session's own key (`cycle_key()`) but *keeps*
     its data -- since draft ownership lives entirely in that data (a per-draft token, never the

@@ -29,8 +29,8 @@ from django.db.models import DateTimeField, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from ..models import FileTransferSettings, Transfer, TransferFile
-from . import limits, uploads
+from ..models import FileTransferSettings, PreviewStatus, Transfer, TransferFile
+from . import limits, renditions, uploads
 from .actions import _require_actionable, _require_not_held
 from .blocklist import check_not_blocked
 from .downloads import is_available
@@ -204,7 +204,13 @@ def complete_file(
             now = timezone.now()
             done = TransferFile.objects.filter(
                 pk=fresh.pk, transfer=locked, uploaded=False, upload_id=upload_id
-            ).update(checksum=info.checksum_sha256, uploaded=True, uploaded_at=now, upload_id='')
+            ).update(
+                checksum=info.checksum_sha256,
+                uploaded=True,
+                uploaded_at=now,
+                upload_id='',
+                preview_type=fresh.preview_type,
+            )
             if not done:
                 gone = True
             else:
@@ -277,6 +283,11 @@ def _remove(
         if fresh is None:
             return
         key, upload_id, uploaded = fresh.storage_key, fresh.upload_id, fresh.uploaded
+        previews = (
+            renditions.preview_prefix(locked.pk, fresh.pk)
+            if fresh.preview_status in (PreviewStatus.READY, PreviewStatus.BUILDING)
+            else ''
+        )
         fresh.delete()
         refresh_size(locked)
         invalidate_zip(locked, storage=storage)
@@ -288,3 +299,10 @@ def _remove(
             logger.exception('Could not abort the unfinished upload of %s', key)
     if uploaded:
         _delete_object(key, storage)
+    if previews:
+        # The downsized preview pages (a build still running deletes its own output when it finds
+        # the row gone, see `renditions.run_build`).
+        try:
+            storage.delete_prefix(previews)
+        except Exception:
+            logger.exception('Could not delete the preview pages under %s', previews)

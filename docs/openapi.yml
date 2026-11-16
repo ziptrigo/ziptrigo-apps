@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.9.0
+  version: 2.11.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -6673,9 +6673,12 @@ components:
 
         `selected` (and ignored otherwise); `max_files` and `max_total_size_bytes` left out mean the
 
-        site''s maximum; the expiry is as in `PATCH /transfers`.'
+        site''s maximum; the expiry is as in `PATCH /transfers`. `title` is optional (issue #318): up to
+
+        100 characters, blank for none.'
       properties:
         title:
+          default: ''
           title: Title
           type: string
         message:
@@ -6717,8 +6720,6 @@ components:
           default: ''
           title: Password
           type: string
-      required:
-      - title
       title: FileRequestCreateSchema
       type: object
     FileRequestListSchema:
@@ -6752,9 +6753,9 @@ components:
 
         is, an explicit `null` clears `max_files` and `max_total_size_bytes` (the site''s maximum
 
-        again). `emails` replaces the whole invitee list (new addresses are emailed). A blank
+        again). `title` may be blank to remove it. `emails` replaces the whole invitee list (new
 
-        `password` is a no-op; `remove_password: true` clears it.'
+        addresses are emailed). A blank `password` is a no-op; `remove_password: true` clears it.'
       properties:
         title:
           anyOf:
@@ -6897,6 +6898,9 @@ components:
         status:
           title: Status
           type: string
+        title:
+          title: Title
+          type: string
         display_name:
           title: Display Name
           type: string
@@ -6956,6 +6960,7 @@ components:
       required:
       - id
       - status
+      - title
       - display_name
       - message
       - recipients
@@ -7050,13 +7055,28 @@ components:
     FinalizeTransferSchema:
       description: 'Body for `POST /transfers/{id}/send`: the same options `SendOptionsForm` collects on the
 
-        web send page, applied and validated by the same service (`services.finalize_send`).'
+        web send page, applied and validated by the same service (`services.finalize_send`).
+
+
+        `recipients` is optional (issue #310): with none, nobody is emailed -- the sender gets the
+
+        link in the response (`download_url`) and in their own copy of the email, and shares it.
+
+
+        `title` is optional (issue #318): up to 100 characters, shown on the download page and in the
+
+        dashboard (`display_name` is the title, else the first file''s name). Never in an email subject.'
       properties:
         recipients:
+          default: []
           items:
             type: string
           title: Recipients
           type: array
+        title:
+          default: ''
+          title: Title
+          type: string
         message:
           default: ''
           title: Message
@@ -7085,8 +7105,6 @@ components:
           default: true
           title: Notify On Download
           type: boolean
-      required:
-      - recipients
       title: FinalizeTransferSchema
       type: object
     AddRecipientsSchema:

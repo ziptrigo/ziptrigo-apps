@@ -13,8 +13,11 @@ from django.template.defaultfilters import filesizeformat
 
 from ..models import FileTransferSettings, Transfer, TransferFile
 
-#: Message body (spec section 2 defaults): plain text, no title field.
+#: Message body (spec section 2 defaults): plain text.
 MAX_MESSAGE_LENGTH = 2000
+
+#: A transfer's or a request's title (issue #318): optional, at most this many characters.
+TITLE_MAX_LENGTH = 100
 
 #: A base64-encoded SHA-256 digest is always 32 raw bytes.
 _SHA256_DIGEST_SIZE = 32
@@ -32,6 +35,26 @@ def _count_text(count: int, noun: str) -> str:
 def validate_message(message: str) -> None:
     if len(message) > MAX_MESSAGE_LENGTH:
         raise ValidationError(f'Message must be at most {MAX_MESSAGE_LENGTH} characters.')
+
+
+def clean_title(raw: object) -> str:
+    """A transfer's or request's optional title (issue #318) as one line of visible text: control
+    and format characters dropped (zero-width spaces, bidirectional overrides: a title made of them
+    would look empty, or read backwards, on a page other people open), white space collapsed and
+    trimmed, at most 100 characters. Blank is fine and means "no title". A refusal is a
+    `ValidationError` keyed `title`; this is the one place the length is judged (the forms leave it
+    to the service, so a raw count can't refuse what the service would accept)."""
+    text = ''.join(
+        ' ' if ch.isspace() else ch
+        for ch in str(raw or '')
+        if ch.isspace() or unicodedata.category(ch) not in ('Cc', 'Cf')
+    )
+    text = ' '.join(text.split())
+    if len(text) > TITLE_MAX_LENGTH:
+        raise ValidationError(
+            {'title': f'Keep the title to {TITLE_MAX_LENGTH} characters or fewer.'}
+        )
+    return text
 
 
 def validate_filename(name: str) -> str:

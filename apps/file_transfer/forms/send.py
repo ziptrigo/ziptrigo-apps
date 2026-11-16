@@ -14,16 +14,26 @@ from ..services.expiry_choices import (
     NO_EXPIRATION_CHOICE,
     end_of_day,
 )
-from ..services.limits import MAX_MESSAGE_LENGTH
+from ..services.limits import MAX_MESSAGE_LENGTH, TITLE_MAX_LENGTH
 from ..services.send import SendOptions
 from ._emails import parse_email_list
 from ._styling import StyledFormMixin
 
 
 class SendOptionsForm(StyledFormMixin, forms.Form):
+    title = forms.CharField(
+        label='Title',
+        required=False,
+        # No `max_length`: `limits.clean_title` judges the length (after cleaning), the HTML
+        # attribute is only a hint.
+        widget=forms.TextInput(attrs={'maxlength': str(TITLE_MAX_LENGTH)}),
+        help_text='Optional. Shown on the download page and in your dashboard.',
+    )
     recipients = forms.CharField(
+        required=False,
         widget=forms.Textarea(attrs={'rows': 3}),
-        help_text='One email address per line (or separated by commas).',
+        help_text='One email address per line (or separated by commas). Leave it empty to just '
+        'get a link to share yourself.',
     )
     message = forms.CharField(
         required=False,
@@ -53,6 +63,7 @@ class SendOptionsForm(StyledFormMixin, forms.Form):
         data = self.cleaned_data
         return SendOptions(
             recipients=data['recipients'],
+            title=data.get('title', ''),
             message=data.get('message', ''),
             expiry_choice=data['expiry_choice'],
             expiry_date=data.get('expiry_date'),
