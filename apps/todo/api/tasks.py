@@ -259,6 +259,10 @@ def list_tasks(
             'states': _states(state),
             'priorities': _priorities(priority),
             'labels': _labels(label),
+            # The view decides about archived projects (`_view_queryset` leaves them out of `all`,
+            # `today` and `upcoming`); a filter on Closed, the Trash or a parent's subtasks must
+            # not drop their tasks.
+            'include_archived': ['1'],
             'date_range': [date_range or ''],
             'date_from': [str(parse_date('date_from', date_from) or '')],
             'date_to': [str(parse_date('date_to', date_to) or '')],

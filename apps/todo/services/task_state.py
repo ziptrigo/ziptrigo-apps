@@ -26,7 +26,7 @@ def lock_tasks(*pks: UUID) -> dict[UUID, Task]:
     write that locks more than one task takes the user's `TodoAccount` row first
     (`accounts.lock_account`), then the task acted on, then its subtasks, then its dependents."""
     rows: Iterable[Task] = (
-        Task.objects.select_related('user')
+        Task.objects.select_related('user', 'project')  # `write_state` asks whether it is archived
         .select_for_update(of=('self',))
         .filter(pk__in=pks)
         .order_by('pk')

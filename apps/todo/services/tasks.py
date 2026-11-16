@@ -403,7 +403,8 @@ def create_task(
 
     `project` (one of the user's, or its id) files the task (issue #314); a subtask is always in
     its parent's, whatever is passed. An archived project is refused unless
-    `allow_archived_project` (the next occurrence of a repeating task stays where it was).
+    `allow_archived_project` (the next occurrence of a repeating task stays where it was). A
+    subtask added to a parent in an archived project is allowed and is muted with it.
 
     `email_from` and `email_from_authenticated` (a task made from an email, issue #186) are stored
     on the task so its page needs no lookup of the email: the From address and whether SES
@@ -447,6 +448,18 @@ def create_task(
             cleaned_parent = clean_parent(user, _locked_parent(cleaned_parent))
             if cleaned_parent is not None:
                 cleaned.project = cleaned_parent.project  # as it is now
+        if cleaned_parent is None and cleaned.project is not None:
+            # As it is now: a project deleted or archived since the fields were checked is a
+            # refusal, not a foreign-key error or a task filed where it can't be seen. The next
+            # occurrence of a repeating task goes to no project if its project is gone.
+            try:
+                cleaned.project = projects.clean_project(
+                    user, cleaned.project.pk, allow_archived=allow_archived_project
+                )
+            except ValidationError:
+                if not allow_archived_project:
+                    raise
+                cleaned.project = None
         if (
             dates.open_tasks(user).count() >= settings.max_open_tasks_per_user
         ):  # under the lock, so racing creations can't pass the cap together
@@ -654,11 +667,16 @@ def update_task(
             if moves and current.parent_id is not None
             else None
         )
+        left_project = current.project if 'project' in values else None
         for name, value in values.items():
             setattr(task, name, value)
         task.save(update_fields=[*values, 'updated_at'])
         if labels is not None:
             task.labels.set(labels)
+        if 'project' in values and new_parent is not None:
+            # It followed its new parent into that parent's project: logged, and the reminders an
+            # archived project held are released (`services.projects`).
+            projects.followed_parent(task, left_project, values['project'], new_parent)
         _record_update(
             task,
             current,

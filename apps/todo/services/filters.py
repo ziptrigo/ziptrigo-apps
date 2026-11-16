@@ -358,8 +358,11 @@ class FilterParams:
             condition &= Q(completed_at__isnull=True) | ~Q(resolution=Resolution.WONT_DO)
         today = user_today(user)
         if self.date_range == 'overdue':  # a muted task is never overdue
-            condition &= Q(due_date__lt=today, completed_at__isnull=True) & ~Q(
-                state__in=MUTED_STATES
+            # ... and neither is a task of an archived project, even one the filter names
+            condition &= (
+                Q(due_date__lt=today, completed_at__isnull=True)
+                & ~Q(state__in=MUTED_STATES)
+                & not_archived()
             )
         elif self.date_range == 'no_date':
             condition &= Q(due_date__isnull=True)
