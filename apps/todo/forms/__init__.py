@@ -1,6 +1,6 @@
 from .comment import CommentForm
 from .label import LabelForm
-from .project import MoveForm, ProjectForm
+from .project import MoveForm, ProjectForm, SectionForm
 from .reminder import ReminderForm
 from .settings import InboxSettingsForm, SettingsForm
 from .task import (
@@ -28,6 +28,7 @@ __all__ = [
     'ProjectForm',
     'ReminderForm',
     'ResolutionForm',
+    'SectionForm',
     'SettingsForm',
     'StateForm',
     'SubtaskForm',

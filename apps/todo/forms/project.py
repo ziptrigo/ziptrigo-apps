@@ -1,6 +1,6 @@
 from django import forms
 
-from ..limits import PROJECT_NAME_MAX
+from ..limits import PROJECT_NAME_MAX, SECTION_NAME_MAX
 
 
 class ProjectForm(forms.Form):
@@ -22,3 +22,15 @@ class MoveForm(forms.Form):
     says whether it is one of the user's)."""
 
     project = forms.CharField(label='Project', required=False, max_length=36)
+    #: A section of that project (an id, or nothing for none); only read when the request has it.
+    section = forms.CharField(label='Section', required=False, max_length=36)
+
+
+class SectionForm(forms.Form):
+    """Adding or renaming a section of a project (the rules are `services.projects`')."""
+
+    name = forms.CharField(
+        label='Name',
+        max_length=SECTION_NAME_MAX,
+        error_messages={'required': 'Name is required.'},
+    )

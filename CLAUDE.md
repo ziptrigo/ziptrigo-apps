@@ -55,7 +55,7 @@ apps/short_url/       Short URLs (issue #162): links with editable destinations,
 apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks with per-user numbers
                       from 1000, labels, due dates in the user's time zone, task states and
                       resolutions (#272), Today / Upcoming / All / Closed / Trash pages, task billing (a monthly free allowance, then a price),
-                      projects (#314, part 1 of 3: a task is in at most one, archive and delete),
+                      projects (#314, parts 1 and 2 of 3: a task is in at most one, sections, a manual order, archive and delete),
                       tasks added by email, the JWT API (`/api/todo/`) and the `admin/todo.py` CLI
                       (see "To-do").
 apps/notes/           Notes (issue #260, PRs 2 to 6 of 6): Markdown notes with tags, versions
@@ -5022,10 +5022,10 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
 
 #### Projects
 
-Issue #314, **part 1 of 3** (`models/project.py`, `services/projects.py`, `views/projects.py`,
-`forms/project.py`, migration `0017_projects`; the mock all three parts were designed from is
-`docs/ui-design/mocks/todo-projects.html`). Part 2 is sections inside a project and a manual order
-on the project page; part 3 is projects in the JWT API and the CLI. Projects are **free** (the Costs
+Issue #314, **parts 1 and 2 of 3** (`models/project.py`, `services/projects.py`, `views/projects.py`,
+`forms/project.py`, migrations `0017_projects` and `0018_sections`; the mock all three parts were designed from is
+`docs/ui-design/mocks/todo-projects.html`). Part 2 added sections inside a project and a manual order
+on the project page ("Sections and the manual order" below); part 3 is projects in the JWT API and the CLI. Projects are **free** (the Costs
 line says so).
 
 - **Model.** `Project` (UUID, `user` with `related_name='todo_projects'`, `name` up to
@@ -5092,7 +5092,7 @@ line says so).
   and redirect). `todo:project` `/todo/projects/<uuid>/`: the name, counts and overdue count, the
   progress bar, the rendered description, an Edit form (name, colour, description; `project-edit`
   with `ctx=page`, an `HX-Redirect` back), the quick-add box with the project preselected, and its
-  tasks (`?sort=`, `?dir=`, `?closed=1` for the closed ones after the open, `?page=`; **a plain
+  tasks (see "Sections and the manual order"; **a plain
   page**, the sort bar and pager are links, no list partial). Rows there use `view='project'`
   (`belongs`: any non-trashed task stays, so a completed row is struck in place) and a task added
   from its quick-add box answers `HX-Redirect` to the page. An archived project's page has no quick
@@ -5127,14 +5127,71 @@ line says so).
   does (`_view_queryset`; the filters themselves run with `include_archived`, so a filter on
   `view=closed`, the Trash or a parent's subtasks never drops them), and `FilterParamsSchema` has `projects` and `include_archived` (so the app's `PATCH` of a
   filter, which replaces `params` as a whole, does not drop them; a malformed id is a 422). The
-  activity log's `kind` enum gained `project`. OpenAPI 2.11.0. A task's JSON has no `project` yet.
+  activity log's `kind` enum gained `project` and `section`. OpenAPI 2.12.0. A task's JSON has no `project` yet.
 - **Admin.** Read-only `ProjectAdmin` (archived mark and filter, task count); `TaskAdmin` lists
   `project`. Deleting a user takes their projects (`todo` is in `CASCADE_WITH_USER_APP_LABELS`).
-- **Not done:** sections and a manual order on the project page (part 2), the API and CLI (part 3),
+- **Sections and the manual order** (part 2).
+  - *Model.* `Section` (UUID, `project` `CASCADE` with `related_name='sections'`, `name` up to
+    `SECTION_NAME_MAX` 80, unique in its project ignoring case by `todo_section_name_project`,
+    `position`); at most `MAX_SECTIONS_PER_PROJECT` (50, `limits.py`). `Task.section` (nullable,
+    `SET_NULL`): always a section of the task's project, or none; **a subtask has its parent's**, kept
+    equal like the project. `Task.project_position` (`db_default=0`) is the manual order of a
+    project's page, **a fourth column** (Today, All and a parent's subtasks keep theirs), an order
+    among the tasks of one section of the project (or of its tasks with no section).
+  - *Services* (in `services/projects.py`). `create_section`, `rename_section`, `delete_section`
+    (its tasks stay in the project with no section, at the end of that group, each with an automatic
+    log entry), `reorder_sections`, `list_sections`; all three writes refuse an archived project
+    (`Unarchive the project to change its sections.`). `clean_section(project, section | id | None)`:
+    one of another project, an unknown or malformed id, and any section without a project are all
+    `section: Unknown section.` `create_task(section=...)` (and `check_new_task`) puts a new task at
+    the end of its section (`projects.next_position`); the next occurrence of a repeating task keeps
+    the section and goes to its end. `set_section(task, section | None)` (`check_section` without
+    writes) moves a top-level task and its subtasks (`A subtask is in its parent's section. Move the
+    parent instead.`). **`move_task` to another project leaves the section** (and puts the task at the
+    end of the new project's unsectioned tasks); `delete_project` clears it. `reorder_tasks(user,
+    project, section | None, ids)` writes `project_position` 0, 1, 2... for the rows of **one list**
+    in the order sent (ids that are not the user's non-trashed tasks of the project are ignored); a
+    row listed that is in another section **joins this one**, with its subtasks, and that move is
+    logged, and its subtasks take its place in the order (so they stay next to it); a subtask listed
+    alone in another section is skipped (it stays with its parent). The section is read again under
+    the account lock, as it is in `create_task` (a section deleted meanwhile is "Unknown section.",
+    never a foreign-key error; the next occurrence of a repeating task then goes to no section).
+  - *Activity log.* `EventKind.SECTION` (`from`, `to`, `via`, `reason: 'deleted'`): "Moved to the
+    section X", "Moved from the section X to Y", "Removed from the section X", "The section X was
+    deleted: the task is in no section" (automatic). Reordering inside a list records nothing.
+  - *The project page.* The open tasks are **grouped by section** (the ones with no section first,
+    with no heading), **not paged**: up to `PROJECT_PAGE_LIMIT` (500), then a line pointing at the
+    search. The sort bar is `PROJECT_SORTS`: **Manual** (the default, no direction; `order_tasks(...,
+    'project_manual')`), then Due date, Priority, Newest, Title, which sort inside each section and
+    show no handles. `?closed=1` adds a **Closed** block of its own below, 50 a page. In Manual on a
+    project that isn't archived each list is a sortable (`data-scope="project"`, `data-project`,
+    `data-section`) posting to `todo:reorder`, whose `scope=project` branch calls `reorder_tasks`;
+    with sections the lists share `data-sort-group`, so a row is **dragged into another section**
+    (core's `initSortableList` gained `group` and `canLeave`: the list a row lands in posts its
+    order; a subtask row, `data-subtask`, can't leave its list). The arrow keys move a row inside its
+    list; changing section by keyboard is the task page's select. **After a row lands in another
+    list the page reloads** (`fromOtherList` in `onReorder`: its subtasks moved with it and both counts
+    changed). **A list cut at the cap is not dragged** (numbering only the rows shown would let the
+    hidden ones land among them). A section's header has its own
+    handle (`.section-handle`, `data-handle`; `todo:section-reorder`), a collapse button (remembered
+    in the browser's `localStorage`, key `todo-section-<id>`; **its Alpine state is `expanded`, never
+    `open`**, which would shadow the confirmation modal's and stop it opening from inside a section), the count of its open tasks, rename in place and delete (the
+    confirmation modal), and each section ends with a one-line "Add a task to <name>" form. **Add
+    section** is below the last one. `section-add`, `section-edit`, `section-delete`,
+    `section-reorder` under `/todo/projects/<id>/sections/`: `HX-Redirect` back with a flash, 422
+    into `#todo-msg`, 404 for another user's project or a section of another project; all spend
+    `TODO_EDIT_USER`, validated first.
+  - *The task page.* A **Section** select next to Project when the project has sections (posted with
+    `project` to `todo:move`, which applies the section only when the request has the key **and the
+    project stays the same** (the two selects are one form, so a new project arrives with the old
+    project's section), in one transaction with the move); the top line reads "In X / Design". The Move dialog on rows chooses
+    a project only.
+  - *Not in part 2:* a section filter in search, sections in the API (part 3), a board view.
+- **Not done:** the API and CLI (part 3),
   filing emailed tasks (they are in no project), reading a project from the title, bulk moves, and
   the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
   To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
-- **Tests.** `apps/todo/tests/test_projects.py`; the AI plan has TODO-63 to TODO-66 and ADM-65.
+- **Tests.** `apps/todo/tests/test_projects.py`; the AI plan has TODO-63 to TODO-67 and ADM-65.
 
 #### Comments and references
 
@@ -7758,8 +7815,8 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   short link zone (#170), sized well above what a crowd behind one shared address produces.
   `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
   `receipts.py` and `filetransfer.py` still carry their own copies of it.
-- To-do projects (#314) are built in three parts; only the first exists (projects, the project page,
-  moving, archive and delete, the search filter). Sections with a manual order, and the API and CLI,
+- To-do projects (#314) are built in three parts; the first two exist (projects, the project page,
+  moving, archive and delete, the search filter; sections and the manual order). The API and CLI
   are still to come: until then the Android app and `inv todo` neither show nor set a task's project.
 - To-do (#161) is built in waves. Only the foundation (#178: tasks, subtasks, labels, numbering, task
   billing, the web pages) and repeating tasks (#179) exist; comments, search, reminders, attachments,

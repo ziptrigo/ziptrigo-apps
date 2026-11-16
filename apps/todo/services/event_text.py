@@ -101,6 +101,21 @@ def _created(data: dict[str, Any]) -> str:
     return text
 
 
+def _section(data: dict[str, Any]) -> str:
+    old, new = data.get('from'), data.get('to')
+    if data.get('reason') == 'deleted':
+        return f'The section {old} was deleted: the task is in no section'
+    if old and new:
+        text = f'Moved from the section {old} to {new}'
+    elif new:
+        text = f'Moved to the section {new}'
+    else:
+        text = f'Removed from the section {old}'
+    if data.get('via'):
+        text += f' with its parent, {_ref(data["via"])}'
+    return text
+
+
 def _project(data: dict[str, Any]) -> str:
     old, new = data.get('from'), data.get('to')
     if data.get('reason') == 'deleted':
@@ -232,6 +247,8 @@ def describe(event: Any) -> str:
             return 'Made a top-level task'
         case EventKind.PROJECT:
             return _project(data)
+        case EventKind.SECTION:
+            return _section(data)
         case EventKind.ATTACHMENT_ADDED | EventKind.ATTACHMENT_REMOVED:
             added = kind == EventKind.ATTACHMENT_ADDED
             where = ' to a comment' if data.get('comment') and added else ''

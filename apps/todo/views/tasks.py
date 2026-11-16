@@ -38,6 +38,7 @@ from ..forms import (
 )
 from ..forms.reminder import PRESETS as REMINDER_PRESETS
 from ..forms.reminder import UNITS as REMINDER_UNITS
+from ..limits import PROJECT_PAGE_LIMIT
 from ..models import Label, Project, ReminderChannel, Resolution, Task, TodoSettings
 from ..services import (
     SUBTASKS_DONE,
@@ -51,6 +52,7 @@ from ..services import (
     open_tasks,
     order_tasks,
     postpone_task,
+    projects,
     recurrence,
     referenced_by,
     reminders,
@@ -143,6 +145,9 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
         'labels': labels,
         'selected_label_ids': [str(label.pk) for label in task.labels.all()],
         'todo_projects': list(Project.objects.filter(user=user, archived_at__isnull=True)),
+        'project_sections': projects.list_sections(task.project)
+        if task.project is not None
+        else [],
         'today': user_today(user),
         'trash_view': task.is_trashed,
     }
@@ -279,6 +284,7 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
             state=form.requested_state(),
             blocked_by=form.requested_blockers(),
             project=form.requested_project(),
+            section=form.requested_section(),
             **form.changes(),
         )
     except InsufficientCreditsError:
@@ -803,11 +809,44 @@ def reschedule_overdue_view(request: AuthenticatedHttpRequest) -> HttpResponse:
 # -- Manual order --------------------------------------------------------------------------------
 
 
+def _reorder_project(request: AuthenticatedHttpRequest) -> HttpResponse:
+    """`reorder_view` for one list of a project's page. What can be refused without writing (the
+    ids, the project, an archived project, the section) is, before the edit budget is charged."""
+    ids: list[UUID] = []
+    for raw in request.POST.getlist('ids[]')[:PROJECT_PAGE_LIMIT]:
+        try:
+            ids.append(UUID(raw))
+        except ValueError:
+            return refuse(request, 'Could not read the new order.')
+    try:
+        project = Project.objects.select_related('user').get(
+            user=request.user, pk=request.POST.get('project', '')
+        )
+    except Project.DoesNotExist, ValueError, ValidationError:
+        return refuse(request, 'Project: Unknown project.')
+    try:
+        projects.require_active(project)
+        projects.clean_section(project, request.POST.get('section') or None)
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc))
+    if (response := limited(request, 'TODO_EDIT_USER')) is not None:
+        return response
+    try:
+        projects.reorder_tasks(request.user, project, request.POST.get('section') or None, ids)
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc))
+    return HttpResponse(status=204)
+
+
 @login_required
 @require_POST
 def reorder_view(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """Write the manual order SortableJS posts: `scope` (`today` or `subtasks`), `ids[]` and, for
-    subtasks, `parent` (the parent's number). Answers 204; nothing on the page changes."""
+    """Write the manual order SortableJS posts: `scope` (`today`, `all`, `subtasks` or `project`),
+    `ids[]` and, for subtasks, `parent` (the parent's number); for a project's page, `project` and
+    `section` (the list the rows are in: a row dragged in from another section joins it). Answers
+    204; nothing on the page changes."""
+    if request.POST.get('scope') == 'project':
+        return _reorder_project(request)
     if (response := limited(request, 'TODO_EDIT_USER')) is not None:
         return response
     ids: list[UUID] = []

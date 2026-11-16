@@ -40,6 +40,7 @@ from ..models import (
     Recurrence,
     RecurrenceMode,
     Resolution,
+    Section,
     Task,
     TaskSource,
     TaskState,
@@ -246,6 +247,7 @@ class _CleanedTask:
     state: str = TaskState.TODO
     blockers: list[Task] = field(default_factory=list)
     project: Project | None = None
+    section: Section | None = None
 
 
 def _clean_new_task(
@@ -265,6 +267,7 @@ def _clean_new_task(
     blocked_by: Iterable[int] = (),
     project: Project | str | UUID | None = None,
     allow_archived_project: bool = False,
+    section: Section | str | UUID | None = None,
 ) -> _CleanedTask:
     """Validate the fields of a new task (no writes, no locks): what `create_task` and
     `check_new_task` share."""
@@ -283,6 +286,12 @@ def _clean_new_task(
         cleaned_parent.project
         if cleaned_parent is not None
         else projects.clean_project(user, project, allow_archived=allow_archived_project)
+    )
+    # Likewise its section; a top-level task's must be a section of its project.
+    cleaned_section = (
+        cleaned_parent.section
+        if cleaned_parent is not None
+        else projects.clean_section(cleaned_project, section)
     )
     if (cleaned_rule or recurrence is not None) and cleaned_parent is not None:
         raise _error('rrule', 'A subtask cannot repeat.')
@@ -303,6 +312,7 @@ def _clean_new_task(
         state=cleaned_state,
         blockers=cleaned_blockers,
         project=cleaned_project,
+        section=cleaned_section,
     )
 
 
@@ -321,6 +331,7 @@ def check_new_task(
     state: str = TaskState.TODO,
     blocked_by: Iterable[int] = (),
     project: Project | str | UUID | None = None,
+    section: Section | str | UUID | None = None,
 ) -> date | None:
     """Everything `create_task` would refuse that can be told without writing anything, in the same
     order: the fields (`ValidationError`), a creation blocked by an unpaid repeating task
@@ -347,6 +358,7 @@ def check_new_task(
         state=state,
         blocked_by=blocked_by,
         project=project,
+        section=section,
     )
     settings = TodoSettings.load()
     account = get_account(user)
@@ -376,6 +388,7 @@ def create_task(
     blocked_by: Iterable[int] = (),
     project: Project | str | UUID | None = None,
     allow_archived_project: bool = False,
+    section: Section | str | UUID | None = None,
     source: str = TaskSource.WEB,
     email_from: str = '',
     email_from_authenticated: bool = False,
@@ -405,6 +418,7 @@ def create_task(
     its parent's, whatever is passed. An archived project is refused unless
     `allow_archived_project` (the next occurrence of a repeating task stays where it was). A
     subtask added to a parent in an archived project is allowed and is muted with it.
+    `section` (a section of that project, or its id) puts it in a section, at the end of it.
 
     `email_from` and `email_from_authenticated` (a task made from an email, issue #186) are stored
     on the task so its page needs no lookup of the email: the From address and whether SES
@@ -431,6 +445,7 @@ def create_task(
         blocked_by=blocked_by,
         project=project,
         allow_archived_project=allow_archived_project,
+        section=section,
     )
     cleaned_title, cleaned_description = cleaned.title, cleaned.description
     cleaned_priority, cleaned_time = cleaned.priority, cleaned.due_time
@@ -448,6 +463,7 @@ def create_task(
             cleaned_parent = clean_parent(user, _locked_parent(cleaned_parent))
             if cleaned_parent is not None:
                 cleaned.project = cleaned_parent.project  # as it is now
+                cleaned.section = cleaned_parent.section
         if cleaned_parent is None and cleaned.project is not None:
             # As it is now: a project deleted or archived since the fields were checked is a
             # refusal, not a foreign-key error or a task filed where it can't be seen. The next
@@ -460,6 +476,16 @@ def create_task(
                 if not allow_archived_project:
                     raise
                 cleaned.project = None
+                cleaned.section = None  # a section belongs to its project
+        if cleaned_parent is None and cleaned.section is not None:
+            # As it is now: a section deleted since the fields were checked is a refusal, not a
+            # foreign-key error; the next occurrence of a repeating task goes to no section then.
+            try:
+                cleaned.section = projects.clean_section(cleaned.project, cleaned.section.pk)
+            except ValidationError:
+                if not allow_archived_project:
+                    raise
+                cleaned.section = None
         if (
             dates.open_tasks(user).count() >= settings.max_open_tasks_per_user
         ):  # under the lock, so racing creations can't pass the cap together
@@ -475,6 +501,12 @@ def create_task(
             number=number,
             parent=cleaned_parent,
             project=cleaned.project,
+            section=cleaned.section,
+            project_position=(
+                projects.next_position(cleaned.project, cleaned.section)
+                if cleaned.project is not None
+                else 0
+            ),
             title=cleaned_title,
             description=cleaned_description,
             priority=cleaned_priority,
@@ -651,6 +683,8 @@ def update_task(
                 parent_project_id = locked[new_parent.pk].project_id
                 if parent_project_id != current.project_id:
                     values['project'] = locked[new_parent.pk].project
+                if locked[new_parent.pk].section_id != current.section_id:
+                    values['section'] = locked[new_parent.pk].section
         description_changed = (
             'description' in values and values['description'] != current.description
         )

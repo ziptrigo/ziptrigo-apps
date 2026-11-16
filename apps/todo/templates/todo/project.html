@@ -4,9 +4,10 @@
 {% block title %}{{ project.name }} - To-do - ZipTrigo{% endblock %}
 
 {% comment %} One project's page (issue #314): its name, colour and counts, progress, the Markdown description (edited in
-   place), the quick-add box bound to the project, and its tasks (open ones; `?closed=1` adds the closed ones after them).
+   place), the quick-add box bound to the project, and its open tasks grouped by section (`?closed=1` adds a Closed block).
    An archived project is read-only here: no quick add, an Unarchive button and the note about what archiving does. The
-   list is a plain page (sort, closed and page are links), its rows answer like any list's (`view='project'`). {% endcomment %}
+   list is a plain page (sort, closed and page are links), its rows answer like any list's (`view='project'`). Sections are
+   added, renamed, reordered and deleted here; in the Manual sort rows are dragged within and between them. {% endcomment %}
 {% block todo_content %}
 <a href="{% url 'todo:projects' %}{% if project.is_archived %}?tab=archived{% endif %}"
    class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Projects</a>
@@ -117,30 +118,152 @@
     <span class="text-gray-500 dark:text-gray-400">Sort by</span>
     {% for link in sort_links %}
     <a href="{{ page_url }}{% if link.query %}?{{ link.query }}{% endif %}"
-       {% if link.active %}aria-current="true" title="Click to sort {% if link.direction == 'asc' %}descending{% else %}ascending{% endif %}"{% endif %}
+       {% if link.active %}aria-current="true"{% if link.direction %} title="Click to sort {% if link.direction == 'asc' %}descending{% else %}ascending{% endif %}"{% elif link.key == 'manual' %} title="Drag the rows to put them in your own order"{% endif %}{% endif %}
        class="rounded-md {% if link.active %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ link.label }}{% if link.active and link.direction %}<i class="fas fa-arrow-{% if link.direction == 'asc' %}up{% else %}down{% endif %} ml-1 text-xs" aria-hidden="true"></i><span class="sr-only">, sorted {% if link.direction == 'asc' %}ascending{% else %}descending{% endif %}</span>{% endif %}</a>
     {% endfor %}
     <a href="{{ page_url }}{% if closed_toggle_query %}?{{ closed_toggle_query }}{% endif %}"
        class="ml-auto rounded-md text-sage-600 dark:text-sage-300 hover:underline">{% if show_closed %}Hide closed{% else %}Show closed{% endif %}</a>
 </div>
 
+{% if truncated %}
+<p class="mb-3 text-sm text-gray-500 dark:text-gray-400">Showing the first {{ page_limit }} open tasks. <a href="{% url 'todo:search' %}?projects={{ project.pk }}" class="text-sage-600 dark:text-sage-300 hover:underline">Search this project</a> for the rest.</p>
+{% endif %}
+
+{% comment %} The tasks with no section come first, without a heading. Each list is its own sortable (Manual sort): its rows
+   are dragged within it and, with sections, into another list (`data-sort-group`); the order is posted with `project` and
+   `section` (tasks.js). A subtask row keeps its parent's section (`data-subtask`: it can't be dropped in another list). {% endcomment %}
 <div id="task-list" class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
-    <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
-        {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700{% if has_sections %} min-h-[2.75rem]{% endif %}"{% if not has_sections %} data-empty-list{% endif %}
+        {% if sortable %}data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="project" data-project="{{ project.pk }}" data-section=""{% if has_sections %} data-sort-group="project-{{ project.pk }}"{% endif %}{% endif %}>
+        {% for task in unsectioned %}{% include 'todo/partials/task_row.html' with oob_nav=False sortable=sortable %}
         {% empty %}
-        <li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">{% if project.is_archived or show_closed %}No tasks in this project.{% else %}No open tasks in this project. Add one above.{% endif %}</li>
+        {% if not has_sections %}<li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">{% if project.is_archived %}No open tasks in this project.{% else %}No open tasks in this project. Add one above.{% endif %}</li>{% endif %}
         {% endfor %}
-        <template data-empty-state><li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">No open tasks in this project.</li></template>
+        {% if not has_sections %}<template data-empty-state><li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">No open tasks in this project.</li></template>{% endif %}
     </ul>
 </div>
 
-{% if page_obj.paginator.num_pages > 1 %}
-<div class="mt-6 flex items-center justify-between text-sm">
-    <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
-    <div class="flex gap-4">
-        {% if page_obj.has_previous %}<a href="{{ page_url }}?{{ prev_query }}" class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-chevron-left mr-1 text-xs" aria-hidden="true"></i>Previous</a>{% endif %}
-        {% if page_obj.has_next %}<a href="{{ page_url }}?{{ next_query }}" class="text-sage-600 dark:text-sage-300 hover:underline">Next<i class="fas fa-chevron-right ml-1 text-xs" aria-hidden="true"></i></a>{% endif %}
-    </div>
+<div id="project-sections"
+     {% if sortable %}data-sortable data-handle=".section-handle" data-reorder-url="{% url 'todo:section-reorder' project.pk %}"{% endif %}>
+    {% for section, section_tasks in section_groups %}
+    {% comment %}`data-task-id` is what the shared reorder script posts as `ids[]` (here: the section's id). Collapsed
+       sections are remembered in this browser (localStorage), not on the account. The state is `expanded`, never `open`:
+       the confirmation modal around the page has its own `open`, which a section's would shadow (the modal would not
+       open from a button inside the section).{% endcomment %}
+    <section data-task-id="{{ section.pk }}" data-section-id="{{ section.pk }}" aria-labelledby="section-title-{{ section.pk }}" class="mt-6"
+             x-data="{ expanded: localStorage.getItem('todo-section-{{ section.pk }}') !== '0', editing: false,
+                       toggle() { this.expanded = !this.expanded; localStorage.setItem('todo-section-{{ section.pk }}', this.expanded ? '1' : '0') } }">
+        <div class="flex items-center gap-2 px-1">
+            {% if sortable %}
+            <span class="section-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
+                  data-name="{{ section.name }}" aria-label="Reorder the section {{ section.name }}: use the up and down arrow keys" title="Drag to reorder sections, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+            {% endif %}
+            <div x-show="!editing" class="flex min-w-0 flex-1 items-center gap-2">
+                <button type="button" @click="toggle()" :aria-expanded="expanded" aria-controls="section-body-{{ section.pk }}"
+                        class="btn flex min-w-0 items-center gap-2 rounded-md text-left">
+                    <i class="fas fa-chevron-right text-xs text-gray-500 dark:text-gray-400 transition-transform" :class="expanded ? 'rotate-90' : ''" aria-hidden="true"></i>
+                    <h2 id="section-title-{{ section.pk }}" class="min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100">{{ section.name }}</h2>
+                </button>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ section_tasks|length }}<span class="sr-only"> open task{{ section_tasks|length|pluralize }}</span></span>
+            </div>
+            {% if not project.is_archived %}
+            <form x-show="editing" style="display: none" method="post" action="{% url 'todo:section-edit' project.pk section.pk %}"
+                  hx-post="{% url 'todo:section-edit' project.pk section.pk %}" hx-target="#todo-msg" hx-swap="innerHTML"
+                  hx-disabled-elt="find button[type='submit']"
+                  class="flex min-w-0 flex-1 items-center gap-2" @keydown.escape="editing = false; todoCancelEdit($el, '#todo-msg')">
+                {% csrf_token %}
+                <label for="section-name-{{ section.pk }}" class="sr-only">Section name</label>
+                <input id="section-name-{{ section.pk }}" name="name" type="text" value="{{ section.name }}" maxlength="80" required
+                       x-effect="if (editing) $nextTick(() => $el.focus())"
+                       class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
+                <button type="submit" aria-label="Save the section" title="Save"
+                        class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                <button type="button" @click="editing = false; todoCancelEdit($el.form, '#todo-msg')" aria-label="Cancel renaming" title="Cancel"
+                        class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            </form>
+            <div x-show="!editing" class="flex flex-shrink-0 items-center">
+                <button type="button" @click="editing = true" aria-label="Rename the section {{ section.name }}" title="Rename"
+                        class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                <button type="button" @click="show($el)"
+                        data-url="{% url 'todo:section-delete' project.pk section.pk %}"
+                        data-title="Delete section"
+                        data-body="Delete the section {{ section.name }}? Its tasks are kept: they stay in {{ project.name }}, in no section."
+                        data-label="Delete section"
+                        aria-label="Delete the section {{ section.name }}" title="Delete section"
+                        class="btn p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-trash" aria-hidden="true"></i></button>
+            </div>
+            {% endif %}
+        </div>
+        <div id="section-body-{{ section.pk }}" x-show="expanded" class="mt-2 bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+            <ul class="min-h-[2.75rem] divide-y divide-gray-200 dark:divide-gray-700"
+                {% if sortable %}data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="project" data-project="{{ project.pk }}" data-section="{{ section.pk }}" data-sort-group="project-{{ project.pk }}"{% endif %}>
+                {% for task in section_tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False sortable=sortable %}{% endfor %}
+            </ul>
+            {% if not project.is_archived %}
+            <form method="post" action="{% url 'todo:create' %}" hx-post="{% url 'todo:create' %}" hx-target="#todo-msg" hx-swap="innerHTML"
+                  hx-disabled-elt="find button[type='submit']"
+                  class="flex items-center gap-2 border-t border-gray-200 dark:border-gray-700 px-4 py-2 sm:px-6">
+                {% csrf_token %}
+                <input type="hidden" name="view" value="project">
+                <input type="hidden" name="project" value="{{ project.pk }}">
+                <input type="hidden" name="section" value="{{ section.pk }}">
+                <label for="section-add-{{ section.pk }}" class="sr-only">Add a task to {{ section.name }}</label>
+                <input id="section-add-{{ section.pk }}" name="title" type="text" maxlength="500" required autocomplete="off"
+                       placeholder="Add a task to {{ section.name }}"
+                       class="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm placeholder-gray-500 dark:placeholder-gray-400 hover:border-gray-300 dark:hover:border-gray-600">
+                <button type="submit" aria-label="Add the task to {{ section.name }}" title="Add task"
+                        class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-plus text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            </form>
+            {% endif %}
+        </div>
+    </section>
+    {% endfor %}
+</div>
+
+{% if not project.is_archived %}
+<div x-data="{ adding: false }" class="mt-6">
+    <button type="button" x-show="!adding" @click="adding = true; $nextTick(() => $refs.name.focus())"
+            class="btn rounded-md text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-plus mr-1" aria-hidden="true"></i>Add section</button>
+    <form x-show="adding" style="display: none" method="post" action="{% url 'todo:section-add' project.pk %}"
+          hx-post="{% url 'todo:section-add' project.pk %}" hx-target="#todo-msg" hx-swap="innerHTML"
+          hx-disabled-elt="find button[type='submit']"
+          class="flex flex-wrap items-center gap-2" @keydown.escape="adding = false; todoCancelEdit($el, '#todo-msg')">
+        {% csrf_token %}
+        <label for="new-section-name" class="sr-only">Section name</label>
+        <input id="new-section-name" x-ref="name" name="name" type="text" maxlength="80" required placeholder="Section name, e.g. Backlog"
+               class="min-w-[12rem] flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm sm:max-w-xs">
+        <button type="submit"
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Add section</button>
+        <button type="button" @click="adding = false; todoCancelEdit($el.form, '#todo-msg')"
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+    </form>
 </div>
 {% endif %}
+
+{% if show_closed %}
+<section class="mt-8" aria-labelledby="closed-title">
+    <h2 id="closed-title" class="mb-2 text-lg font-semibold text-gray-600 dark:text-gray-300">Closed</h2>
+    <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+            {% for task in closed_tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False sortable=False %}
+            {% empty %}
+            <li class="px-4 py-8 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">No closed tasks in this project.</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="mt-6 flex items-center justify-between text-sm">
+        <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+        <div class="flex gap-4">
+            {% if page_obj.has_previous %}<a href="{{ page_url }}?{{ prev_query }}" class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-chevron-left mr-1 text-xs" aria-hidden="true"></i>Previous</a>{% endif %}
+            {% if page_obj.has_next %}<a href="{{ page_url }}?{{ next_query }}" class="text-sage-600 dark:text-sage-300 hover:underline">Next<i class="fas fa-chevron-right ml-1 text-xs" aria-hidden="true"></i></a>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endif %}
+{% endblock %}
+
+{% block todo_js_libs %}
+{% include 'core/partials/sortable_script.html' %}
 {% endblock %}

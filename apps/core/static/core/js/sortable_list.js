@@ -6,13 +6,17 @@
 //     handle: '.drag-handle',         // selector of the drag handle inside an item (a focusable
 //                                     //   role="button" element, not a <button>: Firefox won't drag from one)
 //     item: '[data-task-id]',         // selector of the items, direct children of `container`
-//     onReorder(container, items, {viaKeyboard}) {},  // save the new order; `items` are the elements in order
+//     onReorder(container, items, {viaKeyboard, fromOtherList}) {},  // save the new order; `items` are the elements
+//                                     //   in order; `fromOtherList`: an item was just dragged in from another list
 //     label(handle, item) { return 'Item'; },          // the name announced ("<name> moved to position ...")
 //     liveRegion: element | (container) => element,    // the polite live region (default: one in <body>)
 //     horizontalKeys: false,          // also let Left/Right (earlier/later) move an item (a grid)
 //     canMove(item, other) { return true; },  // false stops an item being dragged (or moved by key) past `other`
 //                                     //   (To-do's Today: a row stays inside its own state group)
 //     debounceMs: 400,                // quiet time after the last key press before onReorder runs
+//     group: 'name',                  // lists with the same group take each other's items by drag; the list an
+//                                     //   item lands in gets the onReorder (the arrow keys stay inside a list)
+//     canLeave(item) { return true; }, // false keeps an item in its own list when lists share a group
 //   });
 //
 // Idempotent per container: call it again after htmx swaps in the list. The options are fixed by the
@@ -49,8 +53,11 @@
     window.setTimeout(function () { live.textContent = text; }, 30);
   }
 
-  function reorder(container, config, viaKeyboard) {
-    config.onReorder(container, itemsOf(container, config), { viaKeyboard: viaKeyboard });
+  function reorder(container, config, viaKeyboard, fromOtherList) {
+    config.onReorder(container, itemsOf(container, config), {
+      viaKeyboard: viaKeyboard,
+      fromOtherList: fromOtherList === true,
+    });
   }
 
   function initSortableList(container, options) {
@@ -71,14 +78,23 @@
       handle: config.handle,
       draggable: config.item,
       animation: 150,
+      group: config.group,
+      emptyInsertThreshold: 12,
       onMove: function (event) {
         // Returning false cancels the move; `related` is the item the dragged one would pass.
+        if (event.to !== event.from && typeof config.canLeave === 'function' && config.canLeave(event.dragged) === false) return false;
         if (typeof config.canMove !== 'function') return true;
         if (!event.related || !event.related.matches(config.item)) return true;
         return config.canMove(event.dragged, event.related) !== false;
       },
       onEnd: function (event) {
-        if (event.oldIndex !== event.newIndex) reorder(container, config, false);
+        if (event.to !== event.from) {
+          // Dropped in another list of the group: that list saves its new order (and takes the item).
+          const other = configs.get(event.to);
+          if (other) reorder(event.to, other, false, true);
+        } else if (event.oldIndex !== event.newIndex) {
+          reorder(container, config, false);
+        }
       },
     });
   }

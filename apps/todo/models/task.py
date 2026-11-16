@@ -12,7 +12,7 @@ from apps.core.markdown import normalize_for_search, search_text
 
 from ..limits import TITLE_MAX
 from .label import Label
-from .project import Project
+from .project import Project, Section
 from .recurrence import Recurrence
 
 
@@ -98,6 +98,7 @@ class Task(models.Model):
     parent_id: uuid.UUID | None
     recurrence_id: uuid.UUID | None
     project_id: uuid.UUID | None
+    section_id: uuid.UUID | None
     # Set by `services.dates.with_subtask_counts` on the tasks a list shows (not stored).
     subtask_total: int
     subtask_done: int
@@ -241,6 +242,18 @@ class Task(models.Model):
             Project, null=True, blank=True, on_delete=models.SET_NULL, related_name='tasks'
         ),
     )
+    #: The section of its project the task is in, or `None` (part 2 of #314). Always a section of
+    #: `project`; a subtask has its parent's. Deleting a section leaves its tasks in the project.
+    section = cast(
+        'Section | None',
+        models.ForeignKey(
+            Section, null=True, blank=True, on_delete=models.SET_NULL, related_name='tasks'
+        ),
+    )
+    #: Manual order on the project's page (sort "Manual"), among the tasks of one section of the
+    #: project (or of its tasks without a section). A fourth column, so ordering a project never
+    #: puts Today, All or a parent's subtasks into manual order.
+    project_position = cast(int, models.IntegerField(default=0, db_default=0))
 
     class Meta:
         constraints = [

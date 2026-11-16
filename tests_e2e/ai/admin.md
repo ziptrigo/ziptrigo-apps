@@ -1098,7 +1098,7 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | # | Step | Expected |
 |---|------|----------|
 | 1 | As `qa.admin@example.com`, open `/admin/todo/project/` (after `qa.user` made projects, TODO-63). | The list shows name, user, colour, an Archived mark, the number of tasks and the creation date; filter by archived (empty / not empty) and date; search by name and email. |
-| 2 | Open one. | Every field is read-only; there is no Add, Save or Delete. |
+| 2 | Open one. | Every field is read-only; there is no Add, Save or Delete. Its sections are listed below (name, position, created), read-only. |
 | 3 | Open `/admin/todo/task/`. | The list has a **Project** column. |
 | 4 | Open `/admin/todo/todosettings/`. | "Max projects per user" (100) is there and editable. Set it to 1, save, and as `qa.user` (who has projects) add another: `You can have up to 1 project.` Restore 100. |
 
