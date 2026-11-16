@@ -18,7 +18,7 @@ from apps.accounts.models import User
 from apps.accounts.tokens import CustomAccessToken
 from apps.billing.services import get_balance, spend_credits
 
-from ..models import TransferFile, TransferStatus
+from ..models import Transfer, TransferFile, TransferStatus
 
 pytestmark = [
     pytest.mark.django_db,
@@ -150,11 +150,41 @@ def test_finalize_validation_error_returns_400(client, draft_transfer, uploaded_
     response = _post(
         client,
         f'/api/ft/transfers/{draft_transfer.id}/send',
-        {'recipients': [], 'expiry_choice': 'none'},
+        {'recipients': ['a@example.com'], 'expiry_choice': 'someday'},
         auth_headers,
     )
     assert response.status_code == 400
     assert response.json()['detail']
+
+
+def test_finalize_without_recipients_sends_nobody_an_email(
+    client,
+    draft_transfer,
+    uploaded_file,
+    auth_headers,
+    sent_emails,
+    django_capture_on_commit_callbacks,
+):
+    """Recipients are optional (issue #310): none (or the field left out) is a transfer nobody is
+    emailed about; only the sender gets their own copy, with the link."""
+    for body in ({'recipients': []}, {}):
+        transfer = Transfer.objects.create(owner=draft_transfer.owner, status=TransferStatus.DRAFT)
+        file = TransferFile.objects.get(pk=uploaded_file.pk)
+        file.pk = None
+        file.transfer = transfer
+        file.save()
+        sent_emails.clear()
+
+        with django_capture_on_commit_callbacks(execute=True):
+            response = _post(client, f'/api/ft/transfers/{transfer.id}/send', body, auth_headers)
+
+        assert response.status_code == 200, response.content
+        assert response.json()['recipients'] == []
+        assert response.json()['status'] == 'active'
+        assert [e['to'] for e in sent_emails] == [draft_transfer.owner.email]
+        assert transfer.slug in sent_emails[0]['text_body']
+        assert 'Nobody was emailed' in sent_emails[0]['text_body']
+        assert sent_emails[0]['subject'].endswith('is ready to share')
 
 
 def test_finalize_rejects_a_recipient_that_is_not_an_email(

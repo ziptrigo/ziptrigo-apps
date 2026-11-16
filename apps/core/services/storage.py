@@ -330,6 +330,27 @@ class S3Storage:
             raise ObjectTooLargeError(f'{key} is over the {max_bytes} byte limit')
         return data
 
+    def get_object_range(self, key: str, start: int, end: int) -> bytes:
+        """The bytes `start` to `end` (both inclusive) of the object -- one ranged `GetObject`, so a
+        caller that needs only the head of a large file (sniffing its type, a text preview) never
+        reads the rest. Past the end of the object it returns what there is; an empty object has no
+        satisfiable range and gives `b''`. Raises `ClientError` (`NoSuchKey`) if absent."""
+        if start < 0 or end < start:
+            raise ValueError('a byte range needs 0 <= start <= end')
+        try:
+            response = self.client.get_object(
+                Bucket=self.bucket, Key=key, Range=f'bytes={start}-{end}'
+            )
+        except ClientError as exc:
+            if exc.response.get('Error', {}).get('Code') == 'InvalidRange':
+                return b''
+            raise
+        body = response['Body']
+        try:
+            return body.read(end - start + 1)
+        finally:
+            body.close()
+
     def get_object_stream(self, key: str) -> IO[bytes]:
         """A readable, streaming file-like object (`.read(n)`) for `key`'s bytes, for building
         the zip without ever loading a whole source file into memory. The real return value is

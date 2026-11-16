@@ -55,9 +55,24 @@ def test_finalize_send_requires_at_least_one_uploaded_file(draft_transfer):
         finalize_send(draft_transfer, _options())
 
 
-def test_finalize_send_requires_a_recipient(draft_transfer, uploaded_file):
-    with pytest.raises(ValidationError):
+def test_finalize_send_without_recipients_emails_only_the_sender(
+    draft_transfer, uploaded_file, sent_emails, django_capture_on_commit_callbacks
+):
+    """Issue #310: recipients are optional; nobody but the sender is emailed (their copy has the
+    link)."""
+    with django_capture_on_commit_callbacks(execute=True):
         finalize_send(draft_transfer, _options(recipients=[]))
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.ACTIVE
+    assert not draft_transfer.recipients.exists()
+    assert [e['to'] for e in sent_emails] == [draft_transfer.owner.email]
+    assert draft_transfer.absolute_download_url in sent_emails[0]['text_body']
+    assert 'was sent to' not in sent_emails[0]['text_body']
+
+
+def test_send_options_recipients_default_to_none():
+    assert SendOptions().recipients == []
 
 
 def test_finalize_send_rejects_a_non_draft_transfer(draft_transfer, uploaded_file):

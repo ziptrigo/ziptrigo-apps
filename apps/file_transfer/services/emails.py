@@ -86,16 +86,19 @@ def send_sender_copy(transfer_id: str) -> None:
 
     name = transfer_display_name(transfer)
     recipients = ', '.join(r.email for r in transfer.recipients.all())
+    if recipients:
+        first_line = f'Your transfer "{name}" was sent to: {recipients}.'
+        subject = f'Your transfer "{name}" is on its way'
+    else:
+        # A transfer with no recipients (issue #310): nobody was emailed, the sender shares it.
+        first_line = f'Your transfer "{name}" is ready. Nobody was emailed: share the link below.'
+        subject = f'Your transfer "{name}" is ready to share'
     body = (
-        f'Your transfer "{name}" was sent to: {recipients}.\n\n'
+        f'{first_line}\n\n'
         f'Download link: {transfer.absolute_download_url}\n'
         f'Manage this transfer: {dashboard_url()}'
     )
-    send_email(
-        to=transfer.owner.email,
-        subject=f'Your transfer "{name}" is on its way',
-        text_body=body,
-    )
+    send_email(to=transfer.owner.email, subject=subject, text_body=body)
 
 
 @task

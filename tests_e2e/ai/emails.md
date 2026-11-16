@@ -43,7 +43,7 @@ Subjects are quoted from the code; `<...>` is filled in at send time.
 | 9 | `New feedback submitted` | Same | Every active superuser | MAIL-10 |
 | 10 | `Test email from the admin panel` | Admin > Tools > "Send test email" | The address typed | MAIL-11 |
 | 11 | `<file> was sent to you via ZipTrigo` / `<file> and N more file(s) were sent to you via ZipTrigo` | Send a transfer; "Add recipients" | Each recipient | MAIL-12, MAIL-17 |
-| 12 | `Your transfer "<file>" is on its way` | Send a transfer (logged in) | The sender | MAIL-12 |
+| 12 | `Your transfer "<file>" is on its way` (or `... is ready to share` when sent with no recipients, issue #310: FT-66) | Send a transfer (logged in) | The sender | MAIL-12 |
 | 13 | `"<file>" was downloaded` / `"all files" was downloaded` | A download, with "Email me when a file is downloaded" on | The sender | MAIL-13 |
 | 14 | `Your transfer "<file>" expires tomorrow` | `expire_transfers` job (shell step) | The sender | MAIL-14 |
 | 15 | `Files for "<file>" have been deleted` | Expiry, or the end of a suspension's grace period (shell steps) | The sender | MAIL-14, MAIL-15 |

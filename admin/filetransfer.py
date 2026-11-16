@@ -321,7 +321,12 @@ def _upload_file(
 def filetransfer_send(
     environment: EnvironmentAnnotation,
     paths: list[Path] = typer.Argument(..., help='Files or folders to send.'),
-    to: list[str] = typer.Option(..., '--to', help='Recipient email address (repeatable).'),
+    to: list[str] | None = typer.Option(
+        None,
+        '--to',
+        help='Recipient email address (repeatable). Optional: without one nobody is emailed '
+        'and you share the link yourself.',
+    ),
     message: str = typer.Option('', '--message', '-m', help='Message shown to recipients.'),
     expiry: str = typer.Option(
         'none', '--expiry', help='Expiry: 1, 5, 15 or 30 (days), or "none".'
@@ -346,6 +351,7 @@ def filetransfer_send(
 
     Example:
         filetransfer send report.pdf --to a@example.com --to b@example.com
+        filetransfer send report.pdf  # no recipient: you get the link to share
         filetransfer send ./photos --to a@example.com --draft-id 1b6e...  # resume
     """
     import requests
@@ -387,7 +393,7 @@ def filetransfer_send(
             'post',
             api_url(f'/ft/transfers/{transfer_id}/send'),
             json={
-                'recipients': to,
+                'recipients': to or [],
                 'message': message,
                 'expiry_choice': expiry,
                 'max_downloads': max_downloads,
@@ -405,7 +411,7 @@ def filetransfer_send(
         raise typer.Exit(1)
 
     result = response.json()
-    logger.info('Sent!')
+    logger.info('Sent!' if to else 'Ready! Nobody was emailed: share the link yourself.')
     logger.info(f'Link: {result["download_url"]}')
 
 

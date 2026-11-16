@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File preview - ZipTrigo (mock)</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="../reference/assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../../../apps/core/static/core/css/site.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<!--
+  MOCK for review (issue #311), not wired to anything. The public download page (/t/<slug>/)
+  with file previews:
+    1. several files: a "Preview" button on every file that can be previewed, plus a line above
+       the list saying how many can be. Nothing opens by itself, even for one file.
+    2. one file: the same button; still a click away.
+    3. password protected: the Preview buttons are locked with the downloads.
+  A PREVIEW IS A SAMPLE, NEVER THE FILE (the owner's decision), so previewing cannot be a way around
+  a download limit:
+    - an image shows a downsized version (WebP, longest side 1600 px) with "View full image";
+    - a PDF shows a downsized WebP of each page (the first 20) with Previous / Next PAGE buttons and
+      "Page 2 of 12" (distinct from the Previous / Next FILE buttons over the viewer; keys: Left /
+      Right = files, Page Up / Page Down = pages) and "View full document";
+    - the first click on an image or a PDF shows "Preparing preview..." while the pages are built
+      (once; they are kept and reused);
+    - text, CSV, Markdown, JSON show the first 64 KB ("Showing the first 64 KB.") and, for a file
+      the sample cut, "View full document";
+    - video and audio have no preview (playing them is downloading them): no button.
+  "View full image / document" COUNTS AS A DOWNLOAD: it shows the whole file in the dialog and the
+  dialog then says "This counted as a download." The Download button after it saves what the
+  browser already has (no second request), so it is one download, not two.
+  The type is read from the file's bytes on the server, never from its name.
+-->
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 font-sans">
+
+    <!-- Mock switcher (not part of the design) -->
+    <div class="bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100 text-sm">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-3">
+            <span class="font-semibold"><i class="fas fa-flask mr-1"></i>Mock</span>
+            <button type="button" data-screen="many" class="screen-btn underline">1. Several files</button>
+            <button type="button" data-screen="one" class="screen-btn underline">2. One file</button>
+            <button type="button" data-screen="locked" class="screen-btn underline">3. Password protected</button>
+            <span class="ml-auto opacity-80">Theme toggle is in the header</span>
+        </div>
+    </div>
+
+    <header class="bg-gray-100 dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <a href="#" class="text-lg font-semibold hover:text-sage-300">
+                <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+            </a>
+            <button id="theme-toggle" type="button" class="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
+                     src="../../../apps/core/static/core/images/theme-system_128x128.png"
+                     data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
+                     data-light="../../../apps/core/static/core/images/theme-light_128x128.png"
+                     data-dark="../../../apps/core/static/core/images/theme-dark_128x128.png">
+            </button>
+        </nav>
+    </header>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 1: several files                                      -->
+    <!-- ============================================================ -->
+    <main id="screen-many" class="screen flex-grow" x-data="preview(manyFiles)">
+        <div class="container mx-auto px-4 py-8 max-w-2xl">
+            <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h1 class="text-2xl font-semibold tracking-tight mb-4">Holiday photos and the itinerary</h1>
+                <p class="text-gray-700 dark:text-gray-300 whitespace-pre-line mb-6">Here are the photos from the trip, plus the booking PDF.</p>
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Available until 11/30/2026, 11:59 PM</p>
+                    <button type="button" class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 sm:ml-auto"><i class="fas fa-qrcode mr-1"></i>QR code</button>
+                </div>
+
+                <!-- NEW: says previews exist, before anyone looks for them -->
+                <p class="preview-hint"><i class="fas fa-eye mr-1.5" aria-hidden="true"></i>6 of 8 files can be previewed before you download them.</p>
+
+                <ul class="divide-y divide-gray-200 dark:divide-gray-700 mb-6">
+                    <template x-for="(file, i) in files" :key="file.name">
+                        <li class="py-3 flex items-center gap-3">
+                            <span class="file-icon" aria-hidden="true"><i :class="file.icon"></i></span>
+                            <div class="min-w-0 flex-1">
+                                <!-- the name opens the preview too, when there is one -->
+                                <template x-if="file.kind">
+                                    <button type="button" @click="open(i)" class="file-name-link" x-text="file.name"></button>
+                                </template>
+                                <template x-if="!file.kind">
+                                    <p class="text-sm font-medium truncate" x-text="file.name"></p>
+                                </template>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    <span x-text="file.size"></span>
+                                    <template x-if="!file.kind"><span> &middot; no preview</span></template>
+                                </p>
+                            </div>
+                            <div class="flex gap-2 shrink-0">
+                                <template x-if="file.kind">
+                                    <button type="button" @click="open(i)" class="btn btn-preview" :aria-label="'Preview ' + file.name">
+                                        <i class="fas fa-eye mr-1" aria-hidden="true"></i>Preview
+                                    </button>
+                                </template>
+                                <a href="#" class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 whitespace-nowrap hover:bg-sage-400"><i class="fas fa-download mr-1"></i>Download</a>
+                            </div>
+                        </li>
+                    </template>
+                </ul>
+                <button type="button" class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"><i class="fas fa-file-zipper mr-1"></i>Download all (.zip)</button>
+                <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <button type="button" class="text-xs text-gray-400"><i class="fas fa-flag mr-1"></i>Report this transfer</button>
+                </div>
+            </div>
+        </div>
+        <div x-show="isOpen" style="display:none" data-dialog></div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 2: one file                                           -->
+    <!-- ============================================================ -->
+    <main id="screen-one" class="screen hidden flex-grow" x-data="preview(oneFile)">
+        <div class="container mx-auto px-4 py-8 max-w-2xl">
+            <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h1 class="text-2xl font-semibold tracking-tight mb-4">Contract to sign</h1>
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">
+                    <button type="button" class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"><i class="fas fa-qrcode mr-1"></i>QR code</button>
+                </div>
+                <!-- one file: the hint drops the count -->
+                <p class="preview-hint"><i class="fas fa-eye mr-1.5" aria-hidden="true"></i>You can preview this file before you download it.</p>
+                <ul class="divide-y divide-gray-200 dark:divide-gray-700 mb-6">
+                    <li class="py-3 flex items-center gap-3">
+                        <span class="file-icon" aria-hidden="true"><i class="fas fa-file-pdf"></i></span>
+                        <div class="min-w-0 flex-1">
+                            <button type="button" @click="open(0)" class="file-name-link">contract-2026.pdf</button>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">412.5 KB</p>
+                        </div>
+                        <div class="flex gap-2 shrink-0">
+                            <button type="button" @click="open(0)" class="btn btn-preview" aria-label="Preview contract-2026.pdf"><i class="fas fa-eye mr-1" aria-hidden="true"></i>Preview</button>
+                            <a href="#" class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400"><i class="fas fa-download mr-1"></i>Download</a>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        <div x-show="isOpen" style="display:none" data-dialog></div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 3: password protected                                 -->
+    <!-- ============================================================ -->
+    <main id="screen-locked" class="screen hidden flex-grow">
+        <div class="container mx-auto px-4 py-8 max-w-2xl">
+            <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h1 class="text-2xl font-semibold tracking-tight mb-4">Holiday photos and the itinerary</h1>
+                <p class="preview-hint"><i class="fas fa-eye mr-1.5" aria-hidden="true"></i>5 of 6 files can be previewed once you enter the password.</p>
+                <ul class="divide-y divide-gray-200 dark:divide-gray-700 mb-6">
+                    <li class="py-3 flex items-center gap-3">
+                        <span class="file-icon" aria-hidden="true"><i class="fas fa-file-image"></i></span>
+                        <div class="min-w-0 flex-1"><p class="text-sm font-medium truncate">beach.jpg</p><p class="text-xs text-gray-500 dark:text-gray-400">3.2 MB</p></div>
+                        <span class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 text-gray-400 whitespace-nowrap"><i class="fas fa-lock mr-1"></i>Locked</span>
+                    </li>
+                    <li class="py-3 flex items-center gap-3">
+                        <span class="file-icon" aria-hidden="true"><i class="fas fa-file-zipper"></i></span>
+                        <div class="min-w-0 flex-1"><p class="text-sm font-medium truncate">raw-photos.zip</p><p class="text-xs text-gray-500 dark:text-gray-400">812.0 MB &middot; no preview</p></div>
+                        <span class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 text-gray-400 whitespace-nowrap"><i class="fas fa-lock mr-1"></i>Locked</span>
+                    </li>
+                </ul>
+                <form class="space-y-3 border-t border-gray-200 dark:border-gray-700 pt-4" onsubmit="return false">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">This transfer is password protected. Enter the password to download.</label>
+                    <input type="password" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2">
+                    <button type="submit" class="btn px-4 py-2 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400">Unlock</button>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <footer class="text-center text-sm text-gray-500 dark:text-gray-400 py-6">© 2026 ZipTrigo</footer>
+
+    <!-- The preview dialog (design system 10.9: the confirmation modal's overlay and panel, wider). -->
+    <template id="dialog-tpl">
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/75 backdrop-blur-[2px] p-2 sm:p-6"
+             @click.self="close()" @keydown.escape.window="close()"
+             @keydown.left.window="prev()" @keydown.right.window="next()"
+             @keydown.page-up.window="pageStep(-1)" @keydown.page-down.window="pageStep(1)">
+            <div role="dialog" aria-modal="true" aria-labelledby="preview-title"
+                 class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-full flex flex-col overflow-hidden">
+                <!-- header: name, size, place, close -->
+                <div class="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                    <span class="file-icon" aria-hidden="true"><i :class="current.icon"></i></span>
+                    <div class="min-w-0 flex-1">
+                        <p id="preview-title" class="text-sm font-semibold truncate" x-text="current.name"></p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
+                            <span x-text="current.size"></span>
+                            <template x-if="previewable.length > 1"><span> &middot; <span x-text="position"></span></span></template>
+                        </p>
+                    </div>
+                    <button type="button" @click="close()" class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="Close preview"><i class="fas fa-xmark text-lg"></i></button>
+                </div>
+
+                <!-- body -->
+                <div class="relative flex-1 min-h-[16rem] bg-gray-50 dark:bg-gray-900 flex items-center justify-center overflow-auto">
+                    <!-- Image / PDF: the downsized sample (a WebP); after "View full", the whole file -->
+                    <template x-if="(current.kind === 'image' || current.kind === 'pdf') && phase === 'ready' && !full">
+                        <img :src="pageSrc" :alt="'Preview of ' + current.name" class="max-h-[70vh] max-w-full object-contain">
+                    </template>
+                    <template x-if="current.kind === 'image' && full">
+                        <img :src="current.src" :alt="current.name" class="max-h-[70vh] max-w-full object-contain">
+                    </template>
+                    <template x-if="current.kind === 'pdf' && full">
+                        <!-- real thing: the whole PDF in an <iframe> (from the Blob that "View full" fetched) -->
+                        <div class="w-full h-[70vh] flex flex-col items-center justify-start gap-3 p-6 overflow-auto">
+                            <div class="bg-white text-gray-900 shadow w-full max-w-md aspect-[1/1.41] p-8 text-xs leading-relaxed">
+                                <p class="text-base font-semibold mb-3">Booking confirmation (the whole PDF)</p>
+                                <p class="mt-3 text-gray-500">(The browser's PDF viewer, with its own page controls, shows here.)</p>
+                            </div>
+                        </div>
+                    </template>
+                    <p x-show="phase === 'preparing'" id="mock-preparing" class="absolute inset-0 flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
+                        <i class="fas fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Preparing preview...
+                    </p>
+                    <template x-if="current.kind === 'text'">
+                        <pre class="w-full h-[70vh] overflow-auto p-4 font-mono text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap" x-text="current.text"></pre>
+                    </template>
+                    <template x-if="current.kind === 'markdown'">
+                        <div class="w-full h-[70vh] overflow-auto">
+                            <div x-show="view === 'formatted'" class="p-6 max-w-3xl mx-auto text-sm leading-relaxed" x-html="current.html"></div>
+                            <pre x-show="view === 'raw'" class="p-4 font-mono text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap" x-text="current.text"></pre>
+                        </div>
+                    </template>
+
+                    <!-- Previous / Next among the previewable files only -->
+                    <template x-if="previewable.length > 1">
+                        <div>
+                            <button type="button" @click="prev()" class="nav-btn left-2" aria-label="Previous file"><i class="fas fa-chevron-left"></i></button>
+                            <button type="button" @click="next()" class="nav-btn right-2" aria-label="Next file"><i class="fas fa-chevron-right"></i></button>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- A PDF's pages: Previous / Next PAGE (the round buttons over the viewer are the previous / next FILE) -->
+                <div x-show="current.kind === 'pdf' && phase === 'ready' && !full" role="group" aria-label="Pages of this document"
+                     class="flex items-center justify-center gap-3 px-4 py-2 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300">
+                    <button type="button" @click="pageStep(-1)" :disabled="pageIndex === 0" class="btn px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"><i class="fas fa-chevron-left mr-1"></i>Previous page</button>
+                    <span x-text="'Page ' + (pageIndex + 1) + ' of ' + current.pages.length"></span>
+                    <button type="button" @click="pageStep(1)" :disabled="pageIndex >= current.pages.length - 1" class="btn px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40">Next page<i class="fas fa-chevron-right ml-1"></i></button>
+                </div>
+
+                <!-- footer -->
+                <div class="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+                    <div class="flex-1 flex flex-wrap items-center gap-3 min-w-0">
+                        <!-- Markdown only: Formatted (default) / Raw -->
+                        <div x-show="current.kind === 'markdown'" role="group" aria-label="Markdown view"
+                             class="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden text-sm">
+                            <button type="button" @click="view = 'formatted'" :aria-pressed="view === 'formatted'"
+                                    :class="view === 'formatted' ? 'bg-primary text-primary-on' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'"
+                                    class="px-3 py-1.5">Formatted</button>
+                            <button type="button" @click="view = 'raw'" :aria-pressed="view === 'raw'"
+                                    :class="view === 'raw' ? 'bg-primary text-primary-on' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'"
+                                    class="px-3 py-1.5 border-l border-gray-300 dark:border-gray-600">Raw</button>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400" x-show="(current.kind === 'image' || current.kind === 'pdf') && phase === 'ready' && !full">
+                            <span x-text="current.kind === 'image' ? 'A smaller version of the image.' : 'Smaller versions of the pages.'"></span></p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400" x-show="(current.kind === 'text' || (current.kind === 'markdown' && view === 'raw')) && current.cut && !full">Showing the first 64 KB.</p>
+                        <!-- after "View full": it was a download -->
+                        <p class="text-xs font-medium text-gray-700 dark:text-gray-200" x-show="counted.has(index)" role="status">This counted as a download.</p>
+                    </div>
+                    <button type="button" x-show="current.fullLabel && !full" @click="viewFull()" class="btn px-4 py-2 rounded-lg text-sm border border-sage-300 text-sage-800 bg-white hover:bg-sage-50 dark:bg-gray-800 dark:text-sage-100 dark:border-sage-600 dark:hover:bg-gray-700"><i class="fas fa-expand mr-1"></i><span x-text="current.fullLabel"></span></button>
+                    <a href="#" class="btn px-4 py-2 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400"><i class="fas fa-download mr-1"></i>Download</a>
+                    <button type="button" @click="close()" class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg">Close</button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <style type="text/tailwindcss">
+        .preview-hint { @apply text-sm rounded-lg px-3 py-2 mb-2 bg-sage-50 text-sage-800 border border-sage-200 dark:bg-sage-900/40 dark:text-sage-100 dark:border-sage-700; }
+        .file-icon { @apply h-9 w-9 shrink-0 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300; }
+        .file-name-link { @apply block max-w-full text-left text-sm font-medium truncate text-gray-900 dark:text-gray-100 hover:underline hover:text-sage-700 dark:hover:text-sage-200; }
+        .btn-preview { @apply px-3 py-1.5 rounded-lg text-sm whitespace-nowrap border border-sage-300 text-sage-800 bg-white hover:bg-sage-50 dark:bg-gray-800 dark:text-sage-100 dark:border-sage-600 dark:hover:bg-gray-700; }
+        .nav-btn { @apply absolute top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 shadow text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-700; }
+    </style>
+    <script>
+        const img = (a, b, label) => 'data:image/svg+xml;utf8,' + encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><text x="600" y="420" font-size="56" font-family="sans-serif" fill="white" text-anchor="middle">${label}</text></svg>`);
+        const page = (n) => 'data:image/svg+xml;utf8,' + encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="1224" height="1584"><rect width="1224" height="1584" fill="white"/><text x="80" y="160" font-size="64" font-family="sans-serif" fill="#2c3432">Booking confirmation</text><text x="80" y="260" font-size="40" font-family="sans-serif" fill="#66716d">Reference ZT-48213 - page ${n}</text></svg>`);
+        window.manyFiles = [
+            { name: 'beach.jpg', size: '3.2 MB', icon: 'fas fa-file-image', kind: 'image', src: img('#8fa89e', '#2c3432', 'beach.jpg'), fullLabel: 'View full image' },
+            { name: 'sunset.png', size: '5.8 MB', icon: 'fas fa-file-image', kind: 'image', src: img('#f59e0b', '#7c2d12', 'sunset.png'), fullLabel: 'View full image' },
+            { name: 'booking.pdf', size: '412.5 KB', icon: 'fas fa-file-pdf', kind: 'pdf', pages: Array.from({ length: 12 }, (_, i) => page(i + 1)), fullLabel: 'View full document' },
+            { name: 'raw-photos.zip', size: '812.0 MB', icon: 'fas fa-file-zipper', kind: null },
+            { name: 'notes.md', size: '1.4 KB', icon: 'fas fa-file-lines', kind: 'markdown',
+              text: '# Trip notes\n\n- Pack **sunscreen**\n- Book the boat\n\nSee [the itinerary](#).',
+              html: '<h2 class="text-lg font-semibold mb-2">Trip notes</h2><ul class="list-disc pl-6 mb-3"><li>Pack <strong>sunscreen</strong></li><li>Book the boat</li></ul><p>See <a class="underline" href="#">the itinerary</a>.</p>' },
+            { name: 'itinerary.txt', size: '2.1 KB', icon: 'fas fa-file-lines', kind: 'text',
+              text: 'Day 1  Fly to Faro, pick up the car\nDay 2  Benagil caves (boat at 10:00)\nDay 3  Lagos old town, dinner at 20:30\nDay 4  Fly home' },
+            // a text file longer than the 64 KB sample: View full is offered (up to 5 MB)
+            { name: 'server.log', size: '340.0 KB', icon: 'fas fa-file-lines', kind: 'text', cut: true, fullLabel: 'View full document',
+              text: '2026-11-14 08:00:01 INFO  started\n2026-11-14 08:00:02 INFO  listening on :8000\n... (the first 64 KB)' },
+            // no preview at all for video and audio: listed, with no Preview button
+            { name: 'clip.mp4', size: '48.0 MB', icon: 'fas fa-file-video', kind: null },
+        ];
+        window.oneFile = [{ name: 'contract-2026.pdf', size: '412.5 KB', icon: 'fas fa-file-pdf', kind: 'pdf', pages: Array.from({ length: 4 }, (_, i) => page(i + 1)), fullLabel: 'View full document' }];
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('preview', (files) => ({
+                files, isOpen: false, index: 0, view: 'formatted',
+                // the build of the downsized pages: "preparing" the first time a file is opened
+                phase: 'ready', pageIndex: 0, full: false, built: new Set(), counted: new Set(),
+                get previewable() { return this.files.map((f, i) => (f.kind ? i : null)).filter((i) => i !== null); },
+                get current() { return this.files[this.index] || {}; },
+                get position() { return (this.previewable.indexOf(this.index) + 1) + ' of ' + this.previewable.length; },
+                get pageSrc() { return this.current.kind === 'pdf' ? this.current.pages[this.pageIndex] : this.current.src; },
+                show() {
+                    this.view = 'formatted'; this.pageIndex = 0; this.full = false;
+                    const f = this.current;
+                    if ((f.kind === 'image' || f.kind === 'pdf') && !this.built.has(this.index)) {
+                        this.phase = 'preparing';
+                        const at = this.index;
+                        setTimeout(() => { this.built.add(at); if (this.index === at) this.phase = 'ready'; }, 1200);
+                    } else { this.phase = 'ready'; }
+                },
+                open(i) { this.index = i; this.isOpen = true; this.show(); },
+                close() { this.isOpen = false; },
+                step(d) { if (!this.isOpen) return; const p = this.previewable; this.index = p[(p.indexOf(this.index) + d + p.length) % p.length]; this.show(); },
+                pageStep(d) { const t = this.pageIndex + d; if (t >= 0 && t < this.current.pages.length) this.pageIndex = t; },
+                viewFull() { this.full = true; this.counted.add(this.index); },
+                prev() { this.step(-1); }, next() { this.step(1); },
+            }));
+        });
+        // Copy the dialog into each screen before Alpine (deferred) starts.
+        document.querySelectorAll('[data-dialog]').forEach((el) =>
+            el.appendChild(document.getElementById('dialog-tpl').content.cloneNode(true)));
+        function show(name) {
+            document.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
+            document.getElementById('screen-' + name).classList.remove('hidden');
+            window.scrollTo(0, 0);
+        }
+        document.querySelectorAll('[data-screen]').forEach((el) =>
+            el.addEventListener('click', (e) => { e.preventDefault(); show(el.dataset.screen); history.replaceState(null, '', '#' + el.dataset.screen); }));
+        show(['many', 'one', 'locked'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'many');
+    </script>
+</body>
+</html>

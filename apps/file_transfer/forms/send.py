@@ -22,8 +22,10 @@ from ._styling import StyledFormMixin
 
 class SendOptionsForm(StyledFormMixin, forms.Form):
     recipients = forms.CharField(
+        required=False,
         widget=forms.Textarea(attrs={'rows': 3}),
-        help_text='One email address per line (or separated by commas).',
+        help_text='One email address per line (or separated by commas). Leave it empty to just '
+        'get a link to share yourself.',
     )
     message = forms.CharField(
         required=False,

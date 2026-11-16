@@ -9,7 +9,14 @@ from django.db.models import DateTimeField, Q, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from ..models import ENDED_STATUSES, Transfer, TransferStatus, ZipStatus
+from ..models import (
+    ENDED_STATUSES,
+    PreviewStatus,
+    Transfer,
+    TransferFile,
+    TransferStatus,
+    ZipStatus,
+)
 from .emails import send_files_deleted_notification
 from .storage import S3Storage, get_storage, transfer_prefix
 
@@ -26,10 +33,18 @@ def delete_transfer_files(transfer: Transfer, *, storage: S3Storage | None = Non
     still preparing) when there's nothing left to build it from at all (`services.zip.build_zip`
     separately guards the still-in-flight case: a build racing this deletion re-checks after it
     finishes and cleans up after itself either way).
+
+    The downsized previews of images and PDFs (`services.renditions`) live under the same prefix
+    (`transfers/<id>/previews/...`), so they are deleted with everything else; the files' preview
+    states go back to `NONE` for the same reason as the zip's, and a preview build racing this
+    deletion deletes what it wrote when it finishes.
     """
     storage = storage or get_storage()
     storage.delete_prefix(transfer_prefix(transfer.id))
     now = timezone.now()
+    TransferFile.objects.filter(
+        transfer=transfer, preview_status__in=[PreviewStatus.READY, PreviewStatus.BUILDING]
+    ).update(preview_status=PreviewStatus.NONE, preview_pages=0, preview_total_pages=0)
     Transfer.objects.filter(pk=transfer.pk).update(
         files_deleted_at=now, zip_status=ZipStatus.NONE, zip_key=''
     )

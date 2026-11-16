@@ -16,7 +16,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
-from . import anon_limits, limits
+from . import anon_limits, limits, preview, renditions
 from .storage import (
     PART_SIZE_BYTES,
     ObjectInfo,
@@ -237,16 +237,20 @@ def finish_upload_in_storage(
         raise ValidationError(
             f'Uploaded file size ({info.size}) does not match the declared size ({file.size}).'
         )
+    # What the file really is, read from its bytes (issue #311, see `services.preview`): left on
+    # the instance, not saved, for the caller's own database write. Best effort.
+    file.preview_type = preview.sniff_stored_object(storage, file.storage_key, info.size, file.name)
     return info
 
 
 def mark_file_uploaded(file: TransferFile, info: ObjectInfo) -> None:
-    """The database half of completing an upload: record the verified object on the row."""
+    """The database half of completing an upload: record the verified object on the row
+    (`finish_upload_in_storage` left the file's `preview_type` on the instance)."""
     file.checksum = info.checksum_sha256
     file.uploaded = True
     file.uploaded_at = timezone.now()
     file.upload_id = ''
-    file.save(update_fields=['checksum', 'uploaded', 'uploaded_at', 'upload_id'])
+    file.save(update_fields=['checksum', 'uploaded', 'uploaded_at', 'upload_id', 'preview_type'])
 
 
 def complete_file_upload(
@@ -351,6 +355,7 @@ def remove_file(file: TransferFile, *, storage: S3Storage | None = None) -> None
         storage.abort_multipart_upload(file.storage_key, file.upload_id)
     if file.uploaded:
         storage.delete_object(file.storage_key)
+        renditions.delete_renditions(file, storage=storage)
     file.delete()
 
 

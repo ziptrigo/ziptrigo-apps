@@ -125,5 +125,9 @@ def sent_page(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpRespon
     transfer = get_object_or_404(
         Transfer, id=transfer_id, owner=request.user, status=TransferStatus.ACTIVE
     )
-    context = {'transfer': transfer, 'download_url': transfer.absolute_download_url}
+    context = {
+        'transfer': transfer,
+        'download_url': transfer.absolute_download_url,
+        'has_recipients': transfer.recipients.exists(),
+    }
     return render(request, 'file_transfer/sent.html', context)
