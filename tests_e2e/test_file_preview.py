@@ -254,6 +254,21 @@ def test_a_preview_is_a_sample_and_view_full_is_one_download(
         expect(visitor.locator('#preview-view-full')).to_be_hidden()
         assert _events(receipts_server, 'e2e-preview-big.png') == 1
 
+        # Open in new tab: the same Blob the dialog shows, so no request and no second download.
+        before = len(requested)
+        open_tab = visitor.locator('#preview-open-tab')
+        expect(open_tab).to_be_visible()
+        assert (open_tab.get_attribute('href') or '').startswith('blob:')
+        assert open_tab.get_attribute('target') == '_blank'
+        with visitor.context.expect_page() as tab_info:
+            open_tab.click()
+        tab = tab_info.value
+        tab.wait_for_load_state()
+        assert tab.url.startswith('blob:')
+        tab.close()
+        assert not [url for url in requested[before:] if '/files/' in url]
+        assert _events(receipts_server, 'e2e-preview-big.png') == 1
+
         # Download after it: the browser saves what it already has, no request, still one download.
         before = len(requested)
         with visitor.expect_download() as download_info:

@@ -156,6 +156,14 @@
                     class="btn px-4 py-2 rounded-lg text-sm border border-sage-300 text-sage-800 bg-white hover:bg-sage-50 dark:bg-gray-800 dark:text-sage-100 dark:border-sage-600 dark:hover:bg-gray-700 disabled:opacity-60">
                 <i class="fas fa-expand mr-1" aria-hidden="true"></i><span x-text="current.full_label"></span>
             </button>
+            {% comment %}Once the whole image or PDF is shown, it can be opened in a tab of its own: the
+               same address the dialog shows (the Blob already fetched, or the bucket's own URL), so it
+               is neither fetched nor counted again.{% endcomment %}
+            <a id="preview-open-tab" x-show="fullShowing && !isText && fullSrc" x-cloak style="display: none"
+               :href="fullSrc" target="_blank" rel="noopener"
+               class="btn px-4 py-2 rounded-lg text-sm border border-sage-300 text-sage-800 bg-white hover:bg-sage-50 dark:bg-gray-800 dark:text-sage-100 dark:border-sage-600 dark:hover:bg-gray-700">
+                <i class="fas fa-up-right-from-square mr-1" aria-hidden="true"></i>Open in new tab<span class="sr-only"> (opens a new tab)</span>
+            </a>
             <a :href="current.download" id="preview-download" @click="saveFile($event, current.id)"
                class="btn px-4 py-2 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400"><i class="fas fa-download mr-1" aria-hidden="true"></i>Download</a>
             <button type="button" x-ref="close" @click="close()"
