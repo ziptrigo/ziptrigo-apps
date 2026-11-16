@@ -60,6 +60,7 @@ Subjects are quoted from the code; `<...>` is filled in at send time.
 | 26 | `Your notes renew soon` | The Notes renewal job finds the balance short of the renewals due within 7 days (shell step), once per window | The owner, if confirmed | MAIL-25 |
 | 27 | `You've been asked to upload files` | A file request for "Only these people" is created, an address is added to it, or **Resend** on an invitee | Each invitee address | MAIL-27 |
 | 28 | `Your file request is done` | Someone **other than the owner** marks a file request done | The owner, if confirmed | MAIL-28 |
+| 29 | `Your receipts export is ready` | A Receipts "Download files" export finishes (issue #315) | The owner, if confirmed | MAIL-29 |
 
 Out of scope (see the end of the file): the Google / Microsoft wording of email 2, delivery
 failures, and rate-limited sends.
@@ -563,10 +564,27 @@ two paid notes; the admin spends the balance down to exactly 7; shell access.
 | 9 | The other request emails for a request: its suspension, expiry and files-deleted emails (FT-61). | They name the request by its **title** (`Your transfer "MAIL done <b>x</b>" ...`, the owner's own words) and are text only, like a transfer's. |
 | 10 | Create an untitled request for **Only these people** (FT-71 step 7 with an invitee) and read its invitation. | The text body is `<owner name> is asking you for files.`, a blank line, then the message (if any) and `Upload them here: ...` -- no empty title line and no "Untitled request"; the HTML has no empty title paragraph. |
 
+### MAIL-29 Receipts: "Your receipts export is ready"
+
+**Purpose:** when an export (RCPT-64) finishes the owner gets one email with a link to the export's page, never to a file (issue #315).
+**Preconditions:** `qa.user@example.com` (confirmed) with at least two receipts; the export price at its default (3 credits per file).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | As `qa.user`, **Download files** on `/receipts/`, confirm (RCPT-64 step 1). | The export's page opens, **Ready**. |
+| 2 | `/__e2e__/mail/?to=qa.user@example.com` (reload until it arrives). | Exactly one new email, subject exactly `Your receipts export is ready` (nothing from the receipts in it). |
+| 3 | Text body. | `Your receipts export is ready: N receipt files in 1 zip file.`, a blank line, `The zip files are available to download until <date, time> UTC. Then they are deleted.` (the public wording: `Dec 16, 2026, 9:05 AM`, whatever the account's date format), then `Download them from your exports page (you need to be signed in):` and `<BASE>/receipts/exports/<id>/`, then `--` and `The ZipTrigo Team`. No S3 address and no file name anywhere. |
+| 4 | HTML source. | The same sentences, a link "Open your exports page" to `<BASE>/receipts/exports/<id>/`; no raw `<script>`; the greeting-free layout of the other Receipts emails. |
+| 5 | Click the link signed out, then sign in. | The sign-in page, then the export's page. |
+| 6 | Shell step: delete one receipt's S3 object (RCPT-68 step 2), make a new export. | The email adds `1 file was no longer there and left out; the 3 credits for it were refunded.` |
+| 7 | Set the account on `dd/mm/yyyy` + `24-hour` (ACC-46) and make an export. | The "until" date is still `Mon D, YYYY, h:mm AM/PM UTC`. Restore afterwards. |
+| 8 | Un-confirm `qa.user` (shell, as MAIL-28 step 8), make an export. | The export is ready and the bell has its notice (NOTIF-33) but **no email**. Re-confirm afterwards. |
+| 9 | A failed export (RCPT-69). | **No email** is sent (the notice and the refund only). |
+
 ### MAIL-23 Every email of the run follows the rules
 
 **Purpose:** a final sweep over everything this file made the site send.
-**Preconditions:** MAIL-01 to MAIL-28 have run.
+**Preconditions:** MAIL-01 to MAIL-29 have run.
 
 | # | Action | Expected result |
 |---|---|---|

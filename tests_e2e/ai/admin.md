@@ -1102,6 +1102,21 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | 3 | Open `/admin/todo/task/`. | The list has a **Project** column. |
 | 4 | Open `/admin/todo/todosettings/`. | "Max projects per user" (100) is there and editable. Set it to 1, save, and as `qa.user` (who has projects) add another: `You can have up to 1 project.` Restore 100. |
 
+### ADM-66 Receipt exports and the "Export per receipt" setting
+
+**Purpose:** staff can see exports (read-only) and change the export price and retention (issue #315).
+**Preconditions:** RCPT-64, RCPT-68 and RCPT-69 done (a ready, a partly-skipped and a failed export).
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | As `qa.admin@example.com`, open `/admin/receipts/receiptssettings/` (it goes straight to the form). | Under "Receipts settings" the fields **Export per receipt** (3), **Export retention days** (30, help "Days the zip files of an export stay available...") and **Export part size (bytes)** (104857600). Set **Export per receipt** to `0` and **Save**: saved. Check the Download files dialog now says "This is free." and the Costs page (BILL-38) shows Free. Put it back to `3`. |
+| 2 | Enter `0` in **Export retention days**. | The form refuses (minimum 1). Enter `5` in **Export part size**: refused (minimum 10 MB). |
+| 3 | Open `/admin/receipts/receiptexport/`. | The list shows id, user, status, layout, file count, part count, skipped, charged, refunded, created and expires; filters by status, layout and date; search by id, email and error. |
+| 4 | Filter by status **Failed**; open that export. | Every field read-only (`last_error` shows the cause, e.g. `RuntimeError: S3 is down`); "refunded credits" equals "charged credits"; no parts. There is no Add, Save or Delete button; `/admin/receipts/receiptexport/add/` is a 403. |
+| 5 | Open the ready export. | The Parts table lists `number`, `key` (`receipts/users/<user id>/exports/<id>/part-01.zip`), size, file count and built time, read-only. |
+| 6 | Delete a user who has exports (a throwaway account that made one) from `/admin/accounts/user/`. | The delete page lists the user's exports among the objects removed and is allowed; afterwards the export rows are gone and the zip objects too (the user's whole prefix is deleted). |
+| 7 | `/admin/core/scheduledjob/`. | `receipts.purge_exports` is listed (daily) with its description "Deletes the zip files of receipt exports once their retention days have passed...". |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`
