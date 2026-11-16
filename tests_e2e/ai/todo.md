@@ -8,7 +8,7 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 (#272), blockers (#273), the activity log (#274) and the polish of the E2E run (#224):
 
 - the sidebar (a search box, then Today with a count, Upcoming, All, Closed, Labels, Trash, Settings, then
-  a **Projects** section (issue #314: projects, the project page, moving, archiving, sections and the manual order; TODO-62 to TODO-66) and
+  a **Projects** section (issue #314: projects, the project page, moving, archiving, sections and the manual order, the API and CLI; TODO-62 to TODO-67) and
   a **Filters** section; a top bar of scrolling rows on phones), the "Tasks are blocked" and "Storage is paused"
   banners;
 - **Today** `/todo/` (the quick-add box with the free-tasks line, the Overdue section with "Reschedule overdue to
@@ -1298,6 +1298,21 @@ one`; a second user (Session B) with a task.
 | 13 | Rename `Design` to `Visuals` (pencil), then delete it (confirm). | "Section renamed."; the question says its tasks stay in the project; "Deleted the section Visuals. Its N tasks stay in the project." The tasks are in the top list, at its end; each History has "The section Visuals was deleted: the task is in no section" (Automatic). |
 | 14 | Archive the project and open its page. | Sections and tasks are listed, with no handles, no rename / delete, no "Add a task to ..." and no Add section. Posting to `/todo/projects/<id>/sections/` is refused: `Unarchive the project to change its sections.` |
 
+### TODO-67 Projects and sections over the API and the CLI
+
+**Preconditions:** TODO-55's JWT for `qa.user@example.com`; no project named `Api project`.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | `POST /api/todo/projects` `{"name": "Api project", "color": "#5b8def"}`, then the same again, then `{"name": "x", "colour": "#000"}`. | 201 with `archived_at: null`, `sections: []`, `open_count: 0`; the repeat is a 400 `name: You already have a project with this name.`; the unknown key a 422. |
+| 2 | `POST /api/todo/projects/<id>/sections` `{"name": "Design"}`; `POST /api/todo/tasks` `{"title": "Api filed", "project": "<id>", "section": "<section id>"}`; then with a made-up `project` UUID. | The project comes back with the section; the task has `project.name` `Api project` and `section.name` `Design`; the made-up id is a 400 `project: Unknown project.` and creates nothing. |
+| 3 | `GET /api/todo/tasks?project=<id>`, `?project=none`, `?project=<id>&sort=manual`, `?sort=manual`. | Only the project's tasks; only tasks in no project; the project's tasks in its own order; a 400 `sort: manual needs project to be exactly one project id.` |
+| 4 | `PATCH /api/todo/tasks/<n>` `{"section": null}`, then `{"project": null}`; on a subtask `{"project": "<id>"}`. | The section, then the project, are `null`; the subtask is a 400 `project: A subtask is in its parent's project. Move the parent instead.` |
+| 5 | Put the task back in the project; `POST /api/todo/projects/<id>/archive` twice; `GET /api/todo/tasks?view=all`, `?include_archived=true`, `?project=<id>`. | `archived_at` is set and the same both times; the task is missing from the plain list, present with `include_archived` and with `project=` (its `project.archived` is `true`). The website's All page does not list it either. |
+| 6 | `POST .../unarchive`, then `DELETE /api/todo/projects/<id>`, then `GET /api/todo/tasks/<n>`. | The project is active; 204; the task still exists with `project: null` and `section: null`. |
+| 7 | `inv todo project-add local Cli project`, `section-add local "Cli project" Design`, `add local "cli filed" --project "cli project" --section design`, `list local --project "Cli project"`, `projects local`. | The project and section are made; the task is listed with `Cli project / Design` in the Project column; `projects` shows 1 open and the section. |
+| 8 | `inv todo edit local <n> --no-section`, `edit local <n> --no-project`, `add local x --project Nope`, `project-archive local "Cli project"` (answer n), `project-delete local "Cli project" --yes`. | Each edit succeeds; the unknown project exits 1 with `No project called "Nope"` and creates nothing; the archive asks and does nothing on `n`; the delete succeeds. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it
@@ -1312,9 +1327,6 @@ one`; a second user (Session B) with a task.
   the shell steps (the scheduler does not run on this server).
 - **A reminder email to an unconfirmed address** ("not sent: your email address is not confirmed"): reaching it
   needs an email change through the JWT API, which is out of scope here; unit-tested.
-- **Projects over the JWT API and the CLI**: not built yet (issue #314's third part). The plain API lists leave the
-  tasks of archived projects out and a saved filter carries `projects` / `include_archived`; both are unit-tested
-  (`test_projects.py`).
 - **Rate limits** (switched off on this server), the rest of the JWT API `/api/todo/` and the `inv todo` CLI (unit tests). The
   activity log's entries made through the email intake (automatic, with the files), the phone's Complete
   button and the daily purge, and the channel each is recorded under, are unit-tested (`test_activity_log.py`); the

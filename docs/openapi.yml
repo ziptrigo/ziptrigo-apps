@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.10.0
+  version: 2.11.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -3345,6 +3345,378 @@ paths:
         required: true
       security:
       - JWTAuth: []
+  /api/todo/projects:
+    get:
+      operationId: apps_todo_api_projects_list_projects
+      summary: List Projects
+      parameters:
+      - in: query
+        name: archived
+        schema:
+          default: 'false'
+          title: Archived
+          type: string
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ProjectSchema'
+                title: Response
+                type: array
+      description: 'The caller''s projects in their order: the active ones (`archived=false`, the default), the
+
+        archived ones (`true`) or both (`all`). Three queries whatever their number.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+    post:
+      operationId: apps_todo_api_projects_create_project
+      summary: Create Project
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSchema'
+      description: 'Add a project at the end of the list. A name another of your projects has (ignoring case),
+
+        a bad colour, a description over 10,000 characters and the cap on projects are a 400.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/todo/projects/reorder:
+    post:
+      operationId: apps_todo_api_projects_reorder_projects
+      summary: Reorder Projects
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ProjectSchema'
+                title: Response
+                type: array
+      description: 'Put the projects in the order given; ids that aren''t yours are ignored. Answers the active
+
+        projects in their new order.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectOrderSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/todo/projects/{project_id}:
+    get:
+      operationId: apps_todo_api_projects_get_project
+      summary: Get Project
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSchema'
+      description: One project, archived or not, with its counts and sections.
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+    patch:
+      operationId: apps_todo_api_projects_update_project
+      summary: Update Project
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSchema'
+      description: 'Rename, recolour or describe a project; only the fields present are applied. An archived
+
+        project can be changed too. A body with nothing in it changes nothing and spends nothing.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_todo_api_projects_delete_project
+      summary: Delete Project
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Delete a project. **Its tasks are kept**: they are then in no project (and no section), and
+
+        the open tasks of an archived project come back to the lists.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/projects/{project_id}/archive:
+    post:
+      operationId: apps_todo_api_projects_archive_project
+      summary: Archive Project
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSchema'
+      description: 'Archive a project: nothing is deleted. Its open tasks leave the `today`, `upcoming` and
+
+        `all` lists, are never overdue, and their reminders wait. Archiving an archived project
+
+        answers it as it is and spends nothing.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/projects/{project_id}/unarchive:
+    post:
+      operationId: apps_todo_api_projects_unarchive_project
+      summary: Unarchive Project
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSchema'
+      description: 'Make an archived project active again: its open tasks are back on the lists, and each one
+
+        that held reminders gets a single reminder for what it missed. A project that isn''t archived
+
+        is answered as it is and spends nothing.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/projects/{project_id}/sections:
+    post:
+      operationId: apps_todo_api_projects_create_section
+      summary: Create Section
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSchema'
+      description: 'Add a section at the end of the project''s. A name the project already has (ignoring case),
+
+        more than 50 sections, and an archived project are a 400. Answers the project.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SectionNameSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/todo/projects/{project_id}/sections/reorder:
+    post:
+      operationId: apps_todo_api_projects_reorder_sections
+      summary: Reorder Sections
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSchema'
+      description: Put the project's sections in the order given; ids that aren't its own are ignored.
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SectionOrderSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/todo/projects/{project_id}/sections/{section_id}:
+    patch:
+      operationId: apps_todo_api_projects_rename_section
+      summary: Rename Section
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      - in: path
+        name: section_id
+        schema:
+          format: uuid
+          title: Section Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSchema'
+      description: Rename a section. Answers the project.
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SectionNameSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_todo_api_projects_delete_section
+      summary: Delete Section
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      - in: path
+        name: section_id
+        schema:
+          format: uuid
+          title: Section Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Delete a section. **Its tasks are kept**: they stay in the project, in no section.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/projects/{project_id}/tasks/reorder:
+    post:
+      operationId: apps_todo_api_projects_reorder_project_tasks
+      summary: Reorder Project Tasks
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          format: uuid
+          title: Project Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountSchema'
+      description: 'Write the hand-made order of one list of the project (see `ProjectTaskOrderSchema`): what
+
+        `GET /tasks?project=<id>&sort=manual` follows. `count` is how many tasks were positioned. An
+
+        archived project, and a `section` that is not one of the project''s, are a 400.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectTaskOrderSchema'
+        required: true
+      security:
+      - JWTAuth: []
   /api/todo/tasks/{number}/reminders:
     post:
       operationId: apps_todo_api_reminders_add_reminder
@@ -3661,6 +4033,21 @@ paths:
           title: Label
         required: false
       - in: query
+        name: project
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project
+        required: false
+      - in: query
+        name: include_archived
+        schema:
+          default: false
+          title: Include Archived
+          type: boolean
+        required: false
+      - in: query
         name: date_range
         schema:
           anyOf:
@@ -3729,7 +4116,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListSchema'
-      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own\n  default when left out (`date`, `priority` and `title` ascending, `created` newest first), the\n  exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open\n  ones. Without `sort`, `dir` means `sort=date` for `view=all` and `upcoming` (date-sorted by\n  default); for `view=today`, `closed`, `trash` and `parent=`, whose own order is not a sort,\n  it is a 400 `dir: Choose a sort to reverse.`\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.\n\n**Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`\nand `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found\nby the website's bounded pass (a 0.2 s budget for the page, only the field the database said\nmatched, at most 5,000 characters of it; rows past the budget are listed without a snippet).\nWithout `q` all four are `null`."
+      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `project`: comma-separated project ids, and `none` for tasks in no project; a task in any\n  of them (an id that is not one of your projects matches nothing). Naming a project lists\n  its tasks even when it is archived.\n- `include_archived`: with `view=all`, the tasks of archived projects too. Without it (and\n  without `project`) `today`, `upcoming` and `all` leave them out, as the website does;\n  `closed`, `trash` and a parent's subtasks never do.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`; or `manual`, the hand-made\n  order of a project's page, which needs `project` to be exactly one project id (a 400\n  otherwise): its sections in order, the tasks with no section first. `manual` has no `dir`.\n- `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own\n  default when left out (`date`, `priority` and `title` ascending, `created` newest first), the\n  exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open\n  ones. Without `sort`, `dir` means `sort=date` for `view=all` and `upcoming` (date-sorted by\n  default); for `view=today`, `closed`, `trash` and `parent=`, whose own order is not a sort,\n  it is a 400 `dir: Choose a sort to reverse.`\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label`, `project` and `date_range`, spends\n`TODO_SEARCH_USER`.\n\n**Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`\nand `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found\nby the website's bounded pass (a 0.2 s budget for the page, only the field the database said\nmatched, at most 5,000 characters of it; rows past the budget are listed without a snippet).\nWithout `q` all four are `null`."
       tags:
       - To-do
       security:
@@ -3898,6 +4285,13 @@ paths:
         included; `blocked` as a change is a 400), and a request that changes nothing -- the same
 
         `blocked_by`, the same `state`, no other field -- spends no budget.
+
+
+        `project` moves the task (and its subtasks) to another project, or out of its project with
+
+        `null`; `section` puts it in a section of the project it ends up in. Both follow the website''s
+
+        rules (see `TaskUpdateSchema`).
 
 
         The fields are checked before `TODO_EDIT_USER` is spent, so a bad value costs nothing. What
@@ -8680,6 +9074,31 @@ components:
       - color
       title: LabelRefSchema
       type: object
+    ProjectRefSchema:
+      description: 'The project a task is in, as the task carries it. `archived`: the project is archived, so
+
+        the task is off the `today`, `upcoming` and `all` lists, never overdue, and its reminders wait.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        color:
+          title: Color
+          type: string
+        archived:
+          title: Archived
+          type: boolean
+      required:
+      - id
+      - name
+      - color
+      - archived
+      title: ProjectRefSchema
+      type: object
     RecurrenceSchema:
       description: 'The repeat rule of a task: `rrule` (an RFC 5545 `RRULE` value without the prefix),
 
@@ -8779,6 +9198,21 @@ components:
       - snoozed_until
       - skipped
       title: ReminderSchema
+      type: object
+    SectionRefSchema:
+      description: The section of its project a task is in.
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+      required:
+      - id
+      - name
+      title: SectionRefSchema
       type: object
     TaskRefSchema:
       description: 'A task another task is linked to (`blocked_by`, `blocks`). `open` says whether it is open:
@@ -8964,6 +9398,21 @@ components:
             $ref: '#/components/schemas/LabelRefSchema'
           title: Labels
           type: array
+        project:
+          anyOf:
+          - $ref: '#/components/schemas/ProjectRefSchema'
+          - type: 'null'
+          description: 'The project the task is in (`null`: none). A subtask is always in its parent''s. `archived: true` means the task is muted with its project.'
+        section:
+          anyOf:
+          - $ref: '#/components/schemas/SectionRefSchema'
+          - type: 'null'
+          description: 'The section of its project the task is in (`null`: none). A subtask has its parent''s.'
+        project_position:
+          default: 0
+          description: 'Its place in the hand-made order of its project (among the tasks of its section, or of the tasks with no section): what `sort=manual` with `project=` follows.'
+          title: Project Position
+          type: integer
         recurrence:
           anyOf:
           - $ref: '#/components/schemas/RecurrenceSchema'
@@ -9570,6 +10019,21 @@ components:
             $ref: '#/components/schemas/LabelRefSchema'
           title: Labels
           type: array
+        project:
+          anyOf:
+          - $ref: '#/components/schemas/ProjectRefSchema'
+          - type: 'null'
+          description: 'The project the task is in (`null`: none). A subtask is always in its parent''s. `archived: true` means the task is muted with its project.'
+        section:
+          anyOf:
+          - $ref: '#/components/schemas/SectionRefSchema'
+          - type: 'null'
+          description: 'The section of its project the task is in (`null`: none). A subtask has its parent''s.'
+        project_position:
+          default: 0
+          description: 'Its place in the hand-made order of its project (among the tasks of its section, or of the tasks with no section): what `sort=manual` with `project=` follows.'
+          title: Project Position
+          type: integer
         recurrence:
           anyOf:
           - $ref: '#/components/schemas/RecurrenceSchema'
@@ -9876,6 +10340,224 @@ components:
       required:
       - title
       title: ParseSchema
+      type: object
+    ProjectSchema:
+      description: 'One of the caller''s projects. A task is in at most one project (a subtask in its parent''s).
+
+
+        `description` is Markdown and `description_html` the same rendered and sanitised. `archived_at`
+
+        is set while the project is archived: its open tasks are then left out of the `today`,
+
+        `upcoming` and `all` lists, are never overdue, and their reminders wait until it is unarchived.
+
+        `open_count` and `closed_count` count its tasks outside the Trash, subtasks included.
+
+        `sections` are in their order.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        color:
+          title: Color
+          type: string
+        description:
+          title: Description
+          type: string
+        description_html:
+          title: Description Html
+          type: string
+        position:
+          title: Position
+          type: integer
+        archived_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Archived At
+        open_count:
+          title: Open Count
+          type: integer
+        closed_count:
+          title: Closed Count
+          type: integer
+        sections:
+          items:
+            $ref: '#/components/schemas/SectionSchema'
+          title: Sections
+          type: array
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+      required:
+      - id
+      - name
+      - color
+      - description
+      - description_html
+      - position
+      - archived_at
+      - open_count
+      - closed_count
+      - sections
+      - created_at
+      title: ProjectSchema
+      type: object
+    SectionSchema:
+      description: 'A section of a project: a named group of its tasks, in the project''s order of sections.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        position:
+          title: Position
+          type: integer
+      required:
+      - id
+      - name
+      - position
+      title: SectionSchema
+      type: object
+    ProjectCreateSchema:
+      additionalProperties: false
+      description: 'Body for `POST /projects`. `color` is `#rrggbb` (empty: the default colour); `description`
+
+        is Markdown, up to 10,000 characters. Names are unique among the caller''s projects, ignoring
+
+        case, archived ones included.'
+      properties:
+        name:
+          title: Name
+          type: string
+        color:
+          default: ''
+          title: Color
+          type: string
+        description:
+          default: ''
+          title: Description
+          type: string
+      required:
+      - name
+      title: ProjectCreateSchema
+      type: object
+    ProjectOrderSchema:
+      description: 'Body for `POST /projects/reorder`: the project ids in the new order (ids that aren''t yours
+
+        are ignored; at most 500).'
+      properties:
+        ids:
+          items:
+            format: uuid
+            type: string
+          maxItems: 500
+          title: Ids
+          type: array
+      required:
+      - ids
+      title: ProjectOrderSchema
+      type: object
+    ProjectUpdateSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /projects/{id}`: only the fields present are applied. An explicit `null`
+
+        clears `description` (to empty) and `color` (to the default); a `name` cannot be empty, so
+
+        `null` there is a 400. A key that is not one of these is a 422.'
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+      title: ProjectUpdateSchema
+      type: object
+    SectionNameSchema:
+      additionalProperties: false
+      description: 'Body for adding or renaming a section: its name (unique in the project, ignoring case; up
+
+        to 80 characters).'
+      properties:
+        name:
+          title: Name
+          type: string
+      required:
+      - name
+      title: SectionNameSchema
+      type: object
+    SectionOrderSchema:
+      description: 'Body for `POST /projects/{id}/sections/reorder`: the section ids in the new order (ids that
+
+        aren''t this project''s are ignored).'
+      properties:
+        ids:
+          items:
+            format: uuid
+            type: string
+          maxItems: 50
+          title: Ids
+          type: array
+      required:
+      - ids
+      title: SectionOrderSchema
+      type: object
+    CountSchema:
+      properties:
+        count:
+          title: Count
+          type: integer
+      required:
+      - count
+      title: CountSchema
+      type: object
+    ProjectTaskOrderSchema:
+      additionalProperties: false
+      description: 'Body for `POST /projects/{id}/tasks/reorder`: the hand-made order of **one list** of the
+
+        project''s page. `section` is the list: a section id, or `null` for the tasks with no section.
+
+        `ids` are task ids (not numbers) in the order wanted; ids that are not the caller''s non-trashed
+
+        tasks of this project are ignored. A task listed that is in another section **joins this one**,
+
+        with its subtasks; a subtask listed alone stays with its parent.'
+      properties:
+        section:
+          anyOf:
+          - format: uuid
+            type: string
+          - type: 'null'
+          title: Section
+        ids:
+          items:
+            format: uuid
+            type: string
+          maxItems: 500
+          title: Ids
+          type: array
+      required:
+      - ids
+      title: ProjectTaskOrderSchema
       type: object
     ReminderCreateSchema:
       additionalProperties: false
@@ -10356,6 +11038,21 @@ components:
             $ref: '#/components/schemas/LabelRefSchema'
           title: Labels
           type: array
+        project:
+          anyOf:
+          - $ref: '#/components/schemas/ProjectRefSchema'
+          - type: 'null'
+          description: 'The project the task is in (`null`: none). A subtask is always in its parent''s. `archived: true` means the task is muted with its project.'
+        section:
+          anyOf:
+          - $ref: '#/components/schemas/SectionRefSchema'
+          - type: 'null'
+          description: 'The section of its project the task is in (`null`: none). A subtask has its parent''s.'
+        project_position:
+          default: 0
+          description: 'Its place in the hand-made order of its project (among the tasks of its section, or of the tasks with no section): what `sort=manual` with `project=` follows.'
+          title: Project Position
+          type: integer
         recurrence:
           anyOf:
           - $ref: '#/components/schemas/RecurrenceSchema'
@@ -10576,18 +11273,23 @@ components:
           maxItems: 20
           title: Blocked By
           type: array
+        project:
+          anyOf:
+          - format: uuid
+            type: string
+          - type: 'null'
+          description: 'The id of one of your projects to put the task in. One that is not yours is a 400 `project: Unknown project.`; an archived one is a 400 too. Ignored for a subtask, which is in its parent''s project.'
+          title: Project
+        section:
+          anyOf:
+          - format: uuid
+            type: string
+          - type: 'null'
+          description: 'The id of a section of that project (a 400 `section: Unknown section.` for any other, and without a `project`). The task goes to the end of it.'
+          title: Section
       required:
       - title
       title: TaskCreateSchema
-      type: object
-    CountSchema:
-      properties:
-        count:
-          title: Count
-          type: integer
-      required:
-      - count
-      title: CountSchema
       type: object
     ReorderSchema:
       additionalProperties: false
@@ -10741,6 +11443,21 @@ components:
             $ref: '#/components/schemas/LabelRefSchema'
           title: Labels
           type: array
+        project:
+          anyOf:
+          - $ref: '#/components/schemas/ProjectRefSchema'
+          - type: 'null'
+          description: 'The project the task is in (`null`: none). A subtask is always in its parent''s. `archived: true` means the task is muted with its project.'
+        section:
+          anyOf:
+          - $ref: '#/components/schemas/SectionRefSchema'
+          - type: 'null'
+          description: 'The section of its project the task is in (`null`: none). A subtask has its parent''s.'
+        project_position:
+          default: 0
+          description: 'Its place in the hand-made order of its project (among the tasks of its section, or of the tasks with no section): what `sort=manual` with `project=` follows.'
+          title: Project Position
+          type: integer
         recurrence:
           anyOf:
           - $ref: '#/components/schemas/RecurrenceSchema'
@@ -10958,6 +11675,20 @@ components:
           - type: 'null'
           description: Replaces the set of tasks that block this one (numbers, at most 20); `null` or `[]` removes them all.
           title: Blocked By
+        project:
+          anyOf:
+          - format: uuid
+            type: string
+          - type: 'null'
+          description: Moves the task to one of your projects, with its subtasks; `null` takes it out of its project. A move to another project leaves its section (send `section` too to choose one there). A 400 for a subtask (move its parent), a task in the Trash, a project that is not yours or is archived.
+          title: Project
+        section:
+          anyOf:
+          - format: uuid
+            type: string
+          - type: 'null'
+          description: Puts the task in a section of its project (the one it has, or the `project` sent with it), at the end of it; `null` takes it out of its section. A 400 for a section of another project and for a subtask.
+          title: Section
       title: TaskUpdateSchema
       type: object
     ErrorSchema:

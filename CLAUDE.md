@@ -55,7 +55,7 @@ apps/short_url/       Short URLs (issue #162): links with editable destinations,
 apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks with per-user numbers
                       from 1000, labels, due dates in the user's time zone, task states and
                       resolutions (#272), Today / Upcoming / All / Closed / Trash pages, task billing (a monthly free allowance, then a price),
-                      projects (#314, parts 1 and 2 of 3: a task is in at most one, sections, a manual order, archive and delete),
+                      projects (#314: a task is in at most one, sections, a manual order, archive and delete),
                       tasks added by email, the JWT API (`/api/todo/`) and the `admin/todo.py` CLI
                       (see "To-do").
 apps/notes/           Notes (issue #260, PRs 2 to 6 of 6): Markdown notes with tags, versions
@@ -149,6 +149,10 @@ inv todo postpone local 1234 tomorrow|next-week|next-weekend|2026-12-24
 inv todo overdue-to-today local
 inv todo comment local 1234 asked the landlord  # comments local 1234 lists them
 inv todo labels local | label-add local home --color "#336699" | label-edit local home --name house | label-delete local home [--yes]
+inv todo projects local [--archived | --all] | project-add local Website relaunch --color "#5b8def" | project-edit local Website --name Site
+inv todo project-archive|project-unarchive|project-delete local Website [--yes] | section-add local Website Design | section-rename local Website Design Visuals | section-delete local Website Design [--yes]
+inv todo add local "review mockups" --project Website --section Design | edit local 1234 --project Website | --no-project | --section Design | --no-section
+inv todo list local --project Website [--project none --include-archived --sort manual]
 inv todo remind local 1234 60 [--channel in_app|email|both] | unremind local 1234 <reminder-id>
 inv todo upload local 1234 contract.pdf photo.jpg   # SHA-256, presigned PUT, complete; exit 1 if any failed
 inv todo download local <attachment-id> [--out contract.pdf --force]   # streams to .part, then renames
@@ -4851,10 +4855,11 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
 
 #### Projects
 
-Issue #314, **parts 1 and 2 of 3** (`models/project.py`, `services/projects.py`, `views/projects.py`,
+Issue #314, **all three parts** (`models/project.py`, `services/projects.py`, `views/projects.py`,
 `forms/project.py`, migrations `0017_projects` and `0018_sections`; the mock all three parts were designed from is
 `docs/ui-design/mocks/todo-projects.html`). Part 2 added sections inside a project and a manual order
-on the project page ("Sections and the manual order" below); part 3 is projects in the JWT API and the CLI. Projects are **free** (the Costs
+on the project page ("Sections and the manual order" below); part 3 put projects and sections in
+the JWT API and the CLI ("The API and the CLI" below). Projects are **free** (the Costs
 line says so).
 
 - **Model.** `Project` (UUID, `user` with `related_name='todo_projects'`, `name` up to
@@ -4951,12 +4956,48 @@ line says so).
   unchanged. `describe_params`: `in Website, no project`, `including archived projects`;
   `filters.label_names(user)` now maps project ids too (one dict for both). The search page has a
   Project checkbox group and "Include archived projects".
-- **The API** (part 3 will add the rest). Two things already apply: `GET /api/todo/tasks` with
-  `view=all` (and `today` / `upcoming`) leaves the tasks of archived projects out, as the website
-  does (`_view_queryset`; the filters themselves run with `include_archived`, so a filter on
-  `view=closed`, the Trash or a parent's subtasks never drops them), and `FilterParamsSchema` has `projects` and `include_archived` (so the app's `PATCH` of a
-  filter, which replaces `params` as a whole, does not drop them; a malformed id is a 422). The
-  activity log's `kind` enum gained `project` and `section`. OpenAPI 2.10.0. A task's JSON has no `project` yet.
+- **The API and the CLI** (part 3; `api/projects.py`, `schemas/project.py`, `admin/todo.py`; no
+  migration; OpenAPI 2.11.0, additive). Every endpoint calls `services.projects` and adds no rule.
+  - *Projects.* `GET /projects?archived=false|true|all` (three queries whatever their number: the
+    sections of all of them are read at once), `POST /projects` (201), `POST /projects/reorder`,
+    `GET|PATCH|DELETE /projects/{id}` (`DELETE` keeps the tasks, 204), `POST
+    /projects/{id}/archive|unarchive` (idempotent: the state it already has is answered and spends
+    nothing). A project is `{id, name, color, description, description_html, position, archived_at,
+    open_count, closed_count, sections: [{id, name, position}], created_at}`. *Sections:* `POST
+    /projects/{id}/sections` (201), `POST .../sections/reorder`, `PATCH|DELETE
+    .../sections/{section_id}`, each answering the project (the `DELETE` a 204). `POST
+    /projects/{id}/tasks/reorder` `{section, ids}` is `reorder_tasks` for one list (`{count}`).
+  - *Tasks.* A task's JSON has `project` (`{id, name, color, archived}` or `null`), `section`
+    (`{id, name}` or `null`) and `project_position`, joined by `decorated` (no query per task; a
+    100-task page stays within its pinned count). `POST /tasks` takes `project` and `section` (ids;
+    checked by `check_new_task` before the budget is spent). `PATCH /tasks/{number}` takes
+    `project` (`null`: out of its project) and `section` (`null`: out of its section; a section of
+    the project the task ends up in): `check_move` / `clean_section` run before `TODO_EDIT_USER`,
+    the values the task already has are a no-op that spends nothing, and the move, the section and
+    the other fields are one transaction. `GET /tasks` takes `project` (comma ids and `none`; naming
+    a project lists it even when archived; counts as a criterion, so it spends `TODO_SEARCH_USER`),
+    `include_archived` (with `view=all`) and `sort=manual`, which needs exactly one project id and
+    no `dir` (a 400 otherwise): sections in their order, the tasks with no section first, then
+    `project_position`. `today`, `upcoming` and `all` leave the tasks of archived projects out
+    unless `project` or `include_archived` says otherwise (`_view_queryset`); the filters themselves
+    run with `include_archived`, so a filter on `view=closed`, the Trash or a parent's subtasks
+    never drops them. `FilterParamsSchema` has `projects` and `include_archived`.
+  - *Status codes*: 400 for a service refusal (`project: Unknown project.`, `section: Unknown
+    section.`, an archived project, a subtask moved on its own; a project or section **id in a
+    body** that isn't the caller's is a 400, like a foreign label), 404 for another user's project
+    in the path and for a section that isn't that project's, 422 ninja's own (a malformed UUID, an
+    unknown key: every body is `extra='forbid'`), 429. The activity log's `kind` enum has `project`
+    and `section`.
+  - *CLI* (`inv todo ...`): `projects [--archived | --all]`, `project-add <name...> [--color
+    --description]`, `project-edit <project> [--name --color --description]`, `project-archive`
+    (asks; `--yes`), `project-unarchive`, `project-delete` (asks), `section-add <project>
+    <name...>`, `section-rename <project> <section> <name...>`, `section-delete` (asks). A project
+    and a section are named by name (ignoring case) or id; an unknown one stops before anything is
+    sent. `add --project X [--section Y]`, `edit --project X | --no-project | --section Y |
+    --no-section` (`--section` alone means a section of the project the task is in), `list
+    --project X` (repeatable, `none` allowed) `--include-archived --sort manual`; the list table has
+    a Project column (`Project / Section`, `(archived)`), and `get` prints it. Tests:
+    `apps/todo/tests/test_api_projects.py`, `admin/tests/test_todo.py`.
 - **Admin.** Read-only `ProjectAdmin` (archived mark and filter, task count); `TaskAdmin` lists
   `project`. Deleting a user takes their projects (`todo` is in `CASCADE_WITH_USER_APP_LABELS`).
 - **Sections and the manual order** (part 2).
@@ -5015,12 +5056,11 @@ line says so).
     project stays the same** (the two selects are one form, so a new project arrives with the old
     project's section), in one transaction with the move); the top line reads "In X / Design". The Move dialog on rows chooses
     a project only.
-  - *Not in part 2:* a section filter in search, sections in the API (part 3), a board view.
-- **Not done:** the API and CLI (part 3),
-  filing emailed tasks (they are in no project), reading a project from the title, bulk moves, and
+  - *Not in part 2:* a section filter in search, a board view.
+- **Not done:** filing emailed tasks (they are in no project), reading a project from the title, bulk moves, and
   the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
   To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
-- **Tests.** `apps/todo/tests/test_projects.py`; the AI plan has TODO-62 to TODO-66 and ADM-65.
+- **Tests.** `apps/todo/tests/test_projects.py`; the AI plan has TODO-62 to TODO-67 and ADM-65.
 
 #### Comments and references
 
@@ -7585,9 +7625,8 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   short link zone (#170), sized well above what a crowd behind one shared address produces.
   `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
   `receipts.py` and `filetransfer.py` still carry their own copies of it.
-- To-do projects (#314) are built in three parts; the first two exist (projects, the project page,
-  moving, archive and delete, the search filter; sections and the manual order). The API and CLI
-  are still to come: until then the Android app and `inv todo` neither show nor set a task's project.
+- To-do projects (#314) are built (three parts). The Android app, which is built from
+  `docs/openapi.yml`, does not use the new endpoints and fields yet.
 - To-do (#161) is built in waves. Only the foundation (#178: tasks, subtasks, labels, numbering, task
   billing, the web pages) and repeating tasks (#179) exist; comments, search, reminders, attachments,
   AI date parsing, email intake and the JWT API/CLI are their own sub-issues. Completing a repeating

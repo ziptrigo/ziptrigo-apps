@@ -2125,3 +2125,201 @@ def test_the_site_is_announced_on_stderr(api):
     result = runner.invoke(todo.app, ['list', 'local'])
 
     assert 'Site: http://localhost:8000 (local)' in result.output
+
+
+# -- projects and sections (issue #314) --
+
+PROJECT_ID = '88888888-8888-8888-8888-888888888888'
+SECTION_ID = '99999999-9999-9999-9999-999999999999'
+PROJECT = {
+    'id': PROJECT_ID,
+    'name': 'Website relaunch',
+    'color': '#5b8def',
+    'description': '',
+    'description_html': '',
+    'position': 0,
+    'archived_at': None,
+    'open_count': 4,
+    'closed_count': 1,
+    'sections': [{'id': SECTION_ID, 'name': 'Design', 'position': 0}],
+    'created_at': '2026-11-15T10:00:00Z',
+}
+FILED = {
+    **TASK,
+    'project': {
+        'id': PROJECT_ID,
+        'name': 'Website relaunch',
+        'color': '#5b8def',
+        'archived': False,
+    },
+    'section': {'id': SECTION_ID, 'name': 'Design'},
+}
+
+
+def test_projects_table(api):
+    api.on('get', '/todo/projects', FakeResponse(200, [PROJECT]))
+
+    result = invoke('projects', 'local')
+
+    assert result.exit_code == 0
+    assert api.calls[0]['params'] == {'archived': 'false'}
+    row = next(line for line in result.output.splitlines() if 'Website relaunch' in line)
+    assert 'Design' in row and PROJECT_ID in row and '4' in row
+
+
+def test_projects_archived_and_all(api):
+    api.on('get', '/todo/projects', FakeResponse(200, []))
+
+    invoke('projects', 'local', '--archived')
+    result = invoke('projects', 'local', '--all')
+
+    assert [c['params'] for c in api.calls] == [{'archived': 'true'}, {'archived': 'all'}]
+    assert 'No projects' in result.output
+
+
+def test_project_add_joins_the_name(api):
+    api.on('post', '/todo/projects', FakeResponse(201, PROJECT))
+
+    result = invoke('project-add', 'local', 'Website', 'relaunch', '--color', '#5b8def')
+
+    assert result.exit_code == 0
+    assert api.calls[0]['json'] == {
+        'name': 'Website relaunch',
+        'color': '#5b8def',
+        'description': '',
+    }
+
+
+def test_project_edit_by_name(api):
+    api.on('get', '/todo/projects', FakeResponse(200, [PROJECT]))
+    api.on('patch', f'/todo/projects/{PROJECT_ID}', FakeResponse(200, {**PROJECT, 'name': 'Site'}))
+
+    result = invoke('project-edit', 'local', 'website RELAUNCH', '--name', 'Site')
+
+    assert result.exit_code == 0
+    assert api.requests('patch')[0]['json'] == {'name': 'Site'}
+    assert invoke('project-edit', 'local', 'x').exit_code == 1
+
+
+def test_an_unknown_project_stops_before_anything_is_sent(api):
+    api.on('get', '/todo/projects', FakeResponse(200, [PROJECT]))
+
+    result = invoke('add', 'local', 'New', '--project', 'Nope')
+
+    assert result.exit_code == 1 and 'No project called "Nope"' in flat(result)
+    assert api.requests('post') == []
+
+
+def test_project_archive_asks_first_and_skips_an_archived_one(api):
+    api.on('get', '/todo/projects', FakeResponse(200, [PROJECT]))
+    api.on('post', f'/todo/projects/{PROJECT_ID}/archive', FakeResponse(200, PROJECT))
+
+    declined = invoke('project-archive', 'local', PROJECT_ID, input='n\n')
+    assert declined.exit_code != 0 and api.requests('post') == []
+
+    assert invoke('project-archive', 'local', PROJECT_ID, '--yes').exit_code == 0
+    assert len(api.requests('post')) == 1
+
+    api.on('get', '/todo/projects', FakeResponse(200, [{**PROJECT, 'archived_at': '2026-11-15'}]))
+    again = invoke('project-archive', 'local', PROJECT_ID, '--yes')
+    assert 'already archived' in again.output and len(api.requests('post')) == 1
+
+
+def test_project_unarchive_and_delete(api):
+    archived = {**PROJECT, 'archived_at': '2026-11-15T10:00:00Z'}
+    api.on('get', '/todo/projects', FakeResponse(200, [archived]))
+    api.on('post', f'/todo/projects/{PROJECT_ID}/unarchive', FakeResponse(200, PROJECT))
+    api.on('delete', f'/todo/projects/{PROJECT_ID}', FakeResponse(204))
+
+    assert invoke('project-unarchive', 'local', 'website relaunch').exit_code == 0
+    deleted = invoke('project-delete', 'local', 'website relaunch', '--yes')
+
+    assert deleted.exit_code == 0 and len(api.requests('delete')) == 1
+
+
+def test_section_commands(api):
+    api.on('get', '/todo/projects', FakeResponse(200, [PROJECT]))
+    base = f'/todo/projects/{PROJECT_ID}/sections'
+    api.on('post', base, FakeResponse(201, PROJECT))
+    api.on('patch', f'{base}/{SECTION_ID}', FakeResponse(200, PROJECT))
+    api.on('delete', f'{base}/{SECTION_ID}', FakeResponse(204))
+
+    assert invoke('section-add', 'local', PROJECT_ID, 'This', 'week').exit_code == 0
+    assert invoke('section-rename', 'local', PROJECT_ID, 'design', 'Visuals').exit_code == 0
+    assert invoke('section-delete', 'local', PROJECT_ID, 'Design', '--yes').exit_code == 0
+    missing = invoke('section-delete', 'local', PROJECT_ID, 'Nope', '--yes')
+
+    assert api.requests('post')[0]['json'] == {'name': 'This week'}
+    assert api.requests('patch')[0]['json'] == {'name': 'Visuals'}
+    assert missing.exit_code == 1 and 'has no section called "Nope"' in flat(missing)
+    assert len(api.requests('delete')) == 1
+
+
+def test_add_into_a_project_and_section(api):
+    api.on('get', '/todo/projects', FakeResponse(200, [PROJECT]))
+    api.on('post', '/todo/tasks', FakeResponse(201, {**FILED, 'parsed': None}))
+
+    result = invoke(
+        'add', 'local', 'Mockups', '--project', 'website relaunch', '--section', 'design'
+    )
+
+    assert result.exit_code == 0
+    sent = api.requests('post')[0]['json']
+    assert (sent['project'], sent['section']) == (PROJECT_ID, SECTION_ID)
+    assert invoke('add', 'local', 'X', '--section', 'Design').exit_code != 0  # needs --project
+
+
+def test_edit_project_and_section(api):
+    api.on('get', '/todo/projects', FakeResponse(200, [PROJECT]))
+    api.on('get', f'/todo/projects/{PROJECT_ID}', FakeResponse(200, PROJECT))
+    api.on('get', '/todo/tasks/1234', FakeResponse(200, FILED))
+    api.on('patch', '/todo/tasks/1234', FakeResponse(200, FILED))
+
+    invoke('edit', 'local', '1234', '--project', PROJECT_ID, '--section', 'Design')
+    invoke('edit', 'local', '1234', '--section', 'design')  # of the project it is in
+    invoke('edit', 'local', '1234', '--no-section')
+    invoke('edit', 'local', '1234', '--no-project')
+
+    assert [c['json'] for c in api.requests('patch')] == [
+        {'project': PROJECT_ID, 'section': SECTION_ID},
+        {'section': SECTION_ID},
+        {'section': None},
+        {'project': None},
+    ]
+    assert invoke('edit', 'local', '1234', '--project', 'x', '--no-project').exit_code != 0
+
+
+def test_edit_section_of_a_task_in_no_project(api):
+    api.on('get', '/todo/tasks/1234', FakeResponse(200, {**TASK, 'project': None}))
+
+    result = invoke('edit', 'local', '1234', '--section', 'Design')
+
+    assert result.exit_code == 1 and 'is in no project' in flat(result)
+
+
+def test_list_by_project_and_the_project_column(api):
+    api.on('get', '/todo/projects', FakeResponse(200, [PROJECT]))
+    page = {'count': 1, 'limit': 50, 'offset': 0, 'results': [FILED]}
+    api.on('get', '/todo/tasks', FakeResponse(200, page))
+
+    result = invoke(
+        'list', 'local', '--project', 'Website relaunch', '--project', 'none', '--sort', 'manual'
+    )
+
+    assert result.exit_code == 0
+    params = api.requests('get', '/todo/tasks')[0]['params']
+    assert params['project'] == f'{PROJECT_ID},none' and params['sort'] == 'manual'
+    assert 'Design' in flat(result) and 'Website' in flat(result)
+
+
+def test_get_shows_the_project(api):
+    api.on(
+        'get',
+        '/todo/tasks/1234',
+        FakeResponse(200, {**FILED, 'attachments': [], 'referenced_by': []}),
+    )
+    api.on('get', '/todo/tasks/1234/comments', FakeResponse(200, []))
+
+    result = invoke('get', 'local', '1234')
+
+    assert 'Project: Website relaunch / Design' in flat(result)
