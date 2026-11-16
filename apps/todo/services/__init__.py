@@ -18,6 +18,7 @@ from . import (
     saved_filters,
     search,
     tasks,
+    title_tags,
 )
 from .accounts import (
     active_inbox_code,
@@ -301,6 +302,7 @@ __all__ = [
     'subtasks_of',
     'sync_references',
     'tasks',
+    'title_tags',
     'toggle_checklist',
     'today_set',
     'todays_tasks',

@@ -118,7 +118,7 @@ from ..models import (
     TodoSettings,
 )
 from . import attachments as attachments_service
-from . import billing, dates, events, parsing, tasks
+from . import billing, dates, events, parsing, tasks, title_tags
 from .accounts import add_stored_bytes
 from .limits import DESCRIPTION_MAX, TITLE_MAX
 from .storage import INBOUND_PREFIX, attachment_key, failed_key_for, get_storage
@@ -642,10 +642,12 @@ def _ingest_for_recipient(context: _Context, recipient: mime.InboxRecipient) -> 
 
     # The AI call is slow and costs us: outside any transaction, after the cheap refusals above
     # (the cap on open tasks and the credits).
-    request = _parse_request(user, account, title or NO_SUBJECT)
+    # `#project` and `@label` in the subject, read before the date so the model never sees them.
+    tags = title_tags.read(user, title or NO_SUBJECT)
+    request = _parse_request(user, account, tags.title)
     reading = _read_date(user, request)
     email.note = note
-    _create(context, user, email, title or NO_SUBJECT, description, reading, files, config)
+    _create(context, user, email, tags, description, reading, files, config)
 
 
 def _at_task_cap(user: User, config: TodoSettings) -> bool:
@@ -734,7 +736,7 @@ def _create(
     context: _Context,
     user: User,
     email: InboundEmail,
-    title: str,
+    tags: title_tags.TitleTags,
     description: str,
     reading: parsing.TitleParse | None,
     files: list[_File],
@@ -752,7 +754,7 @@ def _create(
             written.append(key)
 
         with transaction.atomic():
-            created = _create_task(user, email, title, description, reading)
+            created = _create_task(user, email, tags, description, reading)
             email.status = InboundEmailStatus.ACCEPTED
             email.task = created
             email.save(force_insert=True)
@@ -813,13 +815,14 @@ class _Refused(Exception):
 def _create_task(
     user: User,
     email: InboundEmail,
-    title: str,
+    tags: title_tags.TitleTags,
     description: str,
     reading: parsing.TitleParse | None,
 ):
     """`tasks.create_task` for an email, with the AI's date when there is one. A date the task
     service won't take (it should not happen: the reading was validated) is dropped rather than
-    losing the task."""
+    losing the task. The project and labels are what the subject's tags named."""
+    title = tags.title
     try:
         if reading is not None:
             try:
@@ -830,6 +833,8 @@ def _create_task(
                     due_date=reading.due_date,
                     due_time=reading.due_time,
                     rrule=reading.rrule or '',
+                    project=tags.project,
+                    labels=tags.labels,
                     source=TaskSource.EMAIL,
                     email_from=email.from_address,
                     email_from_authenticated=email.sender_authenticated,
@@ -843,6 +848,8 @@ def _create_task(
             user,
             title=title,
             description=description,
+            project=tags.project,
+            labels=tags.labels,
             source=TaskSource.EMAIL,
             email_from=email.from_address,
             email_from_authenticated=email.sender_authenticated,

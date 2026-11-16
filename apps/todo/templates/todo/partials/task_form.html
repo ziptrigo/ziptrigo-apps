@@ -16,7 +16,7 @@
         <div class="flex-1" data-title-parse data-parse-url="{% url 'todo:parse' %}">
             <label for="quick-title" class="sr-only">Task title</label>
             <input id="quick-title" type="text" name="title" maxlength="500" required autocomplete="off"
-                   placeholder="Add a task" data-parse-input
+                   placeholder="Add a task (#project @label)" data-parse-input
                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
             {% include 'todo/partials/parse_chip.html' with chip_id='quick-parse-chip' %}
         </div>
