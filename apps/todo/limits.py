@@ -10,6 +10,9 @@ MAX_REORDER_IDS = 500
 DESCRIPTION_MAX = 20_000
 LABEL_NAME_MAX = 50
 LABEL_DESCRIPTION_MAX = 255
+#: A project's name and its Markdown description (issue #314).
+PROJECT_NAME_MAX = 80
+PROJECT_DESCRIPTION_MAX = 10_000
 #: A saved filter's name, and how many saved filters one user can have (issue #181).
 SAVED_FILTER_NAME_MAX = 50
 MAX_SAVED_FILTERS = 50

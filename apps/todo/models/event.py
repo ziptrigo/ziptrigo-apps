@@ -35,6 +35,7 @@ class EventKind(models.TextChoices):
     SUBTASK_REMOVED = 'subtask_removed', 'Subtask moved out'
     SUBTASK_CLOSED = 'subtask_closed', 'Subtask closed'
     MOVED = 'moved', 'Moved'
+    PROJECT = 'project', 'Project changed'
     ATTACHMENT_ADDED = 'attachment_added', 'File attached'
     ATTACHMENT_REMOVED = 'attachment_removed', 'File removed'
     TRASHED = 'trashed', 'Moved to the Trash'

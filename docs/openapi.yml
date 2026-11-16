@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.8.0
+  version: 2.9.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -8551,6 +8551,7 @@ components:
           - subtask_removed
           - subtask_closed
           - moved
+          - project
           - attachment_added
           - attachment_removed
           - trashed
@@ -9335,6 +9336,18 @@ components:
             type: string
           title: Labels
           type: array
+        projects:
+          default: []
+          description: 'Project ids, and `none` for tasks in no project: a task in any of them matches. An id that is not one of your projects matches nothing.'
+          items:
+            type: string
+          title: Projects
+          type: array
+        include_archived:
+          default: false
+          description: List the tasks of archived projects too. Without it they are left out, unless `projects` names projects.
+          title: Include Archived
+          type: boolean
         date_range:
           default: any
           title: Date Range
@@ -9412,6 +9425,8 @@ components:
             states: []
             priorities: []
             labels: []
+            projects: []
+            include_archived: false
             date_range: any
             date_from: null
             date_to: null

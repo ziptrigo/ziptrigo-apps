@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-do projects - ZipTrigo (mock)</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="../reference/assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../../../apps/core/static/core/css/site.css">
+</head>
+<!--
+  MOCK for review (issue #314, To-do projects), not wired to anything. Decisions it shows:
+    - flat projects (no folders), a task is in at most one project, subtasks follow their parent;
+    - a project page with a Markdown description, progress, sections as a stacked list, manual order;
+    - archive (fully muted, reversible) and delete (tasks are kept as "No project");
+    - no email intake into a project in v1.
+  Screens (switch with the amber bar):
+    1. project page          /todo/projects/<id>/
+    2. Today with projects   /todo/           (chip on rows, Project in quick add)
+    3. projects list         /todo/projects/  (active + archived, reorder, counts)
+    4. task page details     /todo/1234/      (Project and Section fields, the Move dialog)
+    5. archived project      /todo/projects/<id>/ while archived, and the delete question
+    6. search                /todo/search/    (Project filter, "Include archived")
+  The sidebar and the rows are drawn by the script at the bottom so the six screens stay in step.
+  Built in three parts: 1 (done) projects, the project page, moving, archive and delete, the search filter;
+  2 sections and the Manual sort of screen 1; 3 the JWT API and the CLI. Where part 1 differs from this mock:
+  a row has a folder button for "Move to project" (rows have no "..." menu), the project page's Archive and
+  Delete are buttons, and the projects of the search filter are checkboxes.
+-->
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 font-sans">
+
+    <!-- Mock switcher (not part of the design) -->
+    <div class="bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100 text-sm">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span class="font-semibold"><i class="fas fa-flask mr-1"></i>Mock</span>
+            <button type="button" data-screen="project" class="screen-btn underline">1. Project page</button>
+            <button type="button" data-screen="today" class="screen-btn underline">2. Today</button>
+            <button type="button" data-screen="projects" class="screen-btn underline">3. Projects list</button>
+            <button type="button" data-screen="task" class="screen-btn underline">4. Task page</button>
+            <button type="button" data-screen="archived" class="screen-btn underline">5. Archived / delete</button>
+            <button type="button" data-screen="search" class="screen-btn underline">6. Search</button>
+        </div>
+    </div>
+
+    <header class="bg-gray-100 dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex flex-wrap gap-x-6 gap-y-2">
+                <a href="#" class="text-lg font-semibold hover:text-sage-300">
+                    <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+                </a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-list-check mr-1"></i>To-do</a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-note-sticky mr-1"></i>Notes</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="theme-toggle" type="button" class="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                    <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
+                         src="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-light="../../../apps/core/static/core/images/theme-light_128x128.png"
+                         data-dark="../../../apps/core/static/core/images/theme-dark_128x128.png">
+                </button>
+                <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-user-circle mr-1"></i>Account</a>
+            </div>
+        </nav>
+    </header>
+
+    <div class="container mx-auto px-4 py-6 max-w-6xl flex-grow">
+        <div class="flex flex-col gap-4 md:flex-row md:gap-8">
+            <!-- Sidebar: drawn by the script (same on every screen, the current item changes) -->
+            <div id="sidebar" class="md:w-52 md:flex-shrink-0"></div>
+
+            <div class="min-w-0 flex-1">
+
+                <!-- ============================================================ -->
+                <!-- SCREEN 1: a project's page                                    -->
+                <!-- ============================================================ -->
+                <section id="screen-project" class="screen">
+                    <div class="flex flex-wrap items-start gap-3">
+                        <span class="mt-2 h-3.5 w-3.5 flex-shrink-0 rounded-full" style="background:#5b8def" aria-hidden="true"></span>
+                        <div class="min-w-0 flex-1">
+                            <h1 class="text-2xl font-semibold">Website relaunch</h1>
+                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">7 open · 5 closed · 1 overdue</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="button" class="btn-secondary"><i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit</button>
+                            <button type="button" class="btn-secondary" aria-label="More actions" title="Archive, Delete, Show closed"><i class="fas fa-ellipsis" aria-hidden="true"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Progress: closed / (open + closed), tasks in the Trash left out; Won't do counts as closed -->
+                    <div class="mt-4" role="img" aria-label="5 of 12 tasks closed">
+                        <div class="h-2 rounded-full bg-gray-200 dark:bg-gray-700"><div class="h-2 rounded-full bg-brand-primary" style="width:42%"></div></div>
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">5 of 12 tasks closed</p>
+                    </div>
+
+                    <!-- Markdown description (the task description's renderer; collapsible when long) -->
+                    <div class="card mt-4 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                        <p>Move the marketing site to the new design by <strong>the end of November</strong>.</p>
+                        <p class="mt-2">Brief: <a href="#" class="text-sage-600 dark:text-sage-300 underline">drive.example.com/brief</a> · Staging: <span class="font-mono text-xs">staging.example.com</span></p>
+                    </div>
+
+                    <!-- Sort bar: Manual is the default on a project page -->
+                    <div class="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                        <span class="text-gray-500 dark:text-gray-400">Sort by</span>
+                        <a href="#" class="font-semibold underline underline-offset-4 decoration-sage-400">Manual</a>
+                        <a href="#" class="text-gray-600 dark:text-gray-300 hover:underline">Date</a>
+                        <a href="#" class="text-gray-600 dark:text-gray-300 hover:underline">Priority</a>
+                        <a href="#" class="text-gray-600 dark:text-gray-300 hover:underline">Created</a>
+                        <a href="#" class="text-gray-600 dark:text-gray-300 hover:underline">Title</a>
+                        <label class="ml-auto inline-flex items-center gap-2 text-gray-600 dark:text-gray-300"><input type="checkbox" class="rounded border-gray-300"> Show closed</label>
+                    </div>
+
+                    <!-- Tasks with no section come first, with no heading -->
+                    <div class="card mt-3"><ul class="rows" data-rows="unsectioned"></ul>
+                        <div class="quick-add"><i class="fas fa-plus text-sage-400" aria-hidden="true"></i><input class="qa-input" placeholder="Add a task to Website relaunch" aria-label="Add a task"></div>
+                    </div>
+
+                    <!-- A section: collapsible, renamed in place, dragged by its own handle; tasks drag between sections -->
+                    <div class="mt-5">
+                        <div class="section-head">
+                            <span class="drag-handle text-gray-400" title="Drag to reorder sections, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+                            <button type="button" class="flex items-center gap-2 font-semibold" aria-expanded="true"><i class="fas fa-chevron-down text-xs text-gray-400" aria-hidden="true"></i>Design</button>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">3</span>
+                            <button type="button" class="ml-auto text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" aria-label="Section actions: Rename, Delete" title="Rename, Delete"><i class="fas fa-ellipsis" aria-hidden="true"></i></button>
+                        </div>
+                        <div class="card mt-2"><ul class="rows" data-rows="design"></ul>
+                            <div class="quick-add"><i class="fas fa-plus text-sage-400" aria-hidden="true"></i><input class="qa-input" placeholder="Add a task to Design" aria-label="Add a task to Design"></div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5">
+                        <div class="section-head">
+                            <span class="drag-handle text-gray-400"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+                            <button type="button" class="flex items-center gap-2 font-semibold" aria-expanded="true"><i class="fas fa-chevron-down text-xs text-gray-400" aria-hidden="true"></i>Content</button>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">2</span>
+                            <button type="button" class="ml-auto text-gray-400" aria-label="Section actions"><i class="fas fa-ellipsis" aria-hidden="true"></i></button>
+                        </div>
+                        <div class="card mt-2"><ul class="rows" data-rows="content"></ul>
+                            <div class="quick-add"><i class="fas fa-plus text-sage-400" aria-hidden="true"></i><input class="qa-input" placeholder="Add a task to Content" aria-label="Add a task to Content"></div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5">
+                        <div class="section-head">
+                            <span class="drag-handle text-gray-400"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+                            <button type="button" class="flex items-center gap-2 font-semibold" aria-expanded="false"><i class="fas fa-chevron-right text-xs text-gray-400" aria-hidden="true"></i>Launch</button>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">1</span>
+                            <span class="text-xs text-gray-400">collapsed (remembered in this browser)</span>
+                            <button type="button" class="ml-auto text-gray-400" aria-label="Section actions"><i class="fas fa-ellipsis" aria-hidden="true"></i></button>
+                        </div>
+                    </div>
+
+                    <button type="button" class="mt-5 text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-plus mr-1" aria-hidden="true"></i>Add section</button>
+
+                    <p class="note mt-8">Notes: the task counts come from one query. Subtasks are listed under their parent's place and never
+                        hold a section of their own. A task from the quick-add box of a section lands at the end of it. With a sort other than
+                        Manual the section headings stay and each section is sorted; drag handles are hidden.</p>
+                </section>
+
+                <!-- ============================================================ -->
+                <!-- SCREEN 2: Today, with project chips                           -->
+                <!-- ============================================================ -->
+                <section id="screen-today" class="screen hidden">
+                    <h1 class="text-2xl font-semibold">Today</h1>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Sun 11/15 · 4 of 10 free tasks used this month</p>
+
+                    <!-- Quick add: one new control, Project (defaults to "No project"; on a project page it is that project) -->
+                    <div class="card mt-4 p-4">
+                        <input class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm" placeholder="Add a task, e.g. pay rent every month on the 1st" aria-label="Task title">
+                        <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                            <span class="field">11/15/2026</span><span class="field">Time</span><span class="field"><i class="fas fa-flag mr-1 text-gray-400"></i>Priority</span>
+                            <span class="field"><i class="fas fa-tag mr-1 text-gray-400"></i>Labels</span><span class="field">To do</span>
+                            <span class="field ring-2 ring-sage-300"><span class="mr-1.5 inline-block h-2.5 w-2.5 rounded-full bg-gray-300"></span>No project <i class="fas fa-chevron-down ml-1 text-xs text-gray-400"></i></span>
+                            <button type="button" class="btn-primary ml-auto">Add task</button>
+                        </div>
+                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Project is the themed select: "No project", then the active projects in sidebar order. Archived ones are not offered.</p>
+                    </div>
+
+                    <h2 class="mt-6 text-sm font-semibold text-red-600 dark:text-red-400">Overdue</h2>
+                    <div class="card mt-2"><ul class="rows" data-rows="overdue"></ul></div>
+                    <h2 class="mt-6 text-sm font-semibold">Today</h2>
+                    <div class="card mt-2"><ul class="rows" data-rows="today"></ul></div>
+
+                    <p class="note mt-8">Notes: the project chip (colour dot + name) is on every list except the project's own page, links to the
+                        project, and comes from one <span class="font-mono text-xs">select_related</span>, so no query per row. A row's ⋯ menu gains
+                        "Move to project…". Tasks of an archived project are not on Today, Upcoming or All and are not counted beside Today.</p>
+                </section>
+
+                <!-- ============================================================ -->
+                <!-- SCREEN 3: the projects list                                   -->
+                <!-- ============================================================ -->
+                <section id="screen-projects" class="screen hidden">
+                    <div class="flex items-center gap-3">
+                        <h1 class="text-2xl font-semibold flex-1">Projects</h1>
+                    </div>
+
+                    <!-- Add form (the Labels page's shape: name + colour) -->
+                    <form class="card mt-4 flex flex-wrap items-center gap-2 p-4" onsubmit="return false">
+                        <input class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm" placeholder="New project name" aria-label="Project name" maxlength="80">
+                        <input type="color" value="#8fa89e" aria-label="Colour" class="h-9 w-10 rounded border border-gray-300 dark:border-gray-600 bg-transparent">
+                        <button type="submit" class="btn-primary">Add project</button>
+                    </form>
+
+                    <nav data-tabs class="mt-5 flex gap-5 border-b border-gray-200 dark:border-gray-700 text-sm">
+                        <a href="#" class="-mb-px border-b-2 border-sage-400 pb-2 font-semibold">Active <span class="text-gray-500">4</span></a>
+                        <a href="#" class="pb-2 text-gray-600 dark:text-gray-300">Archived <span class="text-gray-500">1</span></a>
+                    </nav>
+
+                    <div class="card mt-3"><ul id="project-list" class="divide-y divide-gray-200 dark:divide-gray-700"></ul></div>
+
+                    <div class="card mt-5 flex items-center gap-3 px-4 py-3 text-sm">
+                        <span class="h-2.5 w-2.5 rounded-full bg-gray-300" aria-hidden="true"></span>
+                        <a href="#" class="font-medium hover:underline">No project</a>
+                        <span class="text-gray-500 dark:text-gray-400">9 open tasks that are in no project</span>
+                    </div>
+
+                    <p class="note mt-8">Notes: drag (or arrow keys on the handle) sets the sidebar order. Projects are free; a cap per user
+                        (<span class="font-mono text-xs">TodoSettings.max_projects_per_user</span>, 100, archived ones count) bounds them.
+                        Names are unique per user ignoring case, like labels.</p>
+                </section>
+
+                <!-- ============================================================ -->
+                <!-- SCREEN 4: the task page's details, and the Move dialog        -->
+                <!-- ============================================================ -->
+                <section id="screen-task" class="screen hidden">
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        <a href="#" data-screen="project" class="hover:underline"><span class="mr-1 inline-block h-2.5 w-2.5 rounded-full" style="background:#5b8def"></span>Website relaunch</a>
+                        <span class="mx-1">/</span> Design
+                    </p>
+                    <h1 class="mt-1 text-2xl font-semibold">Review homepage mockups <span class="text-base font-normal text-gray-500">#1241</span></h1>
+
+                    <div class="card mt-4 p-4">
+                        <h2 class="text-sm font-semibold">Details</h2>
+                        <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                            <div><dt class="lbl">Due</dt><dd><span class="field">11/17/2026</span> <span class="field">3:00 PM</span></dd></div>
+                            <div><dt class="lbl">Priority</dt><dd><span class="field"><i class="fas fa-flag mr-1 text-red-500"></i>Priority 1</span></dd></div>
+                            <div><dt class="lbl">Project</dt>
+                                <dd><span class="field"><span class="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style="background:#5b8def"></span>Website relaunch <i class="fas fa-chevron-down ml-1 text-xs text-gray-400"></i></span></dd></div>
+                            <div><dt class="lbl">Section</dt>
+                                <dd><span class="field">Design <i class="fas fa-chevron-down ml-1 text-xs text-gray-400"></i></span>
+                                    <span class="ml-1 text-xs text-gray-500 dark:text-gray-400">only while the project has sections</span></dd></div>
+                            <div><dt class="lbl">Labels</dt><dd><span class="chip" style="background:#e9a23b33;color:#9a6a12">design</span></dd></div>
+                            <div><dt class="lbl">Repeat</dt><dd><span class="field">Does not repeat</span></dd></div>
+                        </dl>
+                        <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">A subtask shows its parent's project as plain text ("follows #1241"), not a select.</p>
+                    </div>
+
+                    <div class="card mt-4 p-4">
+                        <h2 class="text-sm font-semibold">History <span class="font-normal text-gray-500">(new entries)</span></h2>
+                        <ul class="mt-2 space-y-1 text-sm text-gray-700 dark:text-gray-300">
+                            <li>Moved from No project to Website relaunch <span class="text-xs text-gray-500">11/12/2026, 9:14 AM</span></li>
+                            <li>Section changed from (none) to Design <span class="text-xs text-gray-500">11/12/2026, 9:15 AM</span></li>
+                            <li>Project "Old site" was deleted; the task is in no project <span class="pill">Automatic</span></li>
+                        </ul>
+                    </div>
+
+                    <!-- The Move dialog a row's "Move to project…" opens -->
+                    <h2 class="mt-8 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Dialog: Move to project (from a row's menu)</h2>
+                    <div class="mt-2 max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-lg" role="dialog" aria-label="Move to project">
+                        <h3 class="text-lg font-semibold">Move "Review homepage mockups"</h3>
+                        <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">Its 2 subtasks move with it.</p>
+                        <ul class="mt-3 space-y-1 text-sm" role="radiogroup">
+                            <li><label class="opt"><input type="radio" name="mv"> <span class="h-2.5 w-2.5 rounded-full bg-gray-300"></span> No project</label></li>
+                            <li><label class="opt bg-sage-100 dark:bg-gray-700"><input type="radio" name="mv" checked> <span class="h-2.5 w-2.5 rounded-full" style="background:#5b8def"></span> Website relaunch <span class="ml-auto text-xs text-gray-500">current</span></label></li>
+                            <li><label class="opt"><input type="radio" name="mv"> <span class="h-2.5 w-2.5 rounded-full" style="background:#e9a23b"></span> House move</label></li>
+                            <li><label class="opt"><input type="radio" name="mv"> <span class="h-2.5 w-2.5 rounded-full" style="background:#c05b8a"></span> Taxes 2026</label></li>
+                        </ul>
+                        <div class="mt-3"><span class="lbl">Section</span> <span class="field">Design <i class="fas fa-chevron-down ml-1 text-xs text-gray-400"></i></span></div>
+                        <div class="mt-5 flex justify-end gap-2"><button type="button" class="btn-secondary">Cancel</button><button type="button" class="btn-primary">Move</button></div>
+                    </div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!-- SCREEN 5: an archived project, and deleting one               -->
+                <!-- ============================================================ -->
+                <section id="screen-archived" class="screen hidden">
+                    <div class="flex flex-wrap items-start gap-3">
+                        <span class="mt-2 h-3.5 w-3.5 flex-shrink-0 rounded-full opacity-60" style="background:#7a8f6a" aria-hidden="true"></span>
+                        <div class="min-w-0 flex-1">
+                            <h1 class="text-2xl font-semibold text-gray-600 dark:text-gray-300">Garden 2026 <span class="pill align-middle">Archived</span></h1>
+                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">3 open · 14 closed · archived 10/02/2026</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="button" class="btn-primary"><i class="fas fa-box-open mr-2" aria-hidden="true"></i>Unarchive</button>
+                            <button type="button" class="btn-secondary text-red-600 dark:text-red-400"><i class="fas fa-trash mr-2" aria-hidden="true"></i>Delete</button>
+                        </div>
+                    </div>
+
+                    <div role="status" class="mt-4 flex gap-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                        <i class="fas fa-box-archive mt-0.5 text-gray-400" aria-hidden="true"></i>
+                        <p><span class="font-medium text-gray-900 dark:text-gray-100">This project is archived.</span>
+                            Its 3 open tasks are not on Today, Upcoming or All, are never overdue, and their reminders wait.
+                            Unarchive it to get them back, with one reminder for each task that missed any.</p>
+                    </div>
+
+                    <div class="card mt-4 opacity-80"><ul class="rows" data-rows="archived"></ul></div>
+                    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Read-only list: no quick add, no drag. A task can still be opened, closed, moved out to another project or trashed.</p>
+
+                    <h2 class="mt-8 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Dialog: Archive (from an active project's ⋯ menu)</h2>
+                    <div class="mt-2 max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-lg" role="dialog" aria-label="Archive project">
+                        <h3 class="text-lg font-semibold">Archive "Website relaunch"?</h3>
+                        <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">Its 7 open tasks leave your lists and their reminders wait until you unarchive it. A repeating task closed while it is archived still makes its next one, in this project. Nothing is deleted.</p>
+                        <div class="mt-5 flex justify-end gap-2"><button type="button" class="btn-secondary">Cancel</button><button type="button" class="btn-primary">Archive</button></div>
+                    </div>
+
+                    <h2 class="mt-6 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Dialog: Delete</h2>
+                    <div class="mt-2 max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-lg" role="dialog" aria-label="Delete project">
+                        <h3 class="text-lg font-semibold">Delete "Garden 2026"?</h3>
+                        <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">The project, its description and its sections are deleted. Its 17 tasks are kept and become "No project"; the 3 open ones come back to your lists. This can't be undone.</p>
+                        <div class="mt-5 flex justify-end gap-2"><button type="button" class="btn-secondary">Cancel</button><button type="button" class="btn-danger">Delete project</button></div>
+                    </div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!-- SCREEN 6: search, with the Project filter                     -->
+                <!-- ============================================================ -->
+                <section id="screen-search" class="screen hidden">
+                    <h1 class="text-2xl font-semibold">Search</h1>
+                    <div class="card mt-4 p-4 text-sm">
+                        <div class="flex gap-2">
+                            <input class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2" value="mockup*" aria-label="Search tasks">
+                            <button type="button" class="btn-primary">Search</button>
+                        </div>
+                        <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-gray-700 dark:text-gray-300">
+                            <label class="inline-flex items-center gap-2"><input type="checkbox" class="rounded border-gray-300"> Regex</label>
+                            <label class="inline-flex items-center gap-2"><input type="checkbox" class="rounded border-gray-300"> Include closed</label>
+                            <label class="inline-flex items-center gap-2 rounded-md ring-2 ring-sage-300 px-1"><input type="checkbox" class="rounded border-gray-300"> Include archived projects</label>
+                        </div>
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                            <span class="field">Priority</span><span class="field">State</span><span class="field">Labels</span><span class="field">Any date</span>
+                            <span class="field ring-2 ring-sage-300">Project: Website relaunch, No project <i class="fas fa-chevron-down ml-1 text-xs text-gray-400"></i></span>
+                            <button type="button" class="btn-secondary ml-auto"><i class="fas fa-filter mr-2" aria-hidden="true"></i>Save as filter</button>
+                        </div>
+                    </div>
+                    <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">priority any · <span class="font-medium">in Website relaunch, no project</span> · "mockup*"</p>
+                    <div class="card mt-2"><ul class="rows" data-rows="search"></ul></div>
+
+                    <p class="note mt-8">Notes: Project is multi-select checkboxes (any of them) with a "No project" choice, like Labels and "none".
+                        A saved filter stores project ids; a project deleted later drops out of the filter and the filter page says so, as it
+                        does for a deleted label. Choosing an archived project in the filter implies "Include archived projects".</p>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center text-sm text-gray-500 dark:text-gray-400 py-6">© 2026 ZipTrigo</footer>
+
+    <!-- Mock-only shorthand; in Django these are the usual Tailwind class lists of docs/ui-design/README.md. -->
+    <style type="text/tailwindcss">
+        .card { @apply rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800; }
+        .rows { @apply divide-y divide-gray-200 dark:divide-gray-700; }
+        .btn-primary { @apply inline-flex items-center justify-center rounded-lg bg-brand-primary text-gray-900 font-medium px-4 py-2 text-sm hover:bg-sage-400; }
+        .btn-secondary { @apply inline-flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700; }
+        .btn-danger { @apply inline-flex items-center justify-center rounded-lg bg-red-600 text-white font-medium px-4 py-2 text-sm hover:bg-red-700; }
+        .field { @apply inline-flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2.5 py-1 text-sm text-gray-700 dark:text-gray-200; }
+        .chip { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium; }
+        .pill { @apply inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-300; }
+        .lbl { @apply mb-1 text-xs font-medium text-gray-500 dark:text-gray-400; }
+        .note { @apply rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-900 dark:text-amber-100; }
+        .quick-add { @apply flex items-center gap-3 border-t border-gray-200 dark:border-gray-700 px-4 py-2 sm:px-6; }
+        .qa-input { @apply min-w-0 flex-1 bg-transparent py-1 text-sm placeholder-gray-400 outline-none; }
+        .section-head { @apply flex items-center gap-3 px-1 text-sm; }
+        .opt { @apply flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700; }
+        .side-link { @apply flex items-center gap-2 rounded-lg px-3 py-2 text-sm whitespace-nowrap text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800; }
+        .side-link.current { @apply bg-sage-100 dark:bg-gray-700 font-semibold text-gray-900 dark:text-gray-100; }
+        .side-head { @apply px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400; }
+    </style>
+
+    <script>
+        const PROJECTS = [
+            { key: 'web', name: 'Website relaunch', color: '#5b8def', open: 7, closed: 5 },
+            { key: 'house', name: 'House move', color: '#e9a23b', open: 12, closed: 30 },
+            { key: 'tax', name: 'Taxes 2026', color: '#c05b8a', open: 2, closed: 0 },
+            { key: 'read', name: 'Reading list', color: '#6fae8b', open: 5, closed: 9 },
+        ];
+        const P = Object.fromEntries(PROJECTS.map((p) => [p.key, p]));
+
+        // t: title, n: number, due / dueRed, pr: priority, st: state pill, sub: 'done/total', p: project key, lab: label, muted, drag
+        const ROWS = {
+            unsectioned: [
+                { t: 'Agree the launch date with Ana', n: 1238, due: 'Today', pr: 1, drag: 1 },
+                { t: 'Collect logins for the old host', n: 1240, st: 'On hold', muted: 1, drag: 1 },
+            ],
+            design: [
+                { t: 'Review homepage mockups', n: 1241, due: 'Tue 3:00 PM', pr: 1, st: 'In progress', sub: '1/3', lab: 'design', drag: 1 },
+                { t: 'Pick the photo set', n: 1244, due: '11/10', dueRed: 1, drag: 1 },
+                { t: 'Dark mode pass', n: 1250, st: 'Blocked', muted: 1, drag: 1 },
+            ],
+            content: [
+                { t: 'Rewrite the pricing page', n: 1246, due: 'Fri', pr: 2, drag: 1 },
+                { t: 'Translate the legal pages', n: 1247, drag: 1 },
+            ],
+            overdue: [
+                { t: 'Pick the photo set', n: 1244, due: '11/10', dueRed: 1, p: 'web' },
+                { t: 'Send the meter readings', n: 1199, due: '11/13', dueRed: 1, p: 'house', pr: 2 },
+            ],
+            today: [
+                { t: 'Agree the launch date with Ana', n: 1238, due: 'Today', pr: 1, p: 'web' },
+                { t: 'Book the removal van', n: 1203, due: 'Today 2:00 PM', st: 'In progress', p: 'house' },
+                { t: 'Water the plants', n: 1102, due: 'Today', rep: 1 },
+                { t: 'Find last year’s return', n: 1260, due: 'Today', p: 'tax', lab: 'paperwork' },
+            ],
+            archived: [
+                { t: 'Order tulip bulbs', n: 1120, due: '10/20', muted: 1 },
+                { t: 'Fix the shed door', n: 1123, muted: 1 },
+                { t: 'Compost bin', n: 1131, st: 'On hold', muted: 1 },
+            ],
+            search: [
+                { t: 'Review homepage mockups', n: 1241, due: 'Tue 3:00 PM', pr: 1, st: 'In progress', p: 'web', snip: 'Title: review homepage <mark>mockups</mark>' },
+                { t: 'Print the kitchen mockup', n: 1188, snip: 'Description: print the kitchen <mark>mockup</mark> at a3' },
+            ],
+        };
+
+        const flag = { 1: 'text-red-500', 2: 'text-amber-500', 3: 'text-sky-500' };
+        const stateCls = { 'In progress': 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200', 'On hold': 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300', 'Blocked': 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' };
+
+        function row(r) {
+            const bits = [];
+            if (r.st) bits.push(`<span class="chip ${stateCls[r.st]}">${r.st}</span>`);
+            if (r.pr) bits.push(`<span class="text-xs ${flag[r.pr]}"><i class="fas fa-flag"></i></span>`);
+            if (r.due) bits.push(`<span class="text-xs ${r.dueRed ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500 dark:text-gray-400'}"><i class="far fa-calendar mr-1"></i>${r.due}</span>`);
+            if (r.rep) bits.push('<span class="text-xs text-gray-500 dark:text-gray-400"><i class="fas fa-repeat mr-1"></i>Every 3 days</span>');
+            if (r.sub) bits.push(`<span class="text-xs text-gray-500 dark:text-gray-400"><i class="fas fa-list-check mr-1"></i>${r.sub}</span>`);
+            if (r.lab) bits.push(`<span class="chip" style="background:#e9a23b33;color:#9a6a12">${r.lab}</span>`);
+            if (r.p) bits.push(`<a href="#" data-screen="project" class="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 hover:underline" title="Project"><span class="h-2 w-2 rounded-full" style="background:${P[r.p].color}"></span>${P[r.p].name}</a>`);
+            return `<li class="task-row flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700">
+                ${r.drag ? '<span class="drag-handle mt-0.5 cursor-grab text-gray-400"><i class="fas fa-grip-vertical"></i></span>' : ''}
+                <button type="button" class="mt-0.5 flex-shrink-0 rounded-full text-gray-400" aria-label="Complete ${r.t}"><svg class="check-svg" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8.5"/></svg></button>
+                <div class="min-w-0 flex-1">
+                    <div class="flex items-baseline gap-2"><a href="#" data-screen="task" class="min-w-0 truncate text-sm font-medium ${r.muted ? 'text-gray-500 dark:text-gray-400' : ''} hover:underline">${r.t}</a><span class="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">#${r.n}</span></div>
+                    ${bits.length ? `<div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">${bits.join('')}</div>` : ''}
+                    ${r.snip ? `<p class="mt-1 text-xs text-gray-600 dark:text-gray-400 [&_mark]:rounded-sm [&_mark]:bg-yellow-200 [&_mark]:px-0.5 [&_mark]:text-gray-900">${r.snip}</p>` : ''}
+                </div>
+                <button type="button" class="flex-shrink-0 px-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" aria-label="Actions for ${r.t}" title="Postpone, Move to project…, Move to trash"><i class="fas fa-ellipsis"></i></button>
+            </li>`;
+        }
+        document.querySelectorAll('[data-rows]').forEach((ul) => { ul.innerHTML = ROWS[ul.dataset.rows].map(row).join(''); });
+
+        document.getElementById('project-list').innerHTML = PROJECTS.map((p) => {
+            const pct = Math.round((100 * p.closed) / (p.open + p.closed || 1));
+            return `<li class="flex items-center gap-3 px-4 py-3 sm:px-6">
+                <span class="drag-handle cursor-grab text-gray-400" role="button" tabindex="0" aria-label="Reorder ${p.name}"><i class="fas fa-grip-vertical"></i></span>
+                <span class="h-3 w-3 flex-shrink-0 rounded-full" style="background:${p.color}"></span>
+                <div class="min-w-0 flex-1">
+                    <a href="#" data-screen="project" class="text-sm font-medium hover:underline">${p.name}</a>
+                    <div class="mt-1 flex items-center gap-3">
+                        <div class="h-1.5 w-32 rounded-full bg-gray-200 dark:bg-gray-700"><div class="h-1.5 rounded-full bg-brand-primary" style="width:${pct}%"></div></div>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">${p.open} open · ${p.closed} closed</span>
+                    </div>
+                </div>
+                <button type="button" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" aria-label="Actions for ${p.name}" title="Rename, Colour, Archive, Delete"><i class="fas fa-ellipsis"></i></button>
+            </li>`;
+        }).join('');
+
+        const NAV = [['today', 'Today', 'fas fa-calendar-day', 6], ['upcoming', 'Upcoming', 'fas fa-calendar-week'], ['all', 'All tasks', 'fas fa-list'],
+            ['closed', 'Closed', 'fas fa-circle-check'], ['trash', 'Trash', 'fas fa-trash'], ['labels', 'Labels', 'fas fa-tags']];
+        const CURRENT = { project: 'p:web', today: 'today', projects: 'projects', task: 'p:web', archived: 'projects', search: '' };
+
+        function sidebar(screen) {
+            const cur = CURRENT[screen];
+            const link = (key, body, target) => `<li class="flex-shrink-0"><a href="#" ${target ? `data-screen="${target}"` : ''} class="side-link ${cur === key ? 'current' : ''}">${body}</a></li>`;
+            return `
+            <div class="mb-3 hidden md:block"><input class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm" placeholder="Search tasks" aria-label="Search tasks"></div>
+            <nav aria-label="To-do"><ul class="flex gap-1 overflow-x-auto pb-1 md:flex-col md:overflow-visible md:pb-0">
+                ${NAV.map(([k, l, i, c]) => link(k, `<i class="${i} w-4 text-center text-sage-400"></i><span>${l}</span>${c ? `<span class="ml-auto text-xs text-gray-500">${c}</span>` : ''}`, k === 'today' ? 'today' : '')).join('')}
+            </ul></nav>
+            <nav aria-label="Projects">
+                <p class="side-head flex items-center"><a href="#" data-screen="projects" class="hover:underline ${cur === 'projects' ? 'text-gray-900 dark:text-gray-100' : ''}">Projects</a>
+                    <a href="#" data-screen="projects" class="ml-auto text-gray-400 hover:text-gray-600" aria-label="New project" title="New project"><i class="fas fa-plus"></i></a></p>
+                <ul class="flex gap-1 overflow-x-auto pb-1 md:flex-col md:overflow-visible md:pb-0">
+                    ${PROJECTS.map((p) => link('p:' + p.key, `<span class="mx-[3px] h-2.5 w-2.5 flex-shrink-0 rounded-full" style="background:${p.color}"></span><span class="min-w-0 truncate">${p.name}</span><span class="ml-auto text-xs text-gray-500">${p.open}</span>`, 'project')).join('')}
+                    <li class="flex-shrink-0"><a href="#" data-screen="archived" class="block rounded-lg px-3 py-1 text-xs text-sage-600 dark:text-sage-300 hover:underline whitespace-nowrap">1 archived</a></li>
+                </ul>
+            </nav>
+            <nav aria-label="Saved filters">
+                <p class="side-head"><a href="#" class="hover:underline">Filters</a></p>
+                <ul class="flex gap-1 overflow-x-auto pb-1 md:flex-col md:overflow-visible md:pb-0">
+                    ${link('f1', '<i class="fas fa-filter w-4 text-center text-sage-400"></i><span class="min-w-0 truncate">Urgent at work</span><span class="ml-auto text-xs text-gray-500">3</span>')}
+                    ${link('f2', '<i class="fas fa-filter w-4 text-center text-sage-400"></i><span class="min-w-0 truncate">Waiting on others</span><span class="ml-auto text-xs text-gray-500">5</span>', 'search')}
+                </ul>
+            </nav>`;
+        }
+
+        const SCREENS = ['project', 'today', 'projects', 'task', 'archived', 'search'];
+        function show(name) {
+            if (!SCREENS.includes(name)) name = 'project';
+            document.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
+            document.getElementById('screen-' + name).classList.remove('hidden');
+            document.getElementById('sidebar').innerHTML = sidebar(name);
+            document.querySelectorAll('.screen-btn').forEach((b) => b.classList.toggle('font-semibold', b.dataset.screen === name));
+            history.replaceState(null, '', '#' + name);
+            window.scrollTo(0, 0);
+        }
+        // Delegated: the sidebar and the rows are re-drawn, so their links are found at click time.
+        document.addEventListener('click', (e) => {
+            const el = e.target.closest('[data-screen]');
+            if (el) { e.preventDefault(); show(el.dataset.screen); } else if (e.target.closest('a[href="#"]')) { e.preventDefault(); }
+        });
+        show(location.hash.slice(1));
+    </script>
+</body>
+</html>

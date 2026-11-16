@@ -51,6 +51,7 @@
                 {% endfor %}
             </select>
         </span>
+        {% if filter_projects %}<label class="inline-flex items-center gap-2"><input type="checkbox" name="include_archived" value="1"{% if params.include_archived %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> Include archived projects</label>{% endif %}
     </div>
 
     <fieldset class="mt-3 grid gap-3 border-t border-gray-200 dark:border-gray-700 pt-3 text-sm sm:grid-cols-2">
@@ -72,6 +73,17 @@
                 <label class="inline-flex items-center gap-1"><input type="checkbox" name="labels" value="none"{% if 'none' in selected_labels %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> No label</label>
             </div>
         </div>
+        {% if filter_projects %}
+        <div>
+            <span class="mb-1 block font-medium">Project</span>
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+                {% for project in filter_projects %}
+                <label class="inline-flex items-center gap-1"><input type="checkbox" name="projects" value="{{ project.pk }}"{% if project.pk|stringformat:'s' in selected_projects %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> <span class="h-2 w-2 rounded-full" style="background-color: {{ project.color }}" aria-hidden="true"></span>{{ project.name }}{% if project.is_archived %} <span class="text-gray-500 dark:text-gray-400">(archived)</span>{% endif %}</label>
+                {% endfor %}
+                <label class="inline-flex items-center gap-1"><input type="checkbox" name="projects" value="none"{% if 'none' in selected_projects %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> No project</label>
+            </div>
+        </div>
+        {% endif %}
         <div>
             <span class="mb-1 block font-medium">State</span>
             <div class="flex flex-wrap gap-x-4 gap-y-1">

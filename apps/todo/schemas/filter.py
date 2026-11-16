@@ -10,7 +10,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from ..limits import MAX_SAVED_FILTERS
 from ..services.dates import SORTS
-from ..services.filters import DATE_RANGES, MAX_LABELS, PRIORITIES
+from ..services.filters import DATE_RANGES, MAX_LABELS, MAX_PROJECTS, PRIORITIES
 from ..services.search import MODES
 
 
@@ -49,6 +49,20 @@ class FilterParamsSchema(Schema):
     )
     priorities: list[int] = []
     labels: list[str] = []
+    projects: list[str] = Field(
+        default=[],
+        description=(
+            'Project ids, and `none` for tasks in no project: a task in any of them matches. An id '
+            'that is not one of your projects matches nothing.'
+        ),
+    )
+    include_archived: bool = Field(
+        default=False,
+        description=(
+            'List the tasks of archived projects too. Without it they are left out, unless '
+            '`projects` names projects.'
+        ),
+    )
     date_range: str = 'any'
     date_from: date | None = None
     date_to: date | None = None
@@ -92,6 +106,16 @@ class FilterParamsSchema(Schema):
                 UUID(item)  # a ValueError is the 422
         return value
 
+    @field_validator('projects')
+    @classmethod
+    def _projects(cls, value: list[str]) -> list[str]:
+        if len(value) > MAX_PROJECTS:
+            raise ValueError(f'At most {MAX_PROJECTS} projects.')
+        for item in value:
+            if item != 'none':
+                UUID(item)  # a ValueError is the 422
+        return value
+
     def to_params(self) -> dict[str, Any]:
         """The dict `services.saved_filters` takes (its key for the closed switch is the old
         one)."""
@@ -107,6 +131,8 @@ class FilterParamsSchema(Schema):
         data['include_closed'] = data.pop('include_completed')
         data['resolution'] = data.get('resolution') or None
         data.setdefault('states', [])
+        data.setdefault('projects', [])
+        data.setdefault('include_archived', False)
         return cls.model_validate(data)
 
 

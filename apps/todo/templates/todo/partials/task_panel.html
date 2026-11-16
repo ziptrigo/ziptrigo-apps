@@ -10,6 +10,7 @@
     <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
         <span>#{{ task.number }}</span>
         {% if task.parent %}<span>Subtask of <a href="{% url 'todo:task' task.parent.number %}" class="text-sage-600 dark:text-sage-300 hover:underline">{{ task.parent.title }}</a></span>{% endif %}
+        {% if task.project %}<span id="task-project-line" class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-full" style="background-color: {{ task.project.color }}" aria-hidden="true"></span>In <a href="{% url 'todo:project' task.project.pk %}" class="text-sage-600 dark:text-sage-300 hover:underline">{{ task.project.name }}</a>{% if task.project.is_archived %} (archived){% endif %}{% if task.parent %}, with its parent{% endif %}</span>{% endif %}
         {% if task.is_trashed %}
         <span class="text-red-600 dark:text-red-400"><i class="fas fa-trash mr-1" aria-hidden="true"></i>In the trash since {{ task.deleted_at|fdate }}</span>
         {% elif task.is_wont_do %}
@@ -97,6 +98,11 @@
         Reopening this task keeps the next occurrence of the repeat if one was already created: nothing is deleted or refunded.
     </p>
     {% endif %}
+    {% if task.is_open and task.in_archived_project %}
+    <p id="archived-note" class="{% if not task.is_muted %}-mt-6 {% endif %}mb-8 text-sm text-gray-500 dark:text-gray-400">
+        This task's project is archived: the task is off Today, Upcoming and All, never overdue, and its reminders wait.{% if has_held_reminders and not task.is_muted %} Unarchive the project, or move the task out of it, to get one reminder for what you missed.{% endif %}
+    </p>
+    {% endif %}
     {% if task.is_muted %}
     <p id="muted-note" class="-mt-6 mb-8 text-sm text-gray-500 dark:text-gray-400">
         {% if task.state == 'blocked' %}This task is blocked: it is shown dimmed, never as overdue, and its reminders wait. It goes back to To do when everything blocking it is closed.{% else %}This task is on hold: it is shown dimmed, never as overdue, and its reminders wait.{% endif %}{% if has_held_reminders %} Set it to To do or In progress to get one reminder for what you missed.{% endif %}
@@ -106,6 +112,26 @@
     <!-- Details -->
     <section class="mb-8" aria-labelledby="details-title">
         <h2 id="details-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Details</h2>
+        {% if not task.is_trashed and not task.parent_id %}{% if todo_projects or task.project %}
+        {% comment %}The project saves on its own (issue #314): changing the select moves the task, and its subtasks with it.{% endcomment %}
+        <form id="task-project-form" method="post" action="{% url 'todo:move' task.number %}"
+              hx-post="{% url 'todo:move' task.number %}" hx-target="#task-panel" hx-swap="outerHTML" hx-trigger="change"
+              class="mb-4 flex flex-wrap items-end gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="ctx" value="page">
+            <div>
+                <label for="task-project" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Project</label>
+                <select id="task-project" name="project"
+                        class="max-w-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
+                    <option value=""{% if not task.project_id %} selected{% endif %}>No project</option>
+                    {% for project in todo_projects %}<option value="{{ project.pk }}"{% if project.pk == task.project_id %} selected{% endif %}>{{ project.name }}</option>{% endfor %}
+                    {% if task.project and task.project.is_archived %}<option value="{{ task.project.pk }}" selected disabled>{{ task.project.name }} (archived)</option>{% endif %}
+                </select>
+            </div>
+            <noscript><button type="submit" class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800">Move</button></noscript>
+            {% if subtasks %}<p class="pb-2 text-xs text-gray-500 dark:text-gray-400">Its subtasks move with it.</p>{% endif %}
+        </form>
+        {% endif %}{% endif %}
         {% if task.is_trashed %}
         <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <div><dt class="text-xs text-gray-500 dark:text-gray-400">Date</dt><dd>{% if task.due_date %}{{ task.due_date|fdate:'weekday' }}{% if task.due_time %} {{ task.due_time|ftime }}{% endif %}{% else %}No date{% endif %}</dd></div>

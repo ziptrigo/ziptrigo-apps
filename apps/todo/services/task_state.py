@@ -53,6 +53,12 @@ def write_state(current: Task, state: str, now: datetime, *, release: bool = Tru
     Task.objects.filter(pk=current.pk).update(**fields)
     for name, value in fields.items():
         setattr(current, name, value)
-    if release and was_muted and state not in MUTED_STATES:
+    if (
+        release
+        and was_muted
+        and state not in MUTED_STATES
+        # In an archived project the reminders keep waiting, for the unarchive.
+        and not current.in_archived_project
+    ):
         reminders.release_held(current, now)
     return True

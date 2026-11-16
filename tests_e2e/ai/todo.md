@@ -8,6 +8,7 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 (#272), blockers (#273), the activity log (#274) and the polish of the E2E run (#224):
 
 - the sidebar (a search box, then Today with a count, Upcoming, All, Closed, Labels, Trash, Settings, then
+  a **Projects** section (issue #314: projects, the project page, moving, archiving; TODO-62 to TODO-65) and
   a **Filters** section; a top bar of scrolling rows on phones), the "Tasks are blocked" and "Storage is paused"
   banners;
 - **Today** `/todo/` (the quick-add box with the free-tasks line, the Overdue section with "Reschedule overdue to
@@ -1218,6 +1219,64 @@ one`; a second user (Session B) with a task.
 | 7 | Click the empty space of a row (to the right of the title, or beside the chips) on All, Today, a search and the Trash. | The task page opens, as the title link does. Ctrl/Cmd-click opens it in a new tab. |
 | 8 | Click the state pill, the Postpone button, the trash button, the circle, a label chip's neighbours that are links (the parent link), and the drag handle; also select some title text by dragging. | Each does only its own thing (menu opens, task completes...); no navigation. Selecting text does not open the task. Closing the state menu by clicking elsewhere on the row does not open the task. |
 
+### TODO-62 Projects: create, rename, reorder and the sidebar
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Open **To-do**. | The sidebar has a **Projects** block between the menu and Filters: "No projects yet" and a `+` link. |
+| 2 | Click **Projects** (or `+`). Add `Website relaunch` with a blue colour, then `House move`. | `/todo/projects/`: tabs **Active 2** and **Archived 0**; each project shows its colour dot, a progress bar and `0 open · 0 closed`. The sidebar lists both at once, without a reload. Under the list: "No project  N open tasks in no project". |
+| 3 | Add `website RELAUNCH`. | Refused in the message slot: `Name: You already have a project with this name.` Nothing is added. |
+| 4 | Add a project with an empty name (remove `required` in the inspector), and one of 81 characters. | `Name: Name is required.` and `Name: Name is too long (at most 80 characters).` |
+| 5 | Click the pencil of `House move`, change the name to `Moving house` and the colour, save. Press the pencil again, change the text and press Escape. | The row shows the new name and colour; Escape discards the second edit. |
+| 6 | Drag `Moving house` above `Website relaunch` (or focus its handle and press Up). Reload any To-do page. | The list keeps the order, and the sidebar shows it after the reload. |
+| 7 | As `qa.admin@example.com`, open `/todo/projects/<id of qa.user's project>/`. | 404. |
+
+### TODO-63 Projects: tasks in a project, the project page and moving
+
+**Preconditions:** TODO-62 done (`Website relaunch`, `Moving house`).
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | On **Today**, the quick-add box now has a **Project** select (No project, then the active projects). Add `Agree the launch date` due today with Project `Website relaunch`, and `Water the plants` with No project. | Both are listed; the first row shows a chip with the project's colour dot and name, linking to the project; the second has none. The sidebar count beside `Website relaunch` is 1. |
+| 2 | Click the chip (or the project in the sidebar). | `/todo/projects/<id>/`: the name with its dot, `1 open · 0 closed`, a progress bar (`0 of 1 task closed`), the quick-add box with Project preselected, a "Sort by" bar (Due date, Priority, Newest, Title) and **Show closed**. The row has no project chip here. The sidebar entry is highlighted. |
+| 3 | Press **Edit**, write a description with `**bold**` and a `#<number of a task>`, save. | A flash "Project saved."; the description is rendered (bold, the task number is a link). |
+| 4 | Add `Review mockups` from this page's quick-add box, then add a subtask `Check contrast` on its task page. | "Task added." and the task is in the list. The subtask's page says "In Website relaunch, with its parent" and has no Project select. The project page counts both. |
+| 5 | Complete `Agree the launch date` from the project page, then press **Show closed**. | The row is struck in place; with Show closed the closed task is listed after the open ones and the link reads **Hide closed**. The progress bar and counts follow after a reload. |
+| 6 | On **All**, press the folder button of `Water the plants`. | The **Move to project** dialog: the task's title, radios No project (selected) and each active project. Escape and Cancel close it and return the focus to the button. |
+| 7 | Choose `Website relaunch`, press **Move**. | A flash "Moved Water the plants to Website relaunch."; the row has the chip. |
+| 8 | Open `Review mockups`' page; change the **Project** select (under Details) to `Moving house`. | The panel re-renders: "In Moving house" in the top line. Its subtask moved too. Press **History**: "Moved from the project Website relaunch to Moving house"; the subtask's history says the same "with its parent, #n Review mockups", marked Automatic. |
+| 9 | Post `project=<uuid of nothing>` to `/todo/<n>/project/` (inspector), and try to move a subtask the same way. | `Project: Unknown project.` and `Project: A subtask is in its parent's project. Move the parent instead.` Nothing changes. |
+| 10 | Make a repeating task in `Website relaunch` and complete it. | The next occurrence is in `Website relaunch` too. |
+
+### TODO-64 Projects: archive, what it mutes, unarchive and delete
+
+**Preconditions:** TODO-63 done. In `Moving house`: an open task `Book the van` due today at a time a few minutes ahead (so its default reminder is still ahead), and one due three days ago. An open task `Unpack` in no project that is **Blocked by** `Book the van`.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | On the project page of `Moving house` press **Archive**. | The question names its open tasks, says their reminders wait and that "1 task outside it is blocked by tasks in it and stays blocked", and "Nothing is deleted." |
+| 2 | Confirm. | A flash "Archived Moving house. Its open tasks are off your lists and their reminders wait."; the page shows an **Archived** pill, the note "This project is archived. ...", no quick-add box, an **Unarchive** button. The sidebar no longer lists it and shows "1 archived". |
+| 3 | Open **Today**, **Upcoming** and **All**. | None lists the project's tasks; the count beside Today leaves them out; the Overdue section does not show the old one and "Reschedule overdue to today" does not count it. `Unpack` is still Blocked. |
+| 4 | Open `Book the van`'s page (from the archived project's page). | The note "This task's project is archived: the task is off Today, Upcoming and All, never overdue, and its reminders wait." The Project select shows `Moving house (archived)`. |
+| 5 | Wait until the reminder's time has passed, then run `python tests_e2e/ai/manage.py shell -c "from apps.todo.services import reminders; print(reminders.deliver_due())"`. | `0`: nothing is delivered, the bell shows no reminder. The task page's note now adds "Unarchive the project, or move the task out of it, to get one reminder for what you missed." |
+| 6 | Try to add a task into the archived project (post `project=<its id>` to `/todo/new/`), and to move a task into it. | `Project: This project is archived. Unarchive it to add tasks to it.` both times. |
+| 7 | Projects > **Archived** tab > **Unarchive** (confirm). | "Moving house is active again."; its tasks are back on Today and All, the old one is overdue again, and the bell has **one** reminder for `Book the van`. |
+| 8 | Archive it again, then on the Archived tab press **Delete** and confirm. | The question says its tasks are kept, in no project. A flash "Deleted the project Moving house. Its N tasks are kept, in no project." The tasks are back on the lists with no chip; each history has "The project Moving house was deleted: the task is in no project" (Automatic). |
+
+### TODO-65 Projects: search and saved filters
+
+**Preconditions:** two active projects with an open task each, an archived project with an open task, and an open task in no project.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Open **Search**. | The filters have **Project** (a checkbox per project, archived ones marked "(archived)", and **No project**) and, next to Include closed, **Include archived projects**. |
+| 2 | Tick one active project. | Only its tasks; the URL gets `projects=<id>`. Tick **No project** too: the unfiled tasks join. |
+| 3 | Clear Project, tick **Priority: No priority**. | The archived project's task is not listed. Tick **Include archived projects**: it is (`include_archived=1`). |
+| 4 | Untick it and tick the archived project under Project. | Its tasks are listed (choosing a project lists it, archived or not). |
+| 5 | Tick one active project and **Save as filter** `Site`. | The filter page's summary reads `in <project name>`; the sidebar count is the project's open tasks. |
+| 6 | Delete that project (Projects page), then open the filter `Site`. | The summary reads `in a deleted project` and the filter lists no task (it does not fall back to every task). |
+| 7 | On the Projects page click **No project**. | The search page with `projects=none`: the open tasks in no project. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it
@@ -1232,6 +1291,9 @@ one`; a second user (Session B) with a task.
   the shell steps (the scheduler does not run on this server).
 - **A reminder email to an unconfirmed address** ("not sent: your email address is not confirmed"): reaching it
   needs an email change through the JWT API, which is out of scope here; unit-tested.
+- **Projects over the JWT API and the CLI**: not built yet (issue #314's third part). The plain API lists leave the
+  tasks of archived projects out and a saved filter carries `projects` / `include_archived`; both are unit-tested
+  (`test_projects.py`).
 - **Rate limits** (switched off on this server), the rest of the JWT API `/api/todo/` and the `inv todo` CLI (unit tests). The
   activity log's entries made through the email intake (automatic, with the files), the phone's Complete
   button and the daily purge, and the channel each is recorded under, are unit-tested (`test_activity_log.py`); the

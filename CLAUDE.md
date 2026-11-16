@@ -55,6 +55,7 @@ apps/short_url/       Short URLs (issue #162): links with editable destinations,
 apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks with per-user numbers
                       from 1000, labels, due dates in the user's time zone, task states and
                       resolutions (#272), Today / Upcoming / All / Closed / Trash pages, task billing (a monthly free allowance, then a price),
+                      projects (#314, part 1 of 3: a task is in at most one, archive and delete),
                       tasks added by email, the JWT API (`/api/todo/`) and the `admin/todo.py` CLI
                       (see "To-do").
 apps/notes/           Notes (issue #260, PRs 2 to 6 of 6): Markdown notes with tags, versions
@@ -4848,6 +4849,117 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
   log, the admin) and the Playwright `tests_e2e/test_todo_activity.py`; the AI plan has TODO-56 to
   TODO-58 and `admin.md` ADM-57.
 
+#### Projects
+
+Issue #314, **part 1 of 3** (`models/project.py`, `services/projects.py`, `views/projects.py`,
+`forms/project.py`, migration `0017_projects`; the mock all three parts were designed from is
+`docs/ui-design/mocks/todo-projects.html`). Part 2 is sections inside a project and a manual order
+on the project page; part 3 is projects in the JWT API and the CLI. Projects are **free** (the Costs
+line says so).
+
+- **Model.** `Project` (UUID, `user` with `related_name='todo_projects'`, `name` up to
+  `PROJECT_NAME_MAX` 80, unique per user ignoring case by `todo_project_name_user`, archived ones
+  included; `color` `#rrggbb`; `description` Markdown up to `PROJECT_DESCRIPTION_MAX` 10,000;
+  `position`; `archived_at`; `created_at`). **Flat**: no folders, no nesting. `Task.project`
+  (nullable FK, `SET_NULL`, `related_name='tasks'`): **a task is in at most one project, or in
+  none**. **A subtask is always in its parent's project**: the column is kept equal on both by the
+  services (`create_task` gives a subtask its parent's whatever is passed, read again under the
+  parent's lock; `move_task` moves the subtasks with their parent, closed and trashed ones too;
+  `update_task` gives a task moved under a parent that parent's), so every list filters on the one
+  column. `TodoSettings.max_projects_per_user` (100, `db_default` too; archived ones count).
+- **Services** (`services/projects.py`; refusals are `ValidationError`s keyed by field; every write
+  takes `lock_account` first). `create_project`, `update_project` (`None` leaves a field; an
+  archived project can still be renamed), `reorder_projects`, `list_projects(user, archived=False |
+  True | None)` (each with `open_count` and `closed_count`: its tasks outside the Trash, subtasks
+  included, **one query**; `Project.progress_percent`), `unfiled_count`, `overdue_count`,
+  `outside_blocked_count` (open tasks outside the project that an open task inside it blocks).
+  `clean_project(user, project | id | None, allow_archived=False)` is the one check a task's project
+  goes through: someone else's, an unknown id and a malformed one are all `project: Unknown
+  project.`; an archived one is `This project is archived. Unarchive it to add tasks to it.`
+  `create_task(project=..., allow_archived_project=False)` and `check_new_task(project=...)` take
+  it; the next occurrence of a repeating task is created in the same project
+  (`recurrence._create_occurrence` passes `allow_archived_project=True`). `move_task(task, project | None)`
+  (`check_move` is the same refusals with no writes, for the view to run before the rate limit): a
+  task in the Trash (`Restore the task before changing it.`) and a subtask on its own (`A subtask is
+  in its parent's project. Move the parent instead.`) are refused; the project it already has is a
+  no-op; a closed task can move.
+- **Archive** (`archive_project` / `unarchive_project`, both idempotent conditional `UPDATE`s that
+  return whether they won) is reversible and deletes nothing. **While a project is archived its open
+  tasks are muted as a whole, like On hold**: off Today, Upcoming and All (`dates.not_archived()`, a
+  `Q`; `dates.listed_tasks(user)` is `open_tasks` without them, which `today_set`, `upcoming_set`,
+  `todays_tasks`, `overdue_set`, `muted_overdue_set` and the All page are built on, so the count
+  beside Today and "Reschedule overdue" leave them out too; **`open_tasks` is unchanged and still
+  what the cap on open tasks counts**), never overdue (`Task.is_overdue`, `Task.in_archived_project`),
+  shown dimmed (`Task.is_dimmed`), and **their reminders wait** (`reminders.deliver_due` and
+  `sweep_stale` exclude `task__project__archived_at`). Unarchiving sends **one** reminder per task
+  for what it held (`reminders.release_held`, through `projects._held_tasks`), except a task that is
+  also On hold or Blocked, which keeps waiting for that; leaving On hold *inside* an archived project
+  releases nothing (`task_state.write_state`). A task moved out of an archived project, and the
+  tasks of an archived project that is deleted, get the same one reminder. Nothing else changes: a
+  repeating task closed meanwhile still makes its next occurrence (in the project, so muted with
+  it), and **a task outside the project that one inside it blocks stays Blocked** (the Archive
+  question on the project page says how many). Closed tasks of an archived project stay on the
+  Closed page.
+- **Delete** (`delete_project`) removes only the project: its tasks (trashed ones too) are kept and
+  are then in no project, each with an automatic log entry. There is no Trash for projects.
+- **Activity log.** `EventKind.PROJECT` (`data`: `from`, `to` project names or none, `via` the
+  parent a subtask moved with, `reason: 'deleted'`): "Added to the project X", "Moved from the
+  project X to Y", "Removed from the project X", "... with its parent, #n Title" (automatic), "The
+  project X was deleted: the task is in no project" (automatic). `created` carries `project` for a
+  top-level task ("Created, in the project X"). A task that takes a project by being moved under a
+  parent records only the `moved` entry. Archiving records nothing on the tasks.
+- **Pages** (`views/projects.py`; another user's project is a 404). `todo:projects`
+  `/todo/projects/` (`?tab=archived`): the htmx list in the Labels page's shape
+  (`partials/project_list.html` into `#projects`, refusals 422 into `#project-msg`): add (name,
+  colour), edit in place, drag to reorder (active tab), a progress bar and `N open · M closed` per
+  project, a "No project" line linking to the search with `projects=none`; an add or edit also
+  sends the sidebar block out of band. Archive, Unarchive and Delete go through the shared
+  confirmation modal (plain POSTs: `project-archive`, `project-unarchive`, `project-delete`, flash
+  and redirect). `todo:project` `/todo/projects/<uuid>/`: the name, counts and overdue count, the
+  progress bar, the rendered description, an Edit form (name, colour, description; `project-edit`
+  with `ctx=page`, an `HX-Redirect` back), the quick-add box with the project preselected, and its
+  tasks (`?sort=`, `?dir=`, `?closed=1` for the closed ones after the open, `?page=`; **a plain
+  page**, the sort bar and pager are links, no list partial). Rows there use `view='project'`
+  (`belongs`: any non-trashed task stays, so a completed row is struck in place) and a task added
+  from its quick-add box answers `HX-Redirect` to the page. An archived project's page has no quick
+  add, a note and Unarchive.
+- **Everywhere else.** `views.common.projects_context(user)` (one query: every project with its
+  counts) gives every page `todo_projects` (active), the sidebar's first `SIDEBAR_LIMIT` (20), "and
+  N more" and "N archived" (`partials/sidebar_projects.html`, between the menu and Filters; counts
+  are part of the render, a plain grouped count, unlike the saved filters' regex counts). A row
+  shows the project as a chip (colour dot + name, a link) on every list but the project's own page
+  (`decorate` and `owned_task` `select_related('project')`: no query per row) and a folder button
+  for a top-level task that opens the **Move dialog** (`partials/move_dialog.html`, one per page in
+  the layout, inline Alpine, opened with a `open-move-dialog` window event; a plain POST to
+  `todo:move` `/todo/<n>/project/`, flash "Moved A to X." and a redirect back). The quick-add box
+  has a **Project** select (`TaskForm.project`, `requested_project()`; not one of `changes()`). The
+  task page shows "In X" in its top line and, for a top-level task, a Project select under Details
+  that saves on change (`todo:move` with `ctx=page`, answers the panel); a subtask says "with its
+  parent"; a task of an archived project gets the `#archived-note`. `todo:move` runs `check_move`
+  before `TODO_EDIT_USER` is charged; every project write spends `TODO_EDIT_USER`, validated first.
+- **Search and saved filters.** `FilterParams.projects` (project ids sorted, and `none`; a task in
+  any of them) and `include_archived`. **Without `include_archived` the tasks of archived projects
+  are left out of every search, filter and filter count, unless `projects` names projects**
+  (choosing a project lists it, archived or not). Unlike labels, **an id that is no project of the
+  user's is kept and matches nothing** (a filter on a deleted project lists no task instead of every
+  task; its summary says `in a deleted project`); `projects` counts for `has_criteria`,
+  `include_archived` alone does not. `to_dict()` writes both only when set, so stored filters are
+  unchanged. `describe_params`: `in Website, no project`, `including archived projects`;
+  `filters.label_names(user)` now maps project ids too (one dict for both). The search page has a
+  Project checkbox group and "Include archived projects".
+- **The API** (part 3 will add the rest). Two things already apply: `GET /api/todo/tasks` with
+  `view=all` (and `today` / `upcoming`) leaves the tasks of archived projects out, as the website
+  does, and `FilterParamsSchema` has `projects` and `include_archived` (so the app's `PATCH` of a
+  filter, which replaces `params` as a whole, does not drop them; a malformed id is a 422). The
+  activity log's `kind` enum gained `project`. OpenAPI 2.9.0. A task's JSON has no `project` yet.
+- **Admin.** Read-only `ProjectAdmin` (archived mark and filter, task count); `TaskAdmin` lists
+  `project`. Deleting a user takes their projects (`todo` is in `CASCADE_WITH_USER_APP_LABELS`).
+- **Not done:** sections and a manual order on the project page (part 2), the API and CLI (part 3),
+  filing emailed tasks (they are in no project), reading a project from the title, bulk moves, and
+  the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
+  To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
+- **Tests.** `apps/todo/tests/test_projects.py`; the AI plan has TODO-62 to TODO-65 and ADM-65.
+
 #### Comments and references
 
 Issue #180 (`models/comment.py`, `models/reference.py`, `services/comments.py`,
@@ -7411,6 +7523,9 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   short link zone (#170), sized well above what a crowd behind one shared address produces.
   `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
   `receipts.py` and `filetransfer.py` still carry their own copies of it.
+- To-do projects (#314) are built in three parts; only the first exists (projects, the project page,
+  moving, archive and delete, the search filter). Sections with a manual order, and the API and CLI,
+  are still to come: until then the Android app and `inv todo` neither show nor set a task's project.
 - To-do (#161) is built in waves. Only the foundation (#178: tasks, subtasks, labels, numbering, task
   billing, the web pages) and repeating tasks (#179) exist; comments, search, reminders, attachments,
   AI date parsing, email intake and the JWT API/CLI are their own sub-issues. Completing a repeating

@@ -1092,6 +1092,15 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | 5 | Abuse reports of a request: report it from its public page (FT-62), then `/admin/file_transfer/abusereport/`. | The report is listed against the request; **Dismiss** / **Take down** work as for a transfer; with an auto-hold threshold set on the File transfer settings page (ADM-21 to ADM-26) enough distinct-IP reports put the request on hold and the owner's row says "This request is on hold pending review and is temporarily unavailable." |
 | 6 | `/admin/core/scheduledjob/` after the scheduler ran (or the job's page). | `file_transfer.send_request_notices` exists: "Tells the owner of a file request that new files arrived, once the last upload of a batch is 15 minutes old (one notice per batch, in the app only)." Every minute, lease 5 minutes. |
 
+### ADM-65 To-do projects in the admin
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | As `qa.admin@example.com`, open `/admin/todo/project/` (after `qa.user` made projects, TODO-62). | The list shows name, user, colour, an Archived mark, the number of tasks and the creation date; filter by archived (empty / not empty) and date; search by name and email. |
+| 2 | Open one. | Every field is read-only; there is no Add, Save or Delete. |
+| 3 | Open `/admin/todo/task/`. | The list has a **Project** column. |
+| 4 | Open `/admin/todo/todosettings/`. | "Max projects per user" (100) is there and editable. Set it to 1, save, and as `qa.user` (who has projects) add another: `You can have up to 1 project.` Restore 100. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

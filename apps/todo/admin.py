@@ -21,6 +21,7 @@ from .models import (
     InboundMessage,
     InboxCode,
     Label,
+    Project,
     Recurrence,
     Reminder,
     ReminderDelivery,
@@ -123,6 +124,7 @@ class TaskAdmin(ReadOnlyModelAdmin):
         'resolution',
         'due_date',
         'priority',
+        'project',
         'recurrence',
         'charged_credits',
         'unpaid',
@@ -140,7 +142,7 @@ class TaskAdmin(ReadOnlyModelAdmin):
         'created_at',
     ]
     search_fields = ['title', 'number', 'user__email']
-    list_select_related = ['user', 'recurrence']
+    list_select_related = ['user', 'recurrence', 'project']
     date_hierarchy = 'created_at'
     inlines = [BlockedByInline, BlocksInline]
 
@@ -274,6 +276,30 @@ class LabelAdmin(ReadOnlyModelAdmin):
 
     @admin.display(description='Tasks', ordering='_task_count')
     def task_count(self, obj: Label) -> int:
+        return obj._task_count  # ty: ignore[missing-attribute]
+
+
+class ProjectAdmin(ReadOnlyModelAdmin):
+    """A user's projects (issue #314). Read-only: archiving and deleting are the owner's."""
+
+    list_display = ['name', 'user', 'color', 'archived', 'task_count', 'created_at']
+    list_filter = [('archived_at', admin.EmptyFieldListFilter), 'created_at']
+    search_fields = ['name', 'user__email']
+    list_select_related = ['user']
+
+    def get_queryset(self, request: HttpRequest):
+        return (
+            super()
+            .get_queryset(request)
+            .annotate(_task_count=Count('tasks', filter=Q(tasks__deleted_at__isnull=True)))
+        )
+
+    @admin.display(description='Archived', boolean=True, ordering='archived_at')
+    def archived(self, obj: Project) -> bool:
+        return obj.is_archived
+
+    @admin.display(description='Tasks', ordering='_task_count')
+    def task_count(self, obj: Project) -> int:
         return obj._task_count  # ty: ignore[missing-attribute]
 
 
@@ -472,6 +498,7 @@ custom_admin_site.register(TaskEvent, TaskEventAdmin)
 custom_admin_site.register(Recurrence, RecurrenceAdmin)
 custom_admin_site.register(TodoAccount, TodoAccountAdmin)
 custom_admin_site.register(Label, LabelAdmin)
+custom_admin_site.register(Project, ProjectAdmin)
 custom_admin_site.register(Comment, CommentAdmin)
 custom_admin_site.register(Attachment, AttachmentAdmin)
 custom_admin_site.register(Reminder, ReminderAdmin)

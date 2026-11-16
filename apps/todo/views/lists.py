@@ -35,8 +35,8 @@ from ..services import (
     closed_set,
     get_account,
     has_manual_order,
+    listed_tasks,
     muted_overdue_set,
-    open_tasks,
     order_grouped,
     order_tasks,
     overdue_set,
@@ -76,7 +76,7 @@ def belongs(task: Task, view: str, today: date) -> bool:
     one that no longer belongs is removed instead of re-rendered. `subtask` is the list on the task
     page, where a closed subtask stays, and `search`, whose results include closed tasks when
     asked."""
-    if view in ('subtask', 'search'):
+    if view in ('subtask', 'search', 'project'):  # `project`: a project's own page
         return not task.is_trashed
     if view == 'trash':
         return task.is_trashed
@@ -103,7 +103,7 @@ def decorate(queryset: QuerySet) -> QuerySet:
         with_reminder_flags(
             with_open_occurrences(with_comment_counts(with_subtask_counts(queryset)))
         )
-        .select_related('parent', 'recurrence')
+        .select_related('parent', 'recurrence', 'project')
         .prefetch_related(
             'labels',
             Prefetch(
@@ -126,13 +126,14 @@ def _query(**params: str) -> str:
     return '&'.join(f'{key}={value}' for key, value in params.items() if value)
 
 
-def sort_links(sort: str, direction: str) -> list[dict]:
+def sort_links(sort: str, direction: str, sorts: dict | None = None) -> list[dict]:
     """What the "Sort by" bar renders, one entry per sort: its `key`, `label`, the `query` of its
     link (`?sort=...&dir=...`, without the `?`; empty for the plain default) and, for the active one,
     its `direction`. A sort's link asks for its own default direction, except the active one, which
-    asks for the opposite: a second click reverses it."""
+    asks for the opposite: a second click reverses it. `sorts` (default: the All page's, with
+    Manual) is what the bar offers."""
     links = []
-    for key, label in LIST_SORTS.items():
+    for key, label in (sorts or LIST_SORTS).items():
         active = key == sort
         if key == MANUAL_SORT:  # no second click to reverse: it has no direction
             links.append(
@@ -213,7 +214,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     if view == 'all':
         # The Manual sort is `Task.all_position`; `manual` in `order_tasks` is a parent's subtasks.
         queryset = order_tasks(
-            decorate(open_tasks(user)), 'all_manual' if sort == MANUAL_SORT else sort, direction
+            decorate(listed_tasks(user)), 'all_manual' if sort == MANUAL_SORT else sort, direction
         )
         context['sortable'] = sort == MANUAL_SORT
     elif view == 'closed':

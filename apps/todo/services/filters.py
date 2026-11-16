@@ -22,8 +22,8 @@ from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
 from apps.core.datetime_format import DisplayFormats, format_date
 
-from ..models import MUTED_STATES, Label, Resolution, Task, TaskState
-from .dates import SORT_DEFAULT, SORTS
+from ..models import MUTED_STATES, Label, Project, Resolution, Task, TaskState
+from .dates import SORT_DEFAULT, SORTS, not_archived
 from .search import (
     MODES,
     PreparedQuery,
@@ -41,6 +41,9 @@ RESOLUTIONS = tuple(Resolution.values)
 #: A task without a label, in `labels`.
 NO_LABEL = 'none'
 MAX_LABELS = 50
+#: A task in no project, in `projects`.
+NO_PROJECT = 'none'
+MAX_PROJECTS = 50
 
 DATE_ANY = 'any'
 DATE_CUSTOM = 'custom'
@@ -64,6 +67,8 @@ QUERY_KEYS = (
     'include_completed',
     'priorities',
     'labels',
+    'projects',
+    'include_archived',
     'states',
     'resolution',
     'date_range',
@@ -109,6 +114,13 @@ class FilterParams:
     priorities: tuple[int, ...] = ()
     #: Label ids of the user, sorted, and `none` for unlabelled; a task with any of them matches.
     labels: tuple[str, ...] = ()
+    #: Project ids of the user, sorted, and `none` for tasks in no project; a task in any of them
+    #: matches. Empty: any. An id that names no project of the user's (one deleted since) matches
+    #: nothing, so a filter on a deleted project selects no task rather than every task.
+    projects: tuple[str, ...] = ()
+    #: Whether the tasks of archived projects are listed too. Without it they are left out, unless
+    #: `projects` names projects (choosing a project asks for its tasks, archived or not).
+    include_archived: bool = False
     #: A subset of `STATES` (open states), sorted; an open task in any of them matches. Empty: any.
     #: Closed tasks are not narrowed by it (`include_completed` and `resolution` decide those).
     states: tuple[str, ...] = ()
@@ -154,6 +166,14 @@ class FilterParams:
                     continue
             labels.append(label_id)
 
+        projects: list[str] = []
+        for token in _tokens(raw.get('projects') or []):
+            project_id = _label_id(token)  # the same shape: a UUID, or `none`
+            if project_id is not None and project_id not in projects:
+                projects.append(project_id)
+        projects = projects[:MAX_PROJECTS]
+        include_archived = first('include_archived').strip().lower() in _TRUE
+
         states = {token for token in _tokens(raw.get('states') or []) if token in STATES}
         resolution = first('resolution').strip().lower()
         if resolution not in RESOLUTIONS or not include:
@@ -177,6 +197,8 @@ class FilterParams:
             include_completed=include,
             priorities=tuple(sorted(priorities)),
             labels=tuple(sorted(labels)),
+            projects=tuple(sorted(projects)),
+            include_archived=include_archived,
             states=tuple(sorted(states)),
             resolution=resolution,
             date_range=date_range,
@@ -228,6 +250,11 @@ class FilterParams:
             data['states'] = list(self.states)
         if self.resolution:
             data['resolution'] = self.resolution
+        # Projects (issue #314) likewise: only when set.
+        if self.projects:
+            data['projects'] = list(self.projects)
+        if self.include_archived:
+            data['include_archived'] = True
         return data
 
     def to_pairs(self, *, keep_sort: bool = False) -> list[tuple[str, str]]:
@@ -241,6 +268,9 @@ class FilterParams:
             pairs.append(('include_completed', '1'))
         pairs += [('priorities', str(priority)) for priority in self.priorities]
         pairs += [('labels', label) for label in self.labels]
+        pairs += [('projects', project) for project in self.projects]
+        if self.include_archived:
+            pairs.append(('include_archived', '1'))
         pairs += [('states', state) for state in self.states]
         if self.resolution:
             pairs.append(('resolution', self.resolution))
@@ -269,6 +299,7 @@ class FilterParams:
             self.q.strip()
             or self.priorities
             or self.labels
+            or self.projects
             or self.states
             or self.date_range != DATE_ANY
         )
@@ -308,6 +339,16 @@ class FilterParams:
             if NO_LABEL in self.labels:
                 any_label |= ~Q(Exists(through))
             condition &= any_label
+        if self.projects:
+            in_any = Q()
+            ids = [uuid.UUID(project) for project in self.projects if project != NO_PROJECT]
+            if ids:
+                in_any |= Q(project_id__in=ids)
+            if NO_PROJECT in self.projects:
+                in_any |= Q(project__isnull=True)
+            condition &= in_any
+        elif not self.include_archived:
+            condition &= not_archived()
         if self.states:
             # A closed task has no state: "Include closed" and the resolution decide those.
             condition &= Q(completed_at__isnull=False) | Q(state__in=self.states)
@@ -359,8 +400,15 @@ def label_ids(user: User) -> set[str]:
 
 
 def label_names(user: User) -> dict[str, str]:
-    """`{label id: name}` of the user's labels."""
-    return {str(pk): name for pk, name in Label.objects.filter(user=user).values_list('pk', 'name')}
+    """`{id: name}` of what a filter can name: the user's labels and projects (their ids are UUIDs,
+    so one dict serves `describe_params` for both)."""
+    names = {
+        str(pk): name for pk, name in Label.objects.filter(user=user).values_list('pk', 'name')
+    }
+    names.update(
+        (str(pk), name) for pk, name in Project.objects.filter(user=user).values_list('pk', 'name')
+    )
+    return names
 
 
 def filter_tasks(user: User, params: FilterParams, *, ordered: bool = True) -> QuerySet:
@@ -423,6 +471,18 @@ def describe_params(
             parts.append('no label')
         elif label in names_by_id:
             parts.append(f'@{names_by_id[label]}')
+    # The named projects by name, then "no project" (the ids' own order means nothing to a reader).
+    places = sorted(
+        names_by_id.get(project, 'a deleted project')
+        for project in params.projects
+        if project != NO_PROJECT
+    )
+    if NO_PROJECT in params.projects:
+        places.append('no project')
+    if places:
+        parts.append(f'in {", ".join(places)}')
+    elif params.include_archived:
+        parts.append('including archived projects')
     if params.date_range == DATE_CUSTOM:
         if params.date_from and params.date_to:
             parts.append(f'{_day(params.date_from)} to {_day(params.date_to)}')
@@ -455,6 +515,7 @@ __all__ = [
     'DATE_RANGES',
     'MODES',
     'NO_LABEL',
+    'NO_PROJECT',
     'PRIORITIES',
     'QUERY_KEYS',
     'RESOLUTIONS',
