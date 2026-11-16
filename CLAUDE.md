@@ -5252,7 +5252,16 @@ line says so).
     project's section), in one transaction with the move); the top line reads "In X / Design". The Move dialog on rows chooses
     a project only.
   - *Not in part 2:* a section filter in search, a board view.
-- **Not done:** filing emailed tasks (they are in no project), reading a project from the title, bulk moves, and
+- **`#project` and `@label` in a new task's title** (`services/title_tags.py`, its docstring the long version). A tag
+  starts a word and runs to the next white space (trailing `.,;:!?)]}` dropped); it names an existing *active* project
+  or a label of the user's, compared ignoring case, spaces, `-` and `_`; `#` with digits only is a task reference, never
+  a project. A used tag leaves the title (a title of tags alone is kept whole); one that names nothing stays as typed and
+  **nothing is ever created**. The first `#` that matches wins, every matching `@` is added. Read at creation only: the
+  quick-add box (the Project select wins over `#`), the subtask form (`@` only), `POST /api/todo/tasks` (`project` in
+  the body wins, `labels` and `@` merged) and an emailed subject (read before the date, so the model never sees the
+  tags). The date reader puts back a tag its `clean_title` dropped (`title_tags.keep_in`), so Accept never loses one.
+  Renaming a task does not read tags. Tests: `apps/todo/tests/test_title_tags.py`; AI case TODO-69.
+- **Not done:** reading a project from a renamed title, bulk moves, and
   the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
   To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
 - **Tests.** `apps/todo/tests/test_projects.py`; the Playwright `tests_e2e/test_todo_projects.py` (the

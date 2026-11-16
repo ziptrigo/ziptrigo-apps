@@ -275,6 +275,13 @@ class TaskCreateSchema(Schema):
     words); an AI that is not configured, busy, over its limits or that finds nothing just creates
     the task as typed. `parsed` in the answer says which.
 
+    The title is read for tags: `#name` files the task in the caller's project of that name and each
+    `@name` adds the label of that name (case, spaces, `-` and `_` ignored; a tag starts a word; `#`
+    with digits only is a task reference). A tag that names nothing, or an archived project, stays in
+    the title as typed and nothing is created; one that was used is taken out of the title. `project`
+    in the body wins over `#` (which then stays as text), `labels` and `@` are merged, and a subtask
+    reads `@` only.
+
     `state` is the state the task starts in: `todo` (the default), `in_progress` or `on_hold` (a 400
     for anything else: `blocked` is set only by blockers). `blocked_by` lists the numbers of the
     caller's own tasks that block the new one (at most 20, none in the Trash; one that doesn't exist,

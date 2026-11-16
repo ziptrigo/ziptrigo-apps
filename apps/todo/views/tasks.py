@@ -62,6 +62,7 @@ from ..services import (
     set_resolution,
     set_state,
     subtasks_of,
+    title_tags,
     today_count,
     toggle_checklist,
     trash_task,
@@ -284,14 +285,21 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
         return refuse(request, form_error_lines(form), retarget='#quick-add-msg')
     if (response := limited(request, 'TODO_CREATE_USER', retarget='#quick-add-msg')) is not None:
         return response
+    values = form.changes()
+    project = form.requested_project()
+    # `#project` and `@label` in the title (a project chosen in the select wins over `#`).
+    tags = title_tags.read(request.user, values.get('title', ''), projects=not project)
+    values['title'] = tags.title
+    if tags.labels:
+        values['labels'] = [*values.get('labels', []), *tags.labels]
     try:
         task = create_task(
             request.user,
             state=form.requested_state(),
             blocked_by=form.requested_blockers(),
-            project=form.requested_project(),
+            project=project or tags.project,
             section=form.requested_section(),
-            **form.changes(),
+            **values,
         )
     except InsufficientCreditsError:
         return refuse(request, CREDITS_LINE, retarget='#quick-add-msg', top_up=True)
@@ -351,7 +359,9 @@ def subtask_add(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     if (response := limited(request, 'TODO_CREATE_USER', retarget='#subtask-msg')) is not None:
         return response
     try:
-        create_task(request.user, title=form.cleaned_data['title'], parent=parent)
+        # A subtask is in its parent's project: only `@label` is read from its title.
+        tags = title_tags.read(request.user, form.cleaned_data['title'], projects=False)
+        create_task(request.user, title=tags.title, parent=parent, labels=tags.labels)
     except InsufficientCreditsError:
         return refuse(
             request, CREDITS_LINE, retarget='#subtask-msg', top_up=True, fallback=_task_url(parent)

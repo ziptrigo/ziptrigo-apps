@@ -462,7 +462,14 @@ def _create(user, payload: TaskCreateSchema, parent: Task | None):
         'due_time': payload.due_time,
         'rrule': payload.rrule,
     }
-    title = payload.title
+    # `#project` and `@label` in the title (`project` in the body wins over `#`; a subtask is in
+    # its parent's project, so only its labels are read).
+    tags = services.title_tags.read(
+        user, payload.title, projects=payload.project is None and parent is None
+    )
+    title = tags.title
+    labels = list(dict.fromkeys([*payload.labels, *(label.pk for label in tags.labels)]))
+    project = payload.project or tags.project
     parsed: dict[str, Any] | None = None
     if payload.parse_title and title.strip():
         reading, reason = read_title(user, ' '.join(title.split()))
@@ -483,11 +490,11 @@ def _create(user, payload: TaskCreateSchema, parent: Task | None):
             description=payload.description,
             priority=payload.priority,
             parent=parent,
-            labels=payload.labels,
+            labels=labels,
             recurrence_mode=payload.recurrence_mode,
             state=payload.state,
             blocked_by=payload.blocked_by,
-            project=payload.project,
+            project=project,
             section=payload.section,
             source=TaskSource.API,
             **values,

@@ -175,7 +175,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/` and click **To-do** in the top navigation (check-square icon). | Lands on `/todo/`. Tab title "Today - To-do - ZipTrigo". |
-| 2 | Look at the page. | A sidebar with, from the top: a "Search tasks" box (a `?` help button, **Regex** and **Include closed** checkboxes); Today (highlighted, no count), Upcoming, All, Closed, Labels, Trash, Settings, each with an icon; then a **Filters** heading with "No saved filters". Heading "Today". A quick-add box: a "Add a task" field, an **Add task** button, Date, Time, Priority, State (a select showing "To do") controls and an "Add labels" button, and the line "0 of 10 free tasks used this month." Below, "Today <weekday date>" with an empty state (check icon, "Nothing due today", "Add a task above."). No Overdue section. No raw `{{ }}`/`{% %}`, broken icons or console errors. |
+| 2 | Look at the page. | A sidebar with, from the top: a "Search tasks" box (a `?` help button, **Regex** and **Include closed** checkboxes); Today (highlighted, no count), Upcoming, All, Closed, Labels, Trash, Settings, each with an icon; then a **Filters** heading with "No saved filters". Heading "Today". A quick-add box: an "Add a task (#project @label)" field, an **Add task** button, Date, Time, Priority, State (a select showing "To do") controls and an "Add labels" button, and the line "0 of 10 free tasks used this month." Below, "Today <weekday date>" with an empty state (check icon, "Nothing due today", "Add a task above."). No Overdue section. No raw `{{ }}`/`{% %}`, broken icons or console errors. |
 | 3 | Click each sidebar entry in turn. | Each page opens with its own heading and a sensible empty state ("No open tasks. Add one above.", "No closed tasks yet.", "The trash is empty.", "No labels yet. Add your first below."); Upcoming shows 14 day headings, the first "Tomorrow, <d Mon>", each with "Nothing due", and a "Later: see all tasks" link; the active entry is highlighted. |
 
 ### TODO-03 Quick add
@@ -1332,6 +1332,19 @@ one`; a second user (Session B) with a task.
 | 6 | `POST .../unarchive`, then `DELETE /api/todo/projects/<id>`, then `GET /api/todo/tasks/<n>`. | The project is active; 204; the task still exists with `project: null` and `section: null`. |
 | 7 | `inv todo project-add local Cli project`, `section-add local "Cli project" Design`, `add local "cli filed" --project "cli project" --section design`, `list local --project "Cli project"`, `projects local`. | The project and section are made; the task is listed with `Cli project / Design` in the Project column; `projects` shows 1 open and the section. |
 | 8 | `inv todo edit local <n> --no-section`, `edit local <n> --no-project`, `add local x --project Nope`, `project-archive local "Cli project"` (answer n), `project-delete local "Cli project" --yes`. | Each edit succeeds; the unknown project exits 1 with `No project called "Nope"` and creates nothing; the archive asks and does nothing on `n`; the delete succeeds. |
+
+### TODO-69 A project and labels from the title
+
+**Preconditions:** a project `WSA` and a label `home` for `qa.user@example.com`; no project `Nowhere`.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | On Today, quick-add `BSpacey integration #WSA @home` (Project select left empty). | The row reads `BSpacey integration` with the `WSA` project chip and the `home` label chip. |
+| 2 | Quick-add `Call Bob #Nowhere @nobody`. | The task is created with the title `Call Bob #Nowhere @nobody` as typed, in no project, without labels; no project or label `Nowhere`/`nobody` appears on the Projects or Labels page. |
+| 3 | Quick-add `x #wsa` with the Project select set to another project. | The task is in the chosen project and its title is `x #wsa`. |
+| 4 | Quick-add `Follow up #1234`. | The title stays `Follow up #1234`, in no project. |
+| 5 | On a task's page add the subtask `Sub #WSA @home`. | The subtask is `Sub #WSA` (a subtask is in its parent's project) with the `home` label. |
+| 6 | `POST /api/todo/tasks` `{"title": "Api #WSA @home"}` with TODO-55's JWT. | 201: `title` `Api`, `project.name` `WSA`, the `home` label. |
 
 ## Out of scope
 

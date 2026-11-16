@@ -68,6 +68,7 @@ from apps.core.datetime_format import (
 from apps.core.markdown import normalize_for_search
 from apps.core.services import ai as core_ai
 
+from . import title_tags
 from .limits import TITLE_MAX
 from .recurrence import describe, first_date, parse_rule
 
@@ -648,7 +649,8 @@ def parse_title(request: ParseRequest, *, charge: Callable[[], bool] | None = No
     wording = request.wording or request.formats
     return TitleParse(
         has_date=True,
-        clean_title=safe_title(title, parsed.clean_title),
+        # A tag (`#project`, `@label`) the model dropped is put back: Accept must not lose it.
+        clean_title=title_tags.keep_in(title, safe_title(title, parsed.clean_title)),
         due_date=due_date,
         due_time=due_time,
         rrule=parsed.rrule,
