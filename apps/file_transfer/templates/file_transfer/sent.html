@@ -5,10 +5,17 @@
 {% block content %}
 <div class="container mx-auto px-4 py-8 max-w-2xl text-center">
     <i class="fas fa-check-circle text-5xl text-sage-500 dark:text-sage-300 mb-4"></i>
+    {% if has_recipients %}
     <h1 class="text-3xl font-semibold tracking-tight mb-4 text-gray-900 dark:text-gray-100">Your transfer is on its way</h1>
     <p class="text-gray-600 dark:text-gray-400 mb-6">
         We emailed the recipients and sent you a copy. Here's the link too:
     </p>
+    {% else %}
+    <h1 class="text-3xl font-semibold tracking-tight mb-4 text-gray-900 dark:text-gray-100">Your files are ready</h1>
+    <p class="text-gray-600 dark:text-gray-400 mb-6" id="sent-no-recipients">
+        Share this link with anyone you like. We also emailed it to you.
+    </p>
+    {% endif %}
     <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-4 flex items-center gap-2 mb-6 border border-gray-200 dark:border-gray-700">
         <input type="text" readonly value="{{ download_url }}" id="download-url-input"
                class="flex-1 text-sm bg-transparent text-gray-900 dark:text-gray-100 border-none">

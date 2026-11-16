@@ -31,6 +31,8 @@ class FakeS3Storage:
     aborted_uploads: set[str] = field(default_factory=set)
     checksum: str = 'ZmFrZWNoZWNrc3Vt'
     presign_calls: list[tuple[str, int]] = field(default_factory=list)
+    #: Every `presigned_get_url` call as `(key, disposition, content_type)`.
+    get_url_calls: list[tuple[str, str, str | None]] = field(default_factory=list)
     #: Parts recorded through `upload_part` (the zip builder's server-side path, and tests that
     #: simulate a part already landed in S3 via a resumed upload), keyed by upload id then part
     #: number -- assembled into `objects[key]` on `complete_multipart_upload`. The browser-PUT
@@ -44,9 +46,13 @@ class FakeS3Storage:
     #: exactly what a resumed upload's completion used to omit) -- see `complete_multipart_upload`.
     checksum_required: dict[str, bool] = field(default_factory=dict)
 
-    def seed_object(self, key: str, size: int) -> None:
-        """Test helper: pretend `size` bytes were already PUT to `key`."""
-        self.objects[key] = b'\0' * size
+    def seed_object(self, key: str, size: int, content: bytes | None = None) -> None:
+        """Test helper: pretend `size` bytes were already PUT to `key` -- zeros, or `content`
+        (padded with zeros, or cut, to `size`) when a test needs the file's real first bytes."""
+        if content is None:
+            self.objects[key] = b'\0' * size
+        else:
+            self.objects[key] = content[:size].ljust(size, b'\0')
 
     def create_multipart_upload(
         self, key: str, *, checksum_algorithm: str | None = 'SHA256'
@@ -167,8 +173,27 @@ class FakeS3Storage:
     def object_exists(self, key: str) -> bool:
         return key in self.objects
 
-    def presigned_get_url(self, key: str, filename: str, expires_in: int = 900) -> str:
-        return f'https://fake-s3.test/{key}?filename={filename}'
+    def get_object_range(self, key: str, start: int, end: int) -> bytes:
+        if key not in self.objects:
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': ''}}, 'GetObject')
+        return self.objects[key][start : end + 1]
+
+    def presigned_get_url(
+        self,
+        key: str,
+        filename: str,
+        expires_in: int = 900,
+        *,
+        disposition: str = 'attachment',
+        content_type: str | None = None,
+    ) -> str:
+        self.get_url_calls.append((key, disposition, content_type))
+        url = f'https://fake-s3.test/{key}?filename={filename}'
+        if disposition != 'attachment':
+            url += f'&disposition={disposition}'
+        if content_type:
+            url += f'&type={content_type}'
+        return url
 
     def delete_object(self, key: str) -> None:
         self.objects.pop(key, None)

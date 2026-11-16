@@ -4,13 +4,15 @@ suspended, deleted, or its limit reached all render the same neutral page).
 """
 
 import base64
+import logging
 import re
 from functools import lru_cache
 
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.core import ratelimit
@@ -21,10 +23,14 @@ from apps.core.services.qr_image import render_png
 from .. import services
 from ..forms import AbuseReportForm, DownloadPasswordForm
 from ..models import Transfer, TransferFile, ZipStatus
+from ..services import preview
 from ..services.request_access import Access, check_access, is_owner
+from ..services.storage import get_storage
 from ..services.zip import ensure_zip_build_started
 from . import request_public
 from .types import PublicHttpRequest
+
+logger = logging.getLogger(__name__)
 
 
 def _unavailable(request: HttpRequest) -> HttpResponse:
@@ -105,14 +111,18 @@ def download_qr_data_uri(transfer: Transfer) -> str:
 
 
 def _context(request: PublicHttpRequest, transfer: Transfer, password_form: DownloadPasswordForm):
+    files = list(transfer.files.filter(uploaded=True).order_by('name'))
+    unlocked = not services.requires_password(transfer) or services.is_unlocked_in_session(
+        request.session, transfer.id, transfer.password_hash
+    )
     return {
         'transfer': transfer,
-        'files': transfer.files.filter(uploaded=True).order_by('name'),
-        'unlocked': not services.requires_password(transfer)
-        or services.is_unlocked_in_session(request.session, transfer.id, transfer.password_hash),
+        'files': files,
+        'unlocked': unlocked,
         'password_form': password_form,
         'report_form': AbuseReportForm(),
         'qr_data_uri': download_qr_data_uri(transfer),
+        **preview.page_context(transfer, files, unlocked=unlocked),
     }
 
 
@@ -203,6 +213,72 @@ def download_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpRe
     except ValidationError:
         return _unavailable(request)
     return redirect(url)
+
+
+def _preview_headers(response: HttpResponse) -> HttpResponse:
+    response['Cache-Control'] = 'no-store, private'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+@require_GET
+@xframe_options_sameorigin
+def preview_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpResponse:
+    """A file's preview (issue #311), for the dialog on the download page: an image, PDF, video or
+    audio file answers a redirect to a short-lived presigned **inline** URL of the file's content
+    type, a text file answers its first `TEXT_PREVIEW_BYTES` as `text/plain`, a Markdown file the same
+    text and its sanitised rendering as JSON.
+
+    **Exactly the gates of the download** (`_password_gated_transfer`: the transfer is available,
+    the password was entered, a file request's access rules, and for a request the owner before
+    it is done), and the same per-file lookup. What differs: a preview is **not a download** --
+    no `DownloadEvent`, nothing counted against `max_downloads`, no notification to the sender --
+    and a refused gate answers a plain 403 instead of a redirect to the page (the response is
+    fetched by an `<img>`, `<iframe>` or `fetch()`, which would show or read the whole page).
+
+    **What the file is comes only from `TransferFile.preview_type`**, the type read from its
+    bytes when it was uploaded (`services.preview`); a file with none, whatever it is called, is a
+    404. The type is also what S3 is told to answer with, and `presigned_get_url` refuses one that
+    may not be inline. Text is read and re-encoded here, never served from the bucket: it is
+    answered as `text/plain; charset=utf-8` with `nosniff` and a `sandbox` CSP, so a hostile text
+    file (HTML, an SVG) cannot run as a page.
+    """
+    limited = ratelimit.hit_ip(request, 'FT_PREVIEW_IP')
+    if not limited.allowed:
+        return ratelimit.page_response(request, limited)
+
+    transfer = _password_gated_transfer(request, slug)
+    if isinstance(transfer, HttpResponseRedirect):
+        return _preview_headers(HttpResponse(status=403))
+    if isinstance(transfer, HttpResponse):
+        return _preview_headers(transfer)
+
+    file = get_object_or_404(TransferFile, id=file_id, transfer=transfer, uploaded=True)
+    kind = preview.kind_of(file.preview_type)
+    if kind is None:
+        return _preview_headers(HttpResponse(status=404))
+
+    storage = get_storage()
+    if kind in (preview.PreviewKind.TEXT, preview.PreviewKind.MARKDOWN):
+        try:
+            data = storage.get_object_range(file.storage_key, 0, preview.TEXT_PREVIEW_BYTES - 1)
+        except Exception:
+            logger.warning('Could not read the text preview of file %s', file.pk, exc_info=True)
+            return _preview_headers(HttpResponse(status=404))
+        if kind == preview.PreviewKind.MARKDOWN:
+            # Raw text plus the sanitised rendering, as JSON (never an HTML response).
+            response = JsonResponse(preview.render_markdown_preview(data))
+        else:
+            response = HttpResponse(
+                preview.decode_text(data), content_type='text/plain; charset=utf-8'
+            )
+        response['Content-Security-Policy'] = "default-src 'none'; sandbox"
+        return _preview_headers(response)
+
+    url = storage.presigned_get_url(
+        file.storage_key, file.name, disposition='inline', content_type=file.preview_type
+    )
+    return _preview_headers(redirect(url))
 
 
 #: How many times the "preparing the zip" partial polls itself automatically before giving up and

@@ -18,7 +18,9 @@ The `apps/file_transfer` web UI, against the real local S3 (Floci) and real emai
 - the public download page `/t/<slug>/` (file list, per-file download with the right name and
   bytes, password gate, "Download all (.zip)" built by streaming from S3, the **QR code** popup of
   the page's own link, no expiry text for a transfer that never expires, the neutral "no longer
-  available" page, "Report this transfer");
+  available" page, "Report this transfer", and **file previews** (issue #311: the hint line, the
+  Preview buttons and the dialog, FT-64 and FT-65);
+- sending **without recipients** (issue #310: FT-06 and FT-66);
 - the daily jobs' visible effects (metering, suspension and its in-app notification, re-enabling
   on a top-up, the suspension grace period, the expiry reminder, natural expiry, the deferred file
   deletion after the last allowed download), triggered with shell steps because the scheduler does
@@ -309,9 +311,9 @@ read: check it on a real click, where the browser saves the file under that name
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Leave **Recipients** empty and click **Send**. | The browser's own "fill out this field" bubble appears on Recipients; no request is sent. |
-| 2 | Enter three spaces in Recipients and click **Send**. | A red box appears above the Files card with "Recipients: This field is required." |
-| 3 | Enter `,` and click **Send**. | The red box now reads "Add at least one recipient." (it replaces the previous message, it doesn't add to it). |
+| 1 | Read the **Recipients** field. | The label is "Recipients (optional)" and the help text "One email address per line (or separated by commas). Leave it empty to just get a link to share yourself." The textarea has no `required` attribute (issue #310; FT-65 sends with it empty). |
+| 2 | Set Recipients to three spaces and Expiry to "Set a date" without a date, then click **Send**. | The red box shows only "Expiry date: Provide a date for a custom expiry." -- no recipients error, nothing is sent. |
+| 3 | Set Recipients to `,` and click **Send** again. | Still only the expiry message (an empty recipient list is fine). Set Expiry back to "No expiration" before the next step. |
 | 4 | Enter `qa.recipient1@example.com, not-an-email` and click **Send**. | Red box: `Recipients: "not-an-email" is not a valid email address.` |
 | 5 | Fill Recipients with 21 addresses: run `document.getElementById('id_recipients').value = Array.from({length: 21}, (_, i) => 'qa.many' + (i + 1) + '@example.com').join('\n')`, then click **Send**. | Red box: "A transfer can have at most 20 recipients." |
 | 6 | Set Recipients to `qa.recipient1@example.com`, choose Expiry "Set a date" without picking a date, click **Send**. | Red box: "Expiry date: Provide a date for a custom expiry." |
@@ -1185,9 +1187,80 @@ pay). Use the **Visitor window** for the anonymous uploader and a second private
 | 3 | Keyboard only on the upload page: Tab to the buttons and the trash button, Enter on trash. | The "Remove this file?" dialog takes focus on **Cancel**; Escape closes it; Enter on **Remove** removes. **Mark as done** is reachable and its dialog behaves the same. |
 | 4 | The upload and request pages' title (browser tab). | `<request title> - ZipTrigo` and `Request files - ZipTrigo`; the dashboard tab's links have `aria-current="page"` on the chosen tab. |
 
+## Previews and optional recipients
+
+### FT-64 Previewing files before downloading them
+
+**Purpose:** the download page says previews exist, opens nothing by itself, and shows each kind of file safely.
+**Preconditions:** the draft of FT-05 is not needed: sign in as `qa.user@example.com` and send one transfer `PREV`
+with these files (create them with the browser tool's file input; names matter, contents are given):
+`pic.png` (a real small PNG), `doc.pdf` (a real small PDF), `clip.mp4` or `clip.webm` (a real tiny video, if you can
+make one; skip the video steps otherwise), `tone.wav` (a real tiny WAV), `a.txt` (`line 1` + newline + `<b>x</b>`),
+`photo.png` (the **text** `<html><body><script>document.title='PWNED'</script></body></html>`, not an image: a
+renamed HTML file), `blob.bin` (a few KB of random bytes) and `fake.png` (2 KB of zero bytes). No recipients. Open the link
+`/t/<slug>/` in the Visitor window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Read the top of the file list. | A line with an eye icon: "N of 8 files can be previewed before you download them." where N counts every file except `blob.bin` and `fake.png` (and the video / audio you skipped). Nothing is open. |
+| 2 | Look at the rows. | Each row has a file-type icon. Previewable rows: the name is a button, a **Preview** button (eye icon, accessible name "Preview <name>") sits left of **Download**. `blob.bin` and `fake.png` read "<size> - no preview" and have only **Download**. |
+| 3 | Reload and wait. | No dialog opens by itself. |
+| 4 | Click **Preview** on `pic.png`. | A dialog opens (focus on **Close**): header with the icon, "pic.png", the size and "k of N" with Previous and Next buttons; the image is shown; footer **Download** and **Close**. The page behind does not scroll. There is no text claiming the preview is not a download. |
+| 5 | Click **Next** until `doc.pdf`, then `a.txt`. | The PDF shows in the browser's PDF viewer in the frame; `a.txt` shows the text `line 1` and `<b>x</b>` **literally** (the tags are visible, nothing bold) with "Showing the first 1 MB as plain text." in the footer. |
+| 6 | Click the name `photo.png` in the list (close the dialog first). | The dialog opens on `photo.png` and shows the **source text** `<html><body><script>...` -- as text. The tab title does not become `PWNED`, no alert. No Formatted / Raw switch. |
+| 7 | Press ArrowRight and ArrowLeft with the dialog open. | The dialog moves among the previewable files only (never `blob.bin` / `fake.png`) and wraps around; the position text updates. |
+| 8 | Press Tab repeatedly; press Shift+Tab. | Focus stays inside the dialog (Close, Previous, Next, Download...). |
+| 9 | Press Escape. | The dialog closes and focus returns to the button that opened it. Open it again and click the backdrop: it closes. |
+| 10 | `/__e2e__/mail/` and the sender's dashboard row of `PREV`: look at the download log. | No download was recorded by all this previewing. Then click a **Download** link in the dialog: the log now has exactly that download. |
+| 11 | Visit `/t/<slug>/preview/<id of fake.png>/` and of `blob.bin` (read the ids from the Download links). | Both 404 -- the type comes from the bytes, not the name. |
+| 12 | Visit `/t/<slug>/preview/<id of photo.png>/`. | The browser shows the HTML **as plain text** (response `text/plain; charset=utf-8`), not a page. |
+| 13 | Send a second transfer `PREV2` with `pic.png`, password `pw1`, no recipients, and open its link in a clean window. | The hint reads "You can preview this file once you enter the password.", the row shows **Locked** with no Preview button, and `/t/<slug2>/preview/<id>/` answers 403. After entering `pw1` the hint reads "You can preview this file before you download it." and the Preview button works. |
+| 14 | Send a third transfer with only `blob.bin`. | No hint line and no "no preview" text; only **Download**. |
+| 15 | Phone width (375 px) and dark mode with the dialog open. | The dialog fits the screen with the footer wrapping; readable in dark mode; Previous / Next stay reachable. |
+
+### FT-65 Markdown files: Formatted and Raw
+
+**Purpose:** Markdown is shown formatted with a switch to the raw text, never trusting what is in the file.
+**Preconditions:** FT-64's sender. Send a transfer `MD` with `notes.md` containing:
+```
+# Title
+
+Some **bold** text, a [link](https://example.com) and <script>document.title='PWNED'</script>
+
+![pic](https://example.com/x.png)
+
+| a | b |
+|---|---|
+| 1 | 2 |
+```
+`page.html` (`<h1>Hi</h1><script>document.title='PWNED'</script>`) and `blob.md` (a few KB of random bytes named `.md`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the link and **Preview** `notes.md`. | Shown **Formatted**: a heading "Title", "bold" in bold, a link, a table. The `<script>` text appears as visible literal text (escaped), the tab title does not become `PWNED`, and there is no image (the Markdown image shows only as its link text). In the footer a segmented control **Formatted | Raw** with Formatted pressed (`aria-pressed="true"`). |
+| 2 | Click **Raw** (or Tab to it and press Enter/Space). | The exact Markdown source is shown as text; Raw is pressed, Formatted not; the footer says "Showing the first 1 MB as plain text." Click **Formatted**: back to the rendering. |
+| 3 | Close, open `notes.md` again. | Formatted is the default again. |
+| 4 | Preview `page.html`. | The raw source `<h1>Hi</h1><script>...` as text; **no** Formatted / Raw switch; no `PWNED`. |
+| 5 | `blob.md` in the list. | "no preview" (random bytes are not text, whatever the name). |
+| 6 | Visit `/t/<slug>/preview/<notes.md id>/`. | JSON (`application/json`) with `text` and a sanitised `html` (the `<script>` is `&lt;script&gt;`); `/t/<slug>/preview/<page.html id>/` is `text/plain`. |
+
+### FT-66 Sending without recipients
+
+**Purpose:** recipients are optional: the sender gets a link to share.
+**Preconditions:** signed in as `qa.user@example.com` (100 credits) on `/transfer/send/` with a fresh draft and one uploaded file `solo.txt`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Leave Recipients empty and click **Send**. | The page goes to the sent page: heading **Your files are ready**, "Share this link with anyone you like. We also emailed it to you.", the link in a read-only input and **Copy** (which turns **Copied**). It does **not** say "We emailed the recipients". |
+| 2 | `/__e2e__/mail/` (reload until it arrives). | Exactly one email, to `qa.user@example.com`, subject `Your transfer "solo.txt" is ready to share`; text "Your transfer "solo.txt" is ready. Nobody was emailed: share the link below." with `Download link: <BASE>/t/<slug>/` and the manage link. No email to anyone else. |
+| 3 | Open the link in the Visitor window and download the file. | It works like any transfer; the sender gets the "was downloaded" email if notify was checked. |
+| 4 | Open `/transfer/`, **Manage** on the new row. | The Recipients list reads "No recipients: nobody was emailed. Share the link yourself, or add recipients below to email it." |
+| 5 | Add `qa.late@example.com` with **Add**. | The recipient is listed with **Resend**, and an email "solo.txt was sent to you via ZipTrigo" arrives for it. |
+| 6 | Anonymous sending (`/transfer/send/anon/`, if enabled in FT-31). | Its Recipients field is still required ("Add at least one recipient."): unchanged. |
+
 ## Out of scope
 
-- **Rate limits** (`FT_UPLOAD_USER`, `FT_DOWNLOAD_IP`, `FT_UNLOCK_*`, `FT_REPORT_*`,
+- **Rate limits** (`FT_UPLOAD_USER`, `FT_DOWNLOAD_IP`, `FT_PREVIEW_IP`, `FT_UNLOCK_*`, `FT_REPORT_*`,
   `FT_RECIPIENT_EMAIL_USER`, the anonymous ones): switched off on this server. Unit tests cover
   them.
 - **Admin moderation** (takedown, the block list and its "Sending isn't available" page, the

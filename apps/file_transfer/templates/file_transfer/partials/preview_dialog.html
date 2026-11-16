@@ -1,0 +1,128 @@
+{% comment %}The file preview dialog of the download page (issue #311; the mock is
+   docs/ui-design/mocks/file-preview.html). Design system 10.9: the confirmation modal's overlay and
+   panel, wider. Driven by the `ftPreview` Alpine component (static/file_transfer/js/preview.js),
+   which reads the previewable files from `#ft-previews`. Focus moves to Close when it opens, stays
+   inside it and goes back to the button that opened it; Escape, the backdrop and Close close it;
+   Left and Right (or Previous and Next) move among the previewable files only.
+
+   What is shown is chosen by the kind the server gave the file, never by its name. Text is put in
+   the page with `x-text` (textContent): it is never HTML.{% endcomment %}
+<style>
+    .ft-markdown > :first-child { margin-top: 0; }
+    .ft-markdown h1, .ft-markdown h2, .ft-markdown h3, .ft-markdown h4, .ft-markdown h5, .ft-markdown h6 { font-weight: 600; margin: 1.25em 0 .5em; line-height: 1.3; }
+    .ft-markdown h1 { font-size: 1.5rem; } .ft-markdown h2 { font-size: 1.25rem; } .ft-markdown h3 { font-size: 1.1rem; }
+    .ft-markdown p, .ft-markdown ul, .ft-markdown ol, .ft-markdown blockquote, .ft-markdown pre, .ft-markdown .md-table { margin: 0 0 .85em; }
+    .ft-markdown ul { list-style: disc; padding-left: 1.5rem; } .ft-markdown ol { list-style: decimal; padding-left: 1.5rem; }
+    .ft-markdown li.task-list-item { list-style: none; margin-left: -1.25rem; }
+    .ft-markdown a { text-decoration: underline; }
+    .ft-markdown blockquote { border-left: 3px solid rgb(var(--c-gray-300)); padding-left: .9em; color: rgb(var(--c-gray-500)); }
+    .ft-markdown code { font-family: var(--font-mono, ui-monospace, monospace); font-size: .85em; background: rgb(var(--c-gray-100)); border-radius: .25rem; padding: .1em .3em; }
+    .ft-markdown pre { background: rgb(var(--c-gray-100)); border-radius: .5rem; padding: .75rem; overflow-x: auto; }
+    .ft-markdown pre code { background: none; padding: 0; }
+    .ft-markdown hr { border: 0; border-top: 1px solid rgb(var(--c-gray-200)); margin: 1.25em 0; }
+    .ft-markdown .md-table { overflow-x: auto; }
+    .ft-markdown table { border-collapse: collapse; }
+    .ft-markdown th, .ft-markdown td { border: 1px solid rgb(var(--c-gray-200)); padding: .3em .6em; text-align: left; }
+    .dark .ft-markdown code, .dark .ft-markdown pre { background: rgb(var(--c-gray-800)); }
+</style>
+<div x-show="isOpen" x-cloak style="display: none" id="preview-modal"
+     @click.self="close()"
+     x-transition:enter="transition-opacity duration-[220ms] ease-out"
+     x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition-opacity duration-[140ms] ease-in"
+     x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/75 backdrop-blur-[2px] p-2 sm:p-6">
+    <div x-show="isOpen" x-ref="dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title"
+         @keydown="trap($event)"
+         x-transition:enter="transform transition duration-[220ms] ease-out"
+         x-transition:enter-start="opacity-0 translate-y-2 scale-[.97]" x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+         x-transition:leave="transform transition duration-[140ms] ease-in"
+         x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 translate-y-2 scale-[.97]"
+         class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-full flex flex-col overflow-hidden">
+        <div class="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <span class="h-9 w-9 shrink-0 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300" aria-hidden="true"><i :class="current.icon"></i></span>
+            <div class="min-w-0 flex-1">
+                <p id="preview-title" class="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate" x-text="current.name"></p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                    <span x-text="current.size"></span><template x-if="many"><span> &middot; <span id="preview-position" x-text="position"></span></span></template>
+                </p>
+            </div>
+            <button type="button" @click="close()" aria-label="Close preview"
+                    class="btn p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"><i class="fas fa-xmark text-lg" aria-hidden="true"></i></button>
+        </div>
+
+        <p class="sr-only" role="status" aria-live="polite" x-text="isOpen ? (current.name + (many ? ', ' + position : '')) : ''"></p>
+
+        <div class="relative flex-1 min-h-[16rem] bg-gray-50 dark:bg-gray-900 flex items-center justify-center overflow-auto">
+            <template x-if="isOpen && current.kind === 'image'">
+                <img :src="current.url" :alt="'Preview of ' + current.name" id="preview-image"
+                     @load="ready()" @error="failed()"
+                     class="max-h-[70vh] max-w-full object-contain">
+            </template>
+            <template x-if="isOpen && current.kind === 'pdf'">
+                <iframe :src="current.url" :title="'Preview of ' + current.name" id="preview-pdf"
+                        @load="ready()" class="w-full h-[70vh] bg-white border-0"></iframe>
+            </template>
+            <template x-if="isOpen && current.kind === 'video'">
+                <video :src="current.url" controls playsinline preload="metadata" id="preview-video"
+                       @loadedmetadata="ready()" @error="failed()"
+                       class="max-h-[70vh] max-w-full bg-black"></video>
+            </template>
+            <template x-if="isOpen && current.kind === 'audio'">
+                <div class="w-full p-8 flex flex-col items-center gap-4">
+                    <i class="fas fa-file-audio text-5xl text-gray-400 dark:text-gray-500" aria-hidden="true"></i>
+                    <audio :src="current.url" controls preload="metadata" id="preview-audio"
+                           @loadedmetadata="ready()" @error="failed()" class="w-full max-w-md"></audio>
+                </div>
+            </template>
+            <template x-if="isOpen && (current.kind === 'text' || current.kind === 'markdown')">
+                <div class="w-full h-[70vh] overflow-auto">
+                    {# Raw: the file's text, put in with textContent, never as HTML. #}
+                    <pre id="preview-text" x-show="status === 'ready' && showRaw" x-text="text" tabindex="0"
+                         class="p-4 font-mono text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words"></pre>
+                    {# Formatted Markdown: HTML the server rendered and sanitised (raw HTML in the file is escaped, images are never rendered). #}
+                    <div id="preview-markdown" x-show="status === 'ready' && showFormatted" x-html="html" tabindex="0"
+                         class="ft-markdown p-6 max-w-3xl mx-auto text-sm text-gray-800 dark:text-gray-200"></div>
+                </div>
+            </template>
+
+            <p x-show="status === 'loading'" x-cloak style="display: none"
+               class="absolute inset-0 flex items-center justify-center pointer-events-none text-sm text-gray-500 dark:text-gray-400">
+                <i class="fas fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Loading preview...
+            </p>
+            <p x-show="status === 'error'" x-cloak style="display: none" role="alert" id="preview-error"
+               class="p-6 text-sm text-center text-gray-600 dark:text-gray-300">
+                This file can't be previewed here. You can still download it.
+            </p>
+
+            <template x-if="many">
+                <div>
+                    <button type="button" @click="prev()" aria-label="Previous file" id="preview-prev"
+                            class="btn absolute top-1/2 -translate-y-1/2 left-2 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 shadow text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-700"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+                    <button type="button" @click="next()" aria-label="Next file" id="preview-next"
+                            class="btn absolute top-1/2 -translate-y-1/2 right-2 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 shadow text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-700"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                </div>
+            </template>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+            <div class="flex-1 flex flex-wrap items-center gap-3 min-w-0">
+                <div x-show="canToggle" x-cloak style="display: none" role="group" aria-label="Markdown view"
+                     class="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden text-sm">
+                    <button type="button" id="preview-view-formatted" @click="setView('formatted')" :aria-pressed="view === 'formatted' ? 'true' : 'false'"
+                            :class="view === 'formatted' ? 'bg-primary text-primary-on' : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'"
+                            class="btn px-3 py-1.5">Formatted</button>
+                    <button type="button" id="preview-view-raw" @click="setView('raw')" :aria-pressed="view === 'raw' ? 'true' : 'false'"
+                            :class="view === 'raw' ? 'bg-primary text-primary-on' : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'"
+                            class="btn px-3 py-1.5 border-l border-gray-300 dark:border-gray-600">Raw</button>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400" x-show="showRaw">Showing the first 1 MB as plain text.</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400" x-show="showFormatted && htmlTruncated">The formatted view shows the start of the file. Switch to Raw for the rest.</p>
+            </div>
+            <a :href="current.download"
+               class="btn px-4 py-2 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400"><i class="fas fa-download mr-1" aria-hidden="true"></i>Download</a>
+            <button type="button" x-ref="close" @click="close()"
+                    class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Close</button>
+        </div>
+    </div>
+</div>

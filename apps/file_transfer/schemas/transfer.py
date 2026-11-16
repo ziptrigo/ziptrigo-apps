@@ -110,9 +110,12 @@ class TransferListSchema(Schema):
 
 class FinalizeTransferSchema(Schema):
     """Body for `POST /transfers/{id}/send`: the same options `SendOptionsForm` collects on the
-    web send page, applied and validated by the same service (`services.finalize_send`)."""
+    web send page, applied and validated by the same service (`services.finalize_send`).
 
-    recipients: list[str]
+    `recipients` is optional (issue #310): with none, nobody is emailed -- the sender gets the
+    link in the response (`download_url`) and in their own copy of the email, and shares it."""
+
+    recipients: list[str] = []
     message: str = ''
     expiry_choice: str = NO_EXPIRATION_CHOICE
     expiry_date: ExpiryDate = None

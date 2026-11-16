@@ -204,7 +204,13 @@ def complete_file(
             now = timezone.now()
             done = TransferFile.objects.filter(
                 pk=fresh.pk, transfer=locked, uploaded=False, upload_id=upload_id
-            ).update(checksum=info.checksum_sha256, uploaded=True, uploaded_at=now, upload_id='')
+            ).update(
+                checksum=info.checksum_sha256,
+                uploaded=True,
+                uploaded_at=now,
+                upload_id='',
+                preview_type=fresh.preview_type,
+            )
             if not done:
                 gone = True
             else:

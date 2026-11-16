@@ -579,6 +579,12 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'FT_RECIPIENT_EMAIL_USER': (30, 60 * 60),
     # -- file_transfer: public download page (`/t/<slug>/`) --
     'FT_DOWNLOAD_IP': (120, 60),
+    # File previews (issue #311, `/t/<slug>/preview/<file id>/`), per IP, charged like the
+    # download page's (before anything is looked up). Every preview the dialog opens, or steps
+    # to with the arrow keys, is one request; text and media files each cost an S3 read or a
+    # signature, and nothing is counted as a download. A person looking through a transfer of a
+    # hundred photos stays well inside it; a script does not.
+    'FT_PREVIEW_IP': (240, 60),
     # Password attempts (issue #53 code review, same split as login): `FT_UNLOCK_IP` stays a
     # strict, every-attempt-counts per-IP limit; `FT_UNLOCK_TRANSFER` becomes a looser per-transfer
     # ceiling that counts only *wrong* passwords, so a third party who merely knows (or guesses) a

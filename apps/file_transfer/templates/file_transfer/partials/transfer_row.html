@@ -143,6 +143,8 @@
                         <button type="submit" class="text-xs text-sage-600 dark:text-sage-300 hover:underline">Resend</button>
                     </form>
                 </li>
+                {% empty %}
+                <li class="text-xs text-gray-500 dark:text-gray-400">No recipients: nobody was emailed. Share the link yourself, or add recipients below to email it.</li>
                 {% endfor %}
             </ul>
             <form method="post" action="{% url 'file_transfer:add-recipients' transfer.id %}"

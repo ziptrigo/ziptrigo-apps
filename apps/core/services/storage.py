@@ -55,6 +55,14 @@ INLINE_CONTENT_TYPES = frozenset(
         'image/webp',
         'image/gif',
         'text/plain',
+        # Media a browser plays in `<video>` / `<audio>` (file transfer previews, issue #311):
+        # none of them runs script.
+        'video/mp4',
+        'video/webm',
+        'audio/mpeg',
+        'audio/wav',
+        'audio/ogg',
+        'audio/mp4',
     }
 )
 
@@ -330,6 +338,27 @@ class S3Storage:
             raise ObjectTooLargeError(f'{key} is over the {max_bytes} byte limit')
         return data
 
+    def get_object_range(self, key: str, start: int, end: int) -> bytes:
+        """The bytes `start` to `end` (both inclusive) of the object -- one ranged `GetObject`, so a
+        caller that needs only the head of a large file (sniffing its type, a text preview) never
+        reads the rest. Past the end of the object it returns what there is; an empty object has no
+        satisfiable range and gives `b''`. Raises `ClientError` (`NoSuchKey`) if absent."""
+        if start < 0 or end < start:
+            raise ValueError('a byte range needs 0 <= start <= end')
+        try:
+            response = self.client.get_object(
+                Bucket=self.bucket, Key=key, Range=f'bytes={start}-{end}'
+            )
+        except ClientError as exc:
+            if exc.response.get('Error', {}).get('Code') == 'InvalidRange':
+                return b''
+            raise
+        body = response['Body']
+        try:
+            return body.read(end - start + 1)
+        finally:
+            body.close()
+
     def get_object_stream(self, key: str) -> IO[bytes]:
         """A readable, streaming file-like object (`.read(n)`) for `key`'s bytes, for building
         the zip without ever loading a whole source file into memory. The real return value is
@@ -435,8 +464,8 @@ class S3Storage:
         or fixed on the server when the object was stored) -- never from user input or the
         uploader's claimed type -- and must never be `text/html` or `image/svg+xml`, which would
         run script. To make that hard to get wrong, an `inline` request with an explicit
-        `content_type` outside `INLINE_CONTENT_TYPES` (PDF, JPEG, PNG, WebP, GIF, plain text)
-        raises `ValueError`. With no `content_type`, S3 serves whatever type the object was
+        `content_type` outside `INLINE_CONTENT_TYPES` (PDF, JPEG, PNG, WebP, GIF, plain text, MP4/WebM video,
+        MP3/WAV/Ogg/M4A audio) raises `ValueError`. With no `content_type`, S3 serves whatever type the object was
         stored with, which the caller must have already vetted.
         """
         if (

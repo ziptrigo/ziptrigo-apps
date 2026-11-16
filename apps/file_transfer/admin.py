@@ -98,6 +98,7 @@ class TransferFileInline(admin.TabularInline):
         'size',
         'storage_key',
         'checksum',
+        'preview_type',
         'uploaded',
         'uploaded_at',
         'created_at',

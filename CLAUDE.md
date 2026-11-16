@@ -2443,6 +2443,60 @@ neither a whole source file nor the whole zip is ever held in memory; this only 
 own non-seekable-stream support instead of assuming it can seek. A "download all" click counts as
 one `DownloadEvent` (`file=None`) toward the same `max_downloads` limit as any other download.
 
+**File previews** (issue #311; mock `docs/ui-design/mocks/file-preview.html`; `services/preview.py`, `views.download.preview_file`,
+`partials/preview_dialog.html`, `static/file_transfer/js/preview.js`, migration `0010`). Someone with the link can preview a file before
+downloading it, **only after a click** (even for a single file): the page shows a hint line above the list ("2 of 3 files can be
+previewed before you download them." and its one-file, all-files and password-locked wordings, `preview.hint_text`; none when nothing can be
+previewed), each previewable row has a file-type icon, its name as a button and a **Preview** button, the others read "no preview" (only
+when something else can be previewed), and a locked page shows the hint and **Locked** but renders no button and **no preview URL**
+(`page_context` returns `previews=[]` while locked). The dialog (Alpine `ftPreview`, a classic script loaded before Alpine) is the
+confirmation modal's look: focus to Close and back to the trigger, a Tab trap, Escape / backdrop / Close, Left / Right and Previous / Next
+among the **previewable files only** ("2 of 4"), Download in the footer. There is deliberately **no** sentence saying a preview is not a
+download (the owner's decision), but it isn't one: no `DownloadEvent`, nothing against `max_downloads`, no sender email.
+- *What a file is comes from its bytes, never its name or the claimed type.* When an upload completes, `uploads.finish_upload_in_storage`
+  makes one ranged `GetObject` of the first 4 KB (`S3Storage.get_object_range`) and `preview.detect_preview_type` stores the result in
+  `TransferFile.preview_type` (`db_default=''`, the #102 lesson; best effort: a failed read is "no preview", never a failed upload;
+  `request_upload.complete_file` writes it in its conditional `UPDATE`). Types: `sniff_inline_type` (PDF, JPEG, PNG, WebP, GIF), the new
+  `sniff_media_type` (MP4 by `ftyp` brand list, WebM by EBML + `webm`, MP3, WAV, Ogg, M4A; Matroska, QuickTime and HEIC are none) and
+  `looks_like_text` (valid UTF-8 allowing a cut character, no NUL or other control but tab, LF, FF, CR); both in `apps.core.services.sniff`,
+  and `sniff_inline_type` is unchanged so To-do's attachments still serve only PDF and images inline. `INLINE_CONTENT_TYPES` gained the
+  video and audio types (`text/markdown` is not in it: Markdown never goes to S3 inline). **Existing files** have `preview_type=''`, so no
+  preview: the page never sniffs (an S3 request per file per view); `./manage.py file_transfer_backfill_previews` reads their heads once
+  (active, disabled or suspended transfers; idempotent). A file nobody can describe as one of the above is simply not previewable.
+- *Kinds*: `image` (`<img>`), `pdf` (`<iframe>` of the browser's viewer), `video` (`<video controls>`), `audio` (`<audio controls>`), `text` and
+  `markdown`. Any text, **HTML and SVG included**, is shown as inert text: `text/plain; charset=utf-8` from Django (never from S3),
+  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, fetched by the page and put in with `x-text`
+  (textContent); the first `TEXT_PREVIEW_BYTES` (1 MB, a ranged read; the incremental UTF-8 decoder holds back a cut character). A text file
+  whose **name** ends in `.md` / `.markdown` is `text/markdown` (the name only picks formatted-vs-plain among files whose bytes already
+  say text, so it can't make a binary previewable): the endpoint answers JSON `{text, html, html_truncated}` where `html` is
+  `apps.core.markdown.render(profile='extended')` with no resolver and no `task_url_path` (raw HTML escaped, images never rendered, nh3
+  sanitised; the renderer's 50,000-character guard means a longer file is rendered up to the last line break under it and
+  `html_truncated` says so). The dialog shows it **Formatted** by default with a Formatted / Raw segmented control (`aria-pressed`;
+  Raw is the same text via `x-text`); an HTML file is only ever raw, with no switch. The formatted HTML goes in with `x-html` (it is the
+  server's sanitised output; the `.ft-markdown` rules are a small `<style>` in the dialog partial).
+- *The endpoint* `GET /t/<slug>/preview/<file id>/` (`t:preview`, GET only, `xframe_options_sameorigin`, `Cache-Control: no-store, private`,
+  `nosniff`) applies **exactly the download's gates**: `FT_PREVIEW_IP` first (240/min per IP, charged before any lookup), then
+  `_password_gated_transfer` (available, password unlocked, a file request's access rules and "owner only until done"), then the same
+  per-file lookup (`uploaded=True`, this transfer). A refused password / access gate answers a plain **403** (not the redirect: an
+  `<img>`, `<iframe>` or `fetch()` would take the whole page), an unavailable transfer the neutral 404, and a file with no `preview_type`
+  a 404. Image, PDF, video and audio answer a 302 to `presigned_get_url(..., disposition='inline', content_type=<the sniffed type>)`
+  (15 minutes like a download; `presigned_get_url` still refuses an inline type outside `INLINE_CONTENT_TYPES`, so HTML and SVG can never be
+  served inline). A file request in the **Done** state renders the same `download.html`, so previews work there too, and the owner can
+  preview while it is still open (the same rule as downloading).
+- Tests: `apps/file_transfer/tests/test_preview.py`, the sniffer tests in `apps/core/tests/test_sniff.py`, `tests_e2e/test_file_preview.py`,
+  AI cases FT-64 and FT-65.
+
+**Recipients are optional** (issue #310) for the logged-in send flow: the web form (`Recipients (optional)`, not `required`), `SendOptions.recipients`
+(default empty; `validate_send_options` no longer refuses an empty list), `POST /api/ft/transfers/{id}/send` (`recipients` defaults to `[]`,
+OpenAPI 2.9.0) and `inv filetransfer send` (no `--to`). With none, no recipient email is queued; the sender's own
+copy (`send_sender_copy`) still goes out, reading "Your transfer "x" is ready. Nobody was emailed: share the link below." under the subject
+`... is ready to share`; the sent page says **Your files are ready** with the link and Copy instead of "We emailed the recipients"; a dashboard
+row lists "No recipients: nobody was emailed..." and **Add recipients** later works as before. Nothing else assumed a recipient (metering,
+claim, admin, `notify_on_download`). **Anonymous sending keeps recipients required** (`services.anonymous`: "Add at least one recipient."),
+as decided: with an unconfirmed sender and no account, a recipient-less link has nobody to hold accountable and the confirmation email is
+the only trail; revisit if anonymous users ask. Tests: `test_send_service.py`, `test_send_views.py`, `test_api.py`, `admin/tests/test_filetransfer.py`;
+AI cases FT-06 and FT-66.
+
 **Abuse reports, takedown and the block list** (issue #59, deferred from #55's phase 3 spec
 section 16): the download page has a "Report this transfer" link (an htmx-collapsed
 `AbuseReportForm`, `views.download.report_transfer`, `POST /t/<slug>/report/`) -- reason, optional

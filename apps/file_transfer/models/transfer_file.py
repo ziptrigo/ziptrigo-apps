@@ -68,6 +68,22 @@ class TransferFile(models.Model):
         ),
     )
 
+    preview_type = cast(
+        str,
+        models.CharField(
+            max_length=40,
+            blank=True,
+            default='',
+            db_default='',
+            help_text='The content type the public download page may preview this file as '
+            '(`image/png`, `application/pdf`, `text/plain`, `video/mp4`, ...), read from its '
+            "first bytes when the upload completed -- never from its name or the uploader's "
+            'claimed type. Empty: no preview (including files uploaded before this column '
+            'existed, until `file_transfer_backfill_previews` runs). See '
+            '`apps.file_transfer.services.preview`.',
+        ),
+    )
+
     created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
     uploaded_at = cast(
         datetime | None,
