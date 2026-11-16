@@ -660,7 +660,7 @@ def _record_section(
 
 
 def reorder_tasks(
-    user: User, project: Project, section: Section | None, ids: Sequence[UUID]
+    user: User, project: Project, section: Section | str | UUID | None, ids: Sequence[UUID]
 ) -> int:
     """Write the manual order of one list of the project's page: the tasks `ids` (the user's own
     non-trashed tasks of `project`; others are ignored) get `project_position` 0, 1, 2, ... in the

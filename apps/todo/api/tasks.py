@@ -13,7 +13,7 @@ from uuid import UUID
 
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from ninja import Query
 from ninja.errors import HttpError
 
@@ -48,8 +48,10 @@ from ..services import (
     closed_set,
     has_manual_order,
     listed_tasks,
+    open_tasks,
     order_tasks,
     order_today,
+    projects,
     reminders,
     subtasks_of,
     today_set,
@@ -57,8 +59,15 @@ from ..services import (
     trash_set,
     upcoming_set,
 )
-from ..services.dates import DIRECTIONS, not_archived
-from ..services.filters import DATE_RANGES, NO_LABEL, PRIORITIES, RESOLUTIONS, STATES
+from ..services.dates import DIRECTIONS, MANUAL_SORT, default_order, not_archived
+from ..services.filters import (
+    DATE_RANGES,
+    NO_LABEL,
+    NO_PROJECT,
+    PRIORITIES,
+    RESOLUTIONS,
+    STATES,
+)
 from ..services.search import MODES, attach_matches, order_results, prepare_query, search_guard
 from ..services.tasks import NOT_OPEN_MESSAGE
 from .common import (
@@ -113,7 +122,19 @@ def _labels(value: str | None) -> list[str]:
     return tokens
 
 
-def _view_queryset(user, view: str, include_closed: bool, resolution: str = '') -> QuerySet:
+def _projects(value: str | None) -> list[str]:
+    tokens = [part.strip().lower() for part in (value or '').split(',') if part.strip()]
+    for token in tokens:
+        if token != NO_PROJECT and uuid_or_none(token) is None:
+            raise HttpError(
+                400, 'project must be a comma-separated list of project ids and "none".'
+            )
+    return tokens
+
+
+def _view_queryset(
+    user, view: str, include_closed: bool, resolution: str = '', archived_too: bool = False
+) -> QuerySet:
     if view == 'today':
         return today_set(user)
     if view == 'upcoming':
@@ -122,10 +143,12 @@ def _view_queryset(user, view: str, include_closed: bool, resolution: str = '') 
         return closed_set(user, resolution)
     if view == 'trash':
         return trash_set(user)
-    # Tasks of an archived project are left out of the plain lists, as on the website.
+    # Tasks of an archived project are left out of the plain lists, as on the website, unless the
+    # request names projects or asks for them (`archived_too`).
+    everything = Task.objects.filter(user=user, deleted_at__isnull=True)
     if include_closed:
-        return Task.objects.filter(user=user, deleted_at__isnull=True).filter(not_archived())
-    return listed_tasks(user)
+        return everything if archived_too else everything.filter(not_archived())
+    return open_tasks(user) if archived_too else listed_tasks(user)
 
 
 def _ordered(
@@ -141,6 +164,15 @@ def _ordered(
     """`queryset` in the order the web shows it: `sort` when asked for, else Today's (overdue
     first, then today's in the order the user gave it), a parent's subtasks (the user's order when
     they gave one), the Closed page's (latest first) and the Trash's, else by date."""
+    if sort == MANUAL_SORT:
+        # A project's hand-made order: its sections in their order (the tasks with none first),
+        # then each list's own order.
+        return queryset.order_by(
+            F('section__position').asc(nulls_first=True),
+            'section__created_at',
+            'project_position',
+            *default_order(),
+        )
     if view == 'all' and include_closed:
         return order_results(queryset, sort or SORT_DEFAULT, direction)  # closed after the open
     if sort is not None:
@@ -169,6 +201,8 @@ def list_tasks(
     state: str | None = None,
     priority: str | None = None,
     label: str | None = None,
+    project: str | None = None,
+    include_archived: bool = False,
     date_range: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -200,11 +234,19 @@ def list_tasks(
       task in any of them. Closed tasks are not narrowed by it.
     - `priority`: comma-separated priorities, 0 (none) to 3; any of them.
     - `label`: comma-separated label ids, and `none` for tasks without a label; any of them.
+    - `project`: comma-separated project ids, and `none` for tasks in no project; a task in any
+      of them (an id that is not one of your projects matches nothing). Naming a project lists
+      its tasks even when it is archived.
+    - `include_archived`: with `view=all`, the tasks of archived projects too. Without it (and
+      without `project`) `today`, `upcoming` and `all` leave them out, as the website does;
+      `closed`, `trash` and a parent's subtasks never do.
     - `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:
       a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or
       `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;
       dates alone mean `custom`). Relative ranges are the caller's own today.
-    - `sort`: `date` (the default), `priority`, `created` or `title`.
+    - `sort`: `date` (the default), `priority`, `created` or `title`; or `manual`, the hand-made
+      order of a project's page, which needs `project` to be exactly one project id (a 400
+      otherwise): its sections in order, the tasks with no section first. `manual` has no `dir`.
     - `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own
       default when left out (`date`, `priority` and `title` ascending, `created` newest first), the
       exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open
@@ -213,7 +255,8 @@ def list_tasks(
       it is a 400 `dir: Choose a sort to reverse.`
     - `limit` (1-100, default 50) and `offset` page the result; `count` is the total.
 
-    A search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.
+    A search, or any of `state`, `priority`, `label`, `project` and `date_range`, spends
+    `TODO_SEARCH_USER`.
 
     **Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`
     and `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found
@@ -228,8 +271,14 @@ def list_tasks(
     if view is not None:
         view = choice('view', view, VIEWS)
     mode = choice('mode', mode, MODES)
+    project_tokens = _projects(project)
     if sort is not None:
-        choice('sort', sort, SORTS)
+        choice('sort', sort, (*SORTS, MANUAL_SORT))
+        if sort == MANUAL_SORT:
+            if len(project_tokens) != 1 or project_tokens[0] == NO_PROJECT:
+                raise HttpError(400, 'sort: manual needs project to be exactly one project id.')
+            if direction is not None:
+                raise HttpError(400, 'dir: The manual order has no direction.')
     if direction is not None:
         choice('dir', direction, DIRECTIONS)
         if sort is None:
@@ -259,6 +308,7 @@ def list_tasks(
             'states': _states(state),
             'priorities': _priorities(priority),
             'labels': _labels(label),
+            'projects': project_tokens,
             # The view decides about archived projects (`_view_queryset` leaves them out of `all`,
             # `today` and `upcoming`); a filter on Closed, the Trash or a parent's subtasks must
             # not drop their tasks.
@@ -266,7 +316,7 @@ def list_tasks(
             'date_range': [date_range or ''],
             'date_from': [str(parse_date('date_from', date_from) or '')],
             'date_to': [str(parse_date('date_to', date_to) or '')],
-            'sort': [sort or SORT_DEFAULT],
+            'sort': [sort if sort in SORTS else SORT_DEFAULT],
         }
     )
     searching = params.has_criteria
@@ -277,7 +327,13 @@ def list_tasks(
         assert parent_task is not None  # `view` is only unset with a `parent`
         queryset = subtasks_of(parent_task)
     else:
-        queryset = _view_queryset(user, view, include_closed, resolution or '')
+        queryset = _view_queryset(
+            user,
+            view,
+            include_closed,
+            resolution or '',
+            archived_too=include_archived or bool(project_tokens),
+        )
         if parent_task is not None:
             queryset = queryset.filter(parent=parent_task)
     with mapped_errors():
@@ -390,6 +446,8 @@ def _check_create(user, payload: TaskCreateSchema, parent: Task | None) -> None:
         recurrence_mode=payload.recurrence_mode,
         state=payload.state,
         blocked_by=payload.blocked_by,
+        project=payload.project,
+        section=payload.section,
     )
     fields = payload.model_fields_set
     # The reading of the title may still set the date, when the body doesn't.
@@ -428,6 +486,8 @@ def _create(user, payload: TaskCreateSchema, parent: Task | None):
             recurrence_mode=payload.recurrence_mode,
             state=payload.state,
             blocked_by=payload.blocked_by,
+            project=payload.project,
+            section=payload.section,
             source=TaskSource.API,
             **values,
         )
@@ -548,6 +608,10 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
     included; `blocked` as a change is a 400), and a request that changes nothing -- the same
     `blocked_by`, the same `state`, no other field -- spends no budget.
 
+    `project` moves the task (and its subtasks) to another project, or out of its project with
+    `null`; `section` puts it in a section of the project it ends up in. Both follow the website's
+    rules (see `TaskUpdateSchema`).
+
     The fields are checked before `TODO_EDIT_USER` is spent, so a bad value costs nothing. What
     only the locked write can decide (the task was trashed or closed meanwhile, a task with
     subtasks moved under a parent, a subtask given a repeat rule, a link another request made first
@@ -567,6 +631,10 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
         changes['labels'] = []
     if 'rrule' in changes and changes['rrule'] is None:
         changes['rrule'] = ''
+    move_project = 'project' in changes
+    wanted_project = changes.pop('project', None)
+    set_section = 'section' in changes
+    wanted_section = changes.pop('section', None)
     new_state = changes.pop('state', None)
     set_blockers = 'blocked_by' in changes
     wanted = changes.pop('blocked_by', None)
@@ -584,12 +652,27 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
             if new_state != task.state:  # the state it already has is a no-op
                 state_change = services.tasks.clean_state(new_state)
         to_add, to_remove = _plan_blockers(task, request.auth, wanted) if set_blockers else ([], [])
-        if not (changes or state_change or to_add or to_remove):
+        # The project and the section (a refusal here spends no budget): the section is one of the
+        # project the task ends up in. The values the task already has change nothing.
+        target_project = task.project
+        if move_project:
+            target_project = projects.check_move(task, wanted_project)
+            move_project = (target_project.pk if target_project else None) != task.project_id
+        if set_section:
+            if task.parent_id is not None or task.is_trashed:
+                projects.check_section(task, wanted_section)  # raises the right refusal
+            projects.clean_section(target_project, wanted_section)
+            set_section = move_project or wanted_section != task.section_id
+        if not (changes or state_change or to_add or to_remove or move_project or set_section):
             return task_response(request, task)
         charge(request, 'TODO_EDIT_USER')
         with transaction.atomic():  # the fields, the state and the links stand or fall together
             if changes:
                 services.update_task(task, changes=changes)
+            if move_project:
+                projects.move_task(task, target_project)
+            if set_section:
+                projects.set_section(task, wanted_section)
             for other in to_remove:
                 blockers.remove_blocker(task, other)
             for other in to_add:

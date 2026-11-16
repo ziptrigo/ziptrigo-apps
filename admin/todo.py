@@ -195,6 +195,17 @@ def _credits(amount: int) -> str:
     return f'{amount} credit{"" if amount == 1 else "s"}'
 
 
+def _place(task: dict) -> str:
+    """Where the task is filed: `Project`, `Project / Section`, with `(archived)` when it is."""
+    project = task.get('project')
+    if not project:
+        return ''
+    text = project['name']
+    if task.get('section'):
+        text += f' / {task["section"]["name"]}'
+    return f'{text} (archived)' if project.get('archived') else text
+
+
 def _task_table(tasks: list[dict], title: str) -> Table:
     table = Table(title=title)
     table.add_column('#', style='cyan', no_wrap=True, justify='right')
@@ -203,6 +214,7 @@ def _task_table(tasks: list[dict], title: str) -> Table:
     table.add_column('State', no_wrap=True)
     table.add_column('Title', overflow='fold')
     table.add_column('Labels', style='blue')
+    table.add_column('Project')
     table.add_column('', no_wrap=True)
     for task in tasks:
         # To do is the ordinary state: only the others (and a closed task's resolution) are shown.
@@ -214,6 +226,7 @@ def _task_table(tasks: list[dict], title: str) -> Table:
             status,
             Text(task['title']),
             Text(', '.join(label['name'] for label in task['labels'])),
+            Text(_place(task)),
             _flags(task),
         )
     return table
@@ -339,6 +352,27 @@ def _resolve_label(ref: str) -> dict:
     return _match_label(_call('get', '/labels'), ref)
 
 
+def _match_project(known: list[dict], ref: str) -> dict:
+    """The project among `known` that `ref` names: its id, or its name ignoring case. An unknown
+    one exits 1: a project is made with `project-add`."""
+    for project in known:
+        if project['id'] == ref.strip().lower() or _norm(project['name']) == _norm(ref):
+            return project
+    raise _fail(f'No project called "{ref}". Make it with `project-add`.')
+
+
+def _resolve_project(ref: str) -> dict:
+    """A project by name or id, archived ones included."""
+    return _match_project(_call('get', '/projects', params={'archived': 'all'}), ref)
+
+
+def _match_section(project: dict, ref: str) -> dict:
+    for section in project['sections']:
+        if section['id'] == ref.strip().lower() or _norm(section['name']) == _norm(ref):
+            return section
+    raise _fail(f'{project["name"]} has no section called "{ref}". Make it with `section-add`.')
+
+
 def _channel(value: str | None) -> str | None:
     if value is not None and value not in CHANNELS:
         raise typer.BadParameter(f'use one of: {", ".join(CHANNELS)}.')
@@ -436,9 +470,21 @@ def todo_list(
     label: list[str] | None = typer.Option(
         None, '--label', help='A label name or id, or "none"; repeat for several.'
     ),
+    project: list[str] | None = typer.Option(
+        None,
+        '--project',
+        help='A project name or id, or "none" for tasks in no project; repeat for several.',
+    ),
+    include_archived: bool = typer.Option(
+        False, '--include-archived', help='With --view all, tasks of archived projects too.'
+    ),
     date_from: str | None = typer.Option(None, '--from', help='Earliest due date, YYYY-MM-DD.'),
     date_to: str | None = typer.Option(None, '--to', help='Latest due date, YYYY-MM-DD.'),
-    sort: str | None = typer.Option(None, '--sort', help='date, priority, created or title.'),
+    sort: str | None = typer.Option(
+        None,
+        '--sort',
+        help='date, priority, created or title; or manual (with one --project: its own order).',
+    ),
     direction: str | None = typer.Option(
         None,
         '--dir',
@@ -449,7 +495,7 @@ def todo_list(
 ):
     """
     List your tasks (a number, the due date and time, the priority, the state, the title, the
-    labels, a repeat mark and a bell for reminders). The state column is blank for To do, and says
+    labels, the project and section, a repeat mark and a bell for reminders). The state column is blank for To do, and says
     Done or Won't do for a closed task. On hold and Blocked tasks are never overdue.
 
     Example:
@@ -460,6 +506,8 @@ def todo_list(
         todo list local --state in-progress --state blocked
         todo list local --priority 1,2 --label home --from 2026-11-01 --to 2026-11-30
         todo list local --sort title --dir desc
+        todo list local --project "Website relaunch" --sort manual
+        todo list local --project none
     """
     select_environment(environment)
     view = 'closed' if view == 'completed' else view  # the name this view had before version 2
@@ -478,6 +526,21 @@ def todo_list(
         )
     if label:
         params['label'] = ','.join(_label_ids(label, allow_none=True))
+    if project:
+        known: list[dict] | None = None
+        ids: list[str] = []
+        for ref in project:
+            if _norm(ref) == 'none':
+                found = 'none'
+            else:
+                if known is None:
+                    known = _call('get', '/projects', params={'archived': 'all'})
+                found = _match_project(known, ref)['id']
+            if found not in ids:
+                ids.append(found)
+        params['project'] = ','.join(ids)
+    if include_archived:
+        params['include_archived'] = 'true'
     if direction:
         params['dir'] = _choice(direction, {'asc': 'asc', 'desc': 'desc'}, '--dir')
     for name, value in (
@@ -520,6 +583,12 @@ def todo_add(
     mode: str | None = typer.Option(
         None, '--mode', help='fixed (default) or from_completion: how a repeat is counted.'
     ),
+    project: str | None = typer.Option(
+        None, '--project', help='Put it in this project (a name or an id).'
+    ),
+    section: str | None = typer.Option(
+        None, '--section', help='A section of that project (a name or an id); needs --project.'
+    ),
     no_parse: bool = typer.Option(
         False, '--no-parse', help='Keep the title as typed: do not read a date out of it.'
     ),
@@ -539,9 +608,17 @@ def todo_add(
         todo add local "write report" --parent 1234 --no-parse
         todo add local "send invoice" --blocked-by 1200 --blocked-by 1201
         todo add local "think about it" --state on-hold
+        todo add local "review mockups" --project "Website relaunch" --section Design
     """
     select_environment(environment)
+    if section and not project:
+        raise typer.BadParameter('--section needs --project.')
     payload: dict = {'title': ' '.join(title), 'parse_title': not no_parse}
+    if project:
+        found = _resolve_project(project)
+        payload['project'] = found['id']
+        if section:
+            payload['section'] = _match_section(found, section)['id']
     text = _description(description, description_file)
     if text is not None:
         payload['description'] = text
@@ -642,6 +719,7 @@ def todo_get(
         row('Repeats', f'{recurrence["rrule_text"]}, {mode}{ended}')
     row('Parent', f'#{task["parent"]}' if task['parent'] else '')
     row('Labels', ', '.join(label['name'] for label in task['labels']))
+    row('Project', _place(task))
     row(
         'Subtasks',
         f'{task["open_subtask_count"]} open of {task["subtask_count"]}'
@@ -771,6 +849,18 @@ def todo_edit(
     clear_blocked_by: bool = typer.Option(
         False, '--clear-blocked-by', help='Remove every blocker.'
     ),
+    project: str | None = typer.Option(
+        None,
+        '--project',
+        help='Move it to this project (a name or an id), with its subtasks. It leaves its section.',
+    ),
+    no_project: bool = typer.Option(False, '--no-project', help='Take it out of its project.'),
+    section: str | None = typer.Option(
+        None,
+        '--section',
+        help='Put it in this section (a name or an id) of its project, or of --project.',
+    ),
+    no_section: bool = typer.Option(False, '--no-section', help='Take it out of its section.'),
 ):
     """
     Change a task: only what you pass is changed.
@@ -784,8 +874,15 @@ def todo_edit(
         todo edit local 1234 --state in-progress
         todo edit local 1234 --blocked-by 1200 --blocked-by 1201   (replaces the blockers)
         todo edit local 1234 --clear-blocked-by
+        todo edit local 1234 --project "Website relaunch" --section Design
+        todo edit local 1234 --no-section
+        todo edit local 1234 --no-project
     """
     select_environment(environment)
+    if project and no_project:
+        raise typer.BadParameter('--project and --no-project cannot be used together.')
+    if section and (no_section or no_project):
+        raise typer.BadParameter('--section cannot be used with --no-section or --no-project.')
     if blocked_by and clear_blocked_by:
         raise typer.BadParameter('--blocked-by and --clear-blocked-by cannot be used together.')
     if due and clear_due:
@@ -824,6 +921,21 @@ def todo_edit(
         payload['blocked_by'] = list(dict.fromkeys(blocked_by))
     elif clear_blocked_by:
         payload['blocked_by'] = []
+    if no_project:
+        payload['project'] = None
+    elif project or section:
+        if project:
+            target = _resolve_project(project)
+            payload['project'] = target['id']
+        else:  # a section of the project the task is in
+            current_project = _call('get', f'/tasks/{number}').get('project')
+            if not current_project:
+                raise _fail(f'#{number} is in no project: pass --project with --section.')
+            target = _call('get', f'/projects/{current_project["id"]}')
+        if section:
+            payload['section'] = _match_section(target, section)['id']
+    if no_section:
+        payload['section'] = None
     if not payload:
         raise _fail('Nothing to change: pass at least one option.')
 
@@ -1335,6 +1447,234 @@ def todo_label_delete(
     )
     _call('delete', f'/labels/{found["id"]}')
     _say(f'Deleted the label {found["name"]}.')
+
+
+# -- Commands: projects --------------------------------------------------------------------------
+
+
+@app.command(name='projects')
+def todo_projects(
+    environment: EnvironmentAnnotation,
+    archived: bool = typer.Option(False, '--archived', help='The archived projects instead.'),
+    everything: bool = typer.Option(False, '--all', help='Active and archived projects.'),
+):
+    """
+    List your projects, with their open and closed task counts and their sections.
+
+    Example:
+        todo projects local
+        todo projects local --archived
+    """
+    select_environment(environment)
+    which = 'all' if everything else 'true' if archived else 'false'
+    projects = _call('get', '/projects', params={'archived': which})
+    if not projects:
+        _say('No projects. Make one with `project-add`.')
+        return
+    table = Table(title='Your projects')
+    table.add_column('Name')
+    table.add_column('Open', justify='right', style='magenta')
+    table.add_column('Closed', justify='right')
+    table.add_column('Sections')
+    table.add_column('', no_wrap=True)
+    table.add_column('ID', style='cyan', no_wrap=True)
+    for project in projects:
+        table.add_row(
+            Text(project['name'], style=project['color']),
+            str(project['open_count']),
+            str(project['closed_count']),
+            Text(', '.join(section['name'] for section in project['sections'])),
+            'archived' if project['archived_at'] else '',
+            project['id'],
+        )
+    _console().print(table)
+
+
+@app.command(name='project-add')
+def todo_project_add(
+    environment: EnvironmentAnnotation,
+    name: list[str] = typer.Argument(..., help='The name of the project.'),
+    color: str = typer.Option('', '--color', help='#rrggbb (default: sage green).'),
+    description: str = typer.Option('', '--description', help='Markdown, shown on its page.'),
+):
+    """
+    Add a project. Projects are free.
+
+    Example:
+        todo project-add local Website relaunch --color "#5b8def"
+    """
+    select_environment(environment)
+    project = _call(
+        'post',
+        '/projects',
+        json={'name': ' '.join(name), 'color': color, 'description': description},
+    )
+    _say(Text.assemble('Added the project ', project['name'], f' ({project["color"]}).').plain)
+
+
+@app.command(name='project-edit')
+def todo_project_edit(
+    environment: EnvironmentAnnotation,
+    project: str = typer.Argument(..., help='The project (a name or an id).'),
+    name: str | None = typer.Option(None, '--name', help='Rename it.'),
+    color: str | None = typer.Option(None, '--color', help='#rrggbb.'),
+    description: str | None = typer.Option(None, '--description', help='Markdown.'),
+):
+    """
+    Rename, recolour or describe a project: only what you pass is changed.
+
+    Example:
+        todo project-edit local "Website relaunch" --name Website --color "#445566"
+    """
+    select_environment(environment)
+    payload = {
+        key: value
+        for key, value in (('name', name), ('color', color), ('description', description))
+        if value is not None
+    }
+    if not payload:
+        raise _fail('Nothing to change: pass at least one option.')
+    found = _resolve_project(project)
+    updated = _call('patch', f'/projects/{found["id"]}', json=payload)
+    _say(Text.assemble('Updated the project ', updated['name'], '.').plain)
+
+
+@app.command(name='project-archive')
+def todo_project_archive(
+    environment: EnvironmentAnnotation,
+    project: str = typer.Argument(..., help='The project (a name or an id).'),
+    yes: YesAnnotation = False,
+):
+    """
+    Archive a project: nothing is deleted. Its open tasks leave Today, Upcoming and All, are never
+    overdue, and their reminders wait until you unarchive it.
+
+    Example:
+        todo project-archive local "Website relaunch"
+    """
+    select_environment(environment)
+    found = _resolve_project(project)
+    if found['archived_at']:
+        _say(Text.assemble(found['name'], ' is already archived.').plain)
+        return
+    count = found['open_count']
+    _confirm(
+        f'Archive {found["name"]}? Its {count} open task{"" if count == 1 else "s"} '
+        'leave your lists and their reminders wait.',
+        yes,
+    )
+    _call('post', f'/projects/{found["id"]}/archive', json={})
+    _say(Text.assemble('Archived ', found['name'], '.').plain)
+
+
+@app.command(name='project-unarchive')
+def todo_project_unarchive(
+    environment: EnvironmentAnnotation,
+    project: str = typer.Argument(..., help='The project (a name or an id).'),
+):
+    """
+    Make an archived project active again. Each task that missed reminders gets one.
+
+    Example:
+        todo project-unarchive local "Website relaunch"
+    """
+    select_environment(environment)
+    found = _resolve_project(project)
+    if not found['archived_at']:
+        _say(Text.assemble(found['name'], ' is not archived.').plain)
+        return
+    _call('post', f'/projects/{found["id"]}/unarchive', json={})
+    _say(Text.assemble(found['name'], ' is active again.').plain)
+
+
+@app.command(name='project-delete')
+def todo_project_delete(
+    environment: EnvironmentAnnotation,
+    project: str = typer.Argument(..., help='The project (a name or an id).'),
+    yes: YesAnnotation = False,
+):
+    """
+    Delete a project. Its tasks are kept: they are then in no project.
+
+    Example:
+        todo project-delete local "Website relaunch"
+    """
+    select_environment(environment)
+    found = _resolve_project(project)
+    count = found['open_count'] + found['closed_count']
+    _confirm(
+        f'Delete the project {found["name"]}? Its {count} task{"" if count == 1 else "s"} '
+        f'{"is" if count == 1 else "are"} kept, in no project.',
+        yes,
+    )
+    _call('delete', f'/projects/{found["id"]}')
+    _say(Text.assemble('Deleted the project ', found['name'], '.').plain)
+
+
+@app.command(name='section-add')
+def todo_section_add(
+    environment: EnvironmentAnnotation,
+    project: str = typer.Argument(..., help='The project (a name or an id).'),
+    name: list[str] = typer.Argument(..., help='The name of the section.'),
+):
+    """
+    Add a section to a project.
+
+    Example:
+        todo section-add local "Website relaunch" Design
+    """
+    select_environment(environment)
+    found = _resolve_project(project)
+    _call('post', f'/projects/{found["id"]}/sections', json={'name': ' '.join(name)})
+    _say(Text.assemble('Added the section ', ' '.join(name), ' to ', found['name'], '.').plain)
+
+
+@app.command(name='section-rename')
+def todo_section_rename(
+    environment: EnvironmentAnnotation,
+    project: str = typer.Argument(..., help='The project (a name or an id).'),
+    section: str = typer.Argument(..., help='The section (a name or an id).'),
+    name: list[str] = typer.Argument(..., help='Its new name.'),
+):
+    """
+    Rename a section of a project.
+
+    Example:
+        todo section-rename local "Website relaunch" Design Visuals
+    """
+    select_environment(environment)
+    found = _resolve_project(project)
+    target = _match_section(found, section)
+    _call(
+        'patch',
+        f'/projects/{found["id"]}/sections/{target["id"]}',
+        json={'name': ' '.join(name)},
+    )
+    _say(Text.assemble('Renamed the section ', target['name'], ' to ', ' '.join(name), '.').plain)
+
+
+@app.command(name='section-delete')
+def todo_section_delete(
+    environment: EnvironmentAnnotation,
+    project: str = typer.Argument(..., help='The project (a name or an id).'),
+    section: str = typer.Argument(..., help='The section (a name or an id).'),
+    yes: YesAnnotation = False,
+):
+    """
+    Delete a section. Its tasks are kept: they stay in the project, in no section.
+
+    Example:
+        todo section-delete local "Website relaunch" Design
+    """
+    select_environment(environment)
+    found = _resolve_project(project)
+    target = _match_section(found, section)
+    _confirm(
+        f'Delete the section {target["name"]} of {found["name"]}? Its tasks stay in the project.',
+        yes,
+    )
+    _call('delete', f'/projects/{found["id"]}/sections/{target["id"]}')
+    _say(Text.assemble('Deleted the section ', target['name'], '.').plain)
 
 
 # -- Commands: reminders -------------------------------------------------------------------------

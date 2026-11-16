@@ -11,6 +11,7 @@ from pydantic import ConfigDict, Field
 from ..limits import MAX_BLOCKERS_PER_TASK, MAX_REORDER_IDS, TITLE_MAX
 from .attachment import AttachmentSchema
 from .label import LabelRefSchema
+from .project import ProjectRefSchema, SectionRefSchema
 from .reminder import ReminderCreateSchema, ReminderSchema
 
 #: The states and resolutions as responses name them (an `enum` in the OpenAPI document).
@@ -132,6 +133,21 @@ class TaskSchema(Schema):
     )
     parent: int | None
     labels: list[LabelRefSchema]
+    project: ProjectRefSchema | None = Field(
+        default=None,
+        description='The project the task is in (`null`: none). A subtask is always in its '
+        "parent's. `archived: true` means the task is muted with its project.",
+    )
+    section: SectionRefSchema | None = Field(
+        default=None,
+        description='The section of its project the task is in (`null`: none). A subtask has its '
+        "parent's.",
+    )
+    project_position: int = Field(
+        default=0,
+        description='Its place in the hand-made order of its project (among the tasks of its '
+        'section, or of the tasks with no section): what `sort=manual` with `project=` follows.',
+    )
     recurrence: RecurrenceSchema | None
     offers_stop_repeating: bool = Field(
         description='Whether trashing this task should offer "Also stop repeating": it is open, '
@@ -287,6 +303,17 @@ class TaskCreateSchema(Schema):
     blocked_by: Annotated[list[int], Field(max_length=MAX_BLOCKERS_PER_TASK)] = Field(
         default=[], description="Numbers of the caller's tasks that block the new one (at most 20)."
     )
+    project: UUID | None = Field(
+        default=None,
+        description='The id of one of your projects to put the task in. One that is not yours is '
+        'a 400 `project: Unknown project.`; an archived one is a 400 too. Ignored for a subtask, '
+        "which is in its parent's project.",
+    )
+    section: UUID | None = Field(
+        default=None,
+        description='The id of a section of that project (a 400 `section: Unknown section.` for '
+        'any other, and without a `project`). The task goes to the end of it.',
+    )
 
 
 class TaskUpdateSchema(Schema):
@@ -330,6 +357,19 @@ class TaskUpdateSchema(Schema):
         default=None,
         description='Replaces the set of tasks that block this one (numbers, at most 20); '
         '`null` or `[]` removes them all.',
+    )
+    project: UUID | None = Field(
+        default=None,
+        description='Moves the task to one of your projects, with its subtasks; `null` takes it '
+        'out of its project. A move to another project leaves its section (send `section` too to '
+        'choose one there). A 400 for a subtask (move its parent), a task in the Trash, a project '
+        'that is not yours or is archived.',
+    )
+    section: UUID | None = Field(
+        default=None,
+        description='Puts the task in a section of its project (the one it has, or the `project` '
+        'sent with it), at the end of it; `null` takes it out of its section. A 400 for a section '
+        'of another project and for a subtask.',
     )
 
 

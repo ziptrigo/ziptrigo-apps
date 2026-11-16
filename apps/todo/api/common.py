@@ -182,6 +182,7 @@ def linked_tasks(side: str) -> QuerySet:
 def decorated(queryset: QuerySet) -> QuerySet:
     """What a task's JSON needs, loaded without a query per task: the subtask, comment and
     attachment counts, `open_occurrences` (one more subquery column), the parent, the repeat rule,
+    the project and the section (joined: no query of their own),
     the labels, the reminders and the tasks it is linked to (`blocked_by` and `blocks`: one query
     each for the whole page)."""
     reminders = Reminder.objects.order_by('-minutes_before', 'created_at')
@@ -191,7 +192,7 @@ def decorated(queryset: QuerySet) -> QuerySet:
         with_open_occurrences(
             with_attachment_counts(with_comment_counts(with_subtask_counts(queryset)))
         )
-        .select_related('parent', 'recurrence')
+        .select_related('parent', 'recurrence', 'project', 'section')
         .prefetch_related(
             'labels',
             Prefetch('reminders', reminders, to_attr='api_reminders'),
@@ -278,6 +279,18 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
             {'id': label.pk, 'name': label.name, 'color': label.color}
             for label in task.labels.all()
         ],
+        'project': None
+        if task.project is None
+        else {
+            'id': task.project.pk,
+            'name': task.project.name,
+            'color': task.project.color,
+            'archived': task.project.is_archived,
+        },
+        'section': None
+        if task.section is None
+        else {'id': task.section.pk, 'name': task.section.name},
+        'project_position': task.project_position,
         'recurrence': None
         if active is None
         else {

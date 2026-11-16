@@ -24,6 +24,18 @@ from .label import (
     LabelUpdateSchema,
 )
 from .parse import ParseAnswerSchema, ParseSchema
+from .project import (
+    ProjectCreateSchema,
+    ProjectOrderSchema,
+    ProjectRefSchema,
+    ProjectSchema,
+    ProjectTaskOrderSchema,
+    ProjectUpdateSchema,
+    SectionNameSchema,
+    SectionOrderSchema,
+    SectionRefSchema,
+    SectionSchema,
+)
 from .reminder import (
     DeliveryListSchema,
     DeliverySchema,
@@ -58,6 +70,16 @@ from .task import (
 )
 
 __all__ = [
+    'ProjectCreateSchema',
+    'ProjectOrderSchema',
+    'ProjectRefSchema',
+    'ProjectSchema',
+    'ProjectTaskOrderSchema',
+    'ProjectUpdateSchema',
+    'SectionNameSchema',
+    'SectionOrderSchema',
+    'SectionRefSchema',
+    'SectionSchema',
     'ActivityEventSchema',
     'ActivityPageSchema',
     'AttachmentSchema',
