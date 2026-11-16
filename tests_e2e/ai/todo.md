@@ -8,7 +8,7 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 (#272), blockers (#273), the activity log (#274) and the polish of the E2E run (#224):
 
 - the sidebar (a search box, then Today with a count, Upcoming, All, Closed, Labels, Trash, Settings, then
-  a **Projects** section (issue #314: projects, the project page, moving, archiving; TODO-62 to TODO-65) and
+  a **Projects** section (issue #314: projects, the project page, moving, archiving, sections and the manual order; TODO-62 to TODO-66) and
   a **Filters** section; a top bar of scrolling rows on phones), the "Tasks are blocked" and "Storage is paused"
   banners;
 - **Today** `/todo/` (the quick-add box with the free-tasks line, the Overdue section with "Reschedule overdue to
@@ -1238,10 +1238,10 @@ one`; a second user (Session B) with a task.
 | # | Step | Expected |
 |---|------|----------|
 | 1 | On **Today**, the quick-add box now has a **Project** select (No project, then the active projects). Add `Agree the launch date` due today with Project `Website relaunch`, and `Water the plants` with No project. | Both are listed; the first row shows a chip with the project's colour dot and name, linking to the project; the second has none. The sidebar count beside `Website relaunch` is 1. |
-| 2 | Click the chip (or the project in the sidebar). | `/todo/projects/<id>/`: the name with its dot, `1 open · 0 closed`, a progress bar (`0 of 1 task closed`), the quick-add box with Project preselected, a "Sort by" bar (Due date, Priority, Newest, Title) and **Show closed**. The row has no project chip here. The sidebar entry is highlighted. |
+| 2 | Click the chip (or the project in the sidebar). | `/todo/projects/<id>/`: the name with its dot, `1 open · 0 closed`, a progress bar (`0 of 1 task closed`), the quick-add box with Project preselected, a "Sort by" bar (Manual, Due date, Priority, Newest, Title) and **Show closed**. The row has no project chip here. The sidebar entry is highlighted. |
 | 3 | Press **Edit**, write a description with `**bold**` and a `#<number of a task>`, save. | A flash "Project saved."; the description is rendered (bold, the task number is a link). |
 | 4 | Add `Review mockups` from this page's quick-add box, then add a subtask `Check contrast` on its task page. | "Task added." and the task is in the list. The subtask's page says "In Website relaunch, with its parent" and has no Project select. The project page counts both. |
-| 5 | Complete `Agree the launch date` from the project page, then press **Show closed**. | The row is struck in place; with Show closed the closed task is listed after the open ones and the link reads **Hide closed**. The progress bar and counts follow after a reload. |
+| 5 | Complete `Agree the launch date` from the project page, then press **Show closed**. | The row is struck in place; with Show closed the closed task is listed in a **Closed** block below and the link reads **Hide closed**. The progress bar and counts follow after a reload. |
 | 6 | On **All**, press the folder button of `Water the plants`. | The **Move to project** dialog: the task's title, radios No project (selected) and each active project. Escape and Cancel close it and return the focus to the button. |
 | 7 | Choose `Website relaunch`, press **Move**. | A flash "Moved Water the plants to Website relaunch."; the row has the chip. |
 | 8 | Open `Review mockups`' page; change the **Project** select (under Details) to `Moving house`. | The panel re-renders: "In Moving house" in the top line. Its subtask moved too. Press **History**: "Moved from the project Website relaunch to Moving house"; the subtask's history says the same "with its parent, #n Review mockups", marked Automatic. |
@@ -1276,6 +1276,27 @@ one`; a second user (Session B) with a task.
 | 5 | Tick one active project and **Save as filter** `Site`. | The filter page's summary reads `in <project name>`; the sidebar count is the project's open tasks. |
 | 6 | Delete that project (Projects page), then open the filter `Site`. | The summary reads `in a deleted project` and the filter lists no task (it does not fall back to every task). |
 | 7 | On the Projects page click **No project**. | The search page with `projects=none`: the open tasks in no project. |
+
+### TODO-66 Projects: sections and the manual order
+
+**Preconditions:** a project `Website relaunch` with three open tasks (`One`, `Two`, `Three`), one of them with a subtask.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Open the project's page. | "Sort by" starts with **Manual** (selected, no arrow), then Due date, Priority, Newest, Title. Every row has a drag handle. Below the list: **Add section**. |
+| 2 | Press **Add section**, type `Design`, submit; add `Content` too. Then try `design` again and an empty name. | "Added the section Design." Each section has a heading with a handle, a chevron, a count `0`, rename and delete buttons, an empty list and "Add a task to Design". The repeats are refused: `Name: This project already has a section with this name.` / `Name: Name is required.` |
+| 3 | Type `Mockups` in "Add a task to Design" and press Enter. | "Task added."; `Mockups` is in Design (count 1). Its task page says "In Website relaunch / Design". |
+| 4 | Drag `Two` from the top list into Design, below `Mockups`. Reload. | The row stays in Design in that place after the reload; Design's count is 2. `Two`'s History: "Moved to the section Design". |
+| 5 | Drag the task that has a subtask into Content, then try to drag only its subtask row back to the top list. | The parent's subtask row follows it to Content after a reload. The subtask row alone cannot be dropped in another list. |
+| 6 | Inside Design, drag `Two` above `Mockups`; then focus a handle and press Up / Down. Reload. | The order is kept. **Today** and **All** (Manual) keep their own orders. |
+| 7 | Drag the `Content` section's handle above `Design` (or focus it and press Up). Reload. | The sections keep the new order. |
+| 8 | Collapse Design with its chevron, reload, expand it. | It stays collapsed across the reload (this browser only) and expands again. |
+| 9 | Click **Title** in the sort bar. | The sections stay, each sorted by title; no drag handles on rows or sections. **Manual** brings the dragged order back. |
+| 10 | Press **Show closed** after completing a task. | A **Closed** block below the sections lists it; the open lists are unchanged. |
+| 11 | On `Mockups`' task page change **Section** to `Content`, then to `No section`. | The top line follows ("/ Content", then no section); History: "Moved from the section Design to Content", "Removed from the section Content". A subtask's page has no Section select. |
+| 12 | Move `Mockups` to another project (Project select or the row's folder button). | It is in the other project with no section. |
+| 13 | Rename `Design` to `Visuals` (pencil), then delete it (confirm). | "Section renamed."; the question says its tasks stay in the project; "Deleted the section Visuals. Its N tasks stay in the project." The tasks are in the top list, at its end; each History has "The section Visuals was deleted: the task is in no section" (Automatic). |
+| 14 | Archive the project and open its page. | Sections and tasks are listed, with no handles, no rename / delete, no "Add a task to ..." and no Add section. Posting to `/todo/projects/<id>/sections/` is refused: `Unarchive the project to change its sections.` |
 
 ## Out of scope
 

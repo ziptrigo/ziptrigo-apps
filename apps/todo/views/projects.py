@@ -13,6 +13,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -23,12 +24,12 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.services.timezones import user_today
 from apps.core.htmx import hx_redirect, is_htmx
 
-from ..forms import MoveForm, ProjectForm, TaskForm
-from ..models import DEFAULT_LABEL_COLOR, Label, Project
-from ..services import SORT_DEFAULT, SORTS, order_tasks, project_tasks, projects, sort_direction
+from ..forms import MoveForm, ProjectForm, SectionForm, TaskForm
+from ..limits import MAX_SECTIONS_PER_PROJECT, PROJECT_PAGE_LIMIT
+from ..models import DEFAULT_LABEL_COLOR, Label, Project, Section, Task
+from ..services import SORTS, order_tasks, project_tasks, projects, sort_direction
 from ..services.dates import DEFAULT_DIRECTIONS
 from ..services.references import render_markdown, resolver_for_request
-from ..services.search import order_results
 from .common import (
     announces_change,
     form_error_lines,
@@ -40,7 +41,7 @@ from .common import (
     render_page,
     validation_lines,
 )
-from .lists import PAGE_SIZE, _query, decorate, sort_links
+from .lists import PAGE_SIZE, _query, decorate
 from .tasks import after_action
 
 SLOT = '#project-msg'
@@ -218,63 +219,117 @@ def project_delete(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpR
 # -- One project ---------------------------------------------------------------------------------
 
 
+#: The sorts of a project's page: the hand-made order first (the default), then the shared ones.
+PROJECT_SORT_DEFAULT = 'manual'
+PROJECT_SORTS = {PROJECT_SORT_DEFAULT: 'Manual', **SORTS}
+
+
+def _sort_links(sort: str, direction: str, show_closed: bool) -> list[dict]:
+    """The "Sort by" bar of a project's page (`lists.sort_links`' shape). Manual is the default and
+    has no direction; the active one of the others links to the opposite direction."""
+    links = []
+    for key, label in PROJECT_SORTS.items():
+        active = key == sort
+        if key == PROJECT_SORT_DEFAULT:
+            wanted = ''
+        else:
+            flipped = 'asc' if direction == 'desc' else 'desc'
+            wanted = flipped if active else DEFAULT_DIRECTIONS[key]
+            wanted = wanted if wanted != DEFAULT_DIRECTIONS[key] else ''
+        links.append(
+            {
+                'key': key,
+                'label': label,
+                'query': _query(
+                    sort=key if key != PROJECT_SORT_DEFAULT else '',
+                    dir=wanted,
+                    closed='1' if show_closed else '',
+                ),
+                'active': active,
+                'direction': direction if active and key != PROJECT_SORT_DEFAULT else '',
+            }
+        )
+    return links
+
+
 @login_required
 @require_GET
 @ensure_csrf_cookie
 def project_page(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpResponse:
-    """The project's page: `?sort=`, `?dir=`, `?closed=1` (closed tasks too, after the open ones)
-    and `?page=`."""
+    """The project's page: its open tasks grouped by section (the ones without a section first),
+    in `?sort=` order (`manual`, the default: `Task.project_position`, set by dragging; or `date`,
+    `priority`, `created`, `title` with `?dir=`). `?closed=1` adds the closed tasks in their own
+    block below, 50 a page (`?page=`). The open tasks are not paged (sections and dragging work on
+    the whole list); beyond `PROJECT_PAGE_LIMIT` the page points at the search."""
     project = projects.with_counts(_owned(request, project_id))
     user = request.user
     today = user_today(user)
     sort = request.GET.get('sort', '')
-    sort = sort if sort in SORTS else SORT_DEFAULT
-    direction = sort_direction(sort, request.GET.get('dir'))
+    sort = sort if sort in PROJECT_SORTS else PROJECT_SORT_DEFAULT
+    manual = sort == PROJECT_SORT_DEFAULT
+    direction = 'asc' if manual else sort_direction(sort, request.GET.get('dir'))
     show_closed = request.GET.get('closed') == '1'
 
-    queryset = decorate(project_tasks(project, include_closed=show_closed))
-    queryset = (
-        order_results(queryset, sort, direction)
-        if show_closed
-        else order_tasks(queryset, sort, direction)
+    ordered = order_tasks(
+        decorate(project_tasks(project)), 'project_manual' if manual else sort, direction
     )
-    page_obj = Paginator(queryset, PAGE_SIZE).get_page(request.GET.get('page'))
+    open_rows = list(ordered[: PROJECT_PAGE_LIMIT + 1])
+    truncated = len(open_rows) > PROJECT_PAGE_LIMIT
+    open_rows = open_rows[:PROJECT_PAGE_LIMIT]
+    sections = projects.list_sections(project)
+    known = {section.pk for section in sections}
+    by_section: dict[UUID | None, list] = {}
+    for task in open_rows:
+        key = task.section_id if task.section_id in known else None
+        by_section.setdefault(key, []).append(task)
+
     base = {
-        'sort': sort if sort != SORT_DEFAULT else '',
-        'dir': direction if direction != DEFAULT_DIRECTIONS[sort] else '',
-        'closed': '1' if show_closed else '',
+        'sort': sort if not manual else '',
+        'dir': direction if not manual and direction != DEFAULT_DIRECTIONS[sort] else '',
     }
-    closed_toggle = _query(**{**base, 'closed': '' if show_closed else '1'})
-    links = sort_links(sort, direction, sorts=SORTS)
-    for link in links:
-        if show_closed:
-            link['query'] = '&'.join(part for part in (link['query'], 'closed=1') if part)
-    description_html = (
-        render_markdown(project.description, resolver_for_request(request))
-        if project.description
-        else ''
-    )
     context = {
         'project': project,
-        'description_html': description_html,
+        'description_html': render_markdown(project.description, resolver_for_request(request))
+        if project.description
+        else '',
         'overdue_count': projects.overdue_count(project, today),
         'outside_blocked': 0 if project.is_archived else projects.outside_blocked_count(project),
-        'tasks': list(page_obj.object_list),
-        'page_obj': page_obj,
+        'unsectioned': by_section.get(None, []),
+        'section_groups': [(section, by_section.get(section.pk, [])) for section in sections],
+        'has_sections': bool(sections),
+        'open_shown': len(open_rows),
+        'truncated': truncated,
+        'page_limit': PROJECT_PAGE_LIMIT,
         'today': today,
         'view': 'project',
-        'sort_links': links,
+        'sort_links': _sort_links(sort, direction, show_closed),
+        # Rows are dragged only in the hand-made order of a project that is not archived.
+        'sortable': manual and not project.is_archived,
         'show_closed': show_closed,
-        'closed_toggle_query': closed_toggle,
+        'closed_toggle_query': _query(**base, closed='' if show_closed else '1'),
         'page_url': _project_url(project),
-        'prev_query': _query(**base, page=str(page_obj.previous_page_number()))
-        if page_obj.has_previous()
-        else '',
-        'next_query': _query(**base, page=str(page_obj.next_page_number()))
-        if page_obj.has_next()
-        else '',
         'default_color': DEFAULT_LABEL_COLOR,
+        'current_project_id': project.pk,
     }
+    if show_closed:
+        closed = decorate(
+            Task.objects.filter(
+                project=project, deleted_at__isnull=True, completed_at__isnull=False
+            )
+        ).order_by('-completed_at', '-number')
+        page_obj = Paginator(closed, PAGE_SIZE).get_page(request.GET.get('page'))
+        context.update(
+            {
+                'closed_tasks': list(page_obj.object_list),
+                'page_obj': page_obj,
+                'prev_query': _query(**base, closed='1', page=str(page_obj.previous_page_number()))
+                if page_obj.has_previous()
+                else '',
+                'next_query': _query(**base, closed='1', page=str(page_obj.next_page_number()))
+                if page_obj.has_next()
+                else '',
+            }
+        )
     if not project.is_archived:
         context.update(
             {
@@ -285,8 +340,99 @@ def project_page(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpRes
                 'form_project_id': project.pk,
             }
         )
-    context['current_project_id'] = project.pk
     return render_page(request, 'todo/project.html', context, nav='project')
+
+
+# -- Sections ------------------------------------------------------------------------------------
+
+
+def _section(project: Project, section_id: UUID) -> Section:
+    return get_object_or_404(
+        Section.objects.select_related('project'), pk=section_id, project=project
+    )
+
+
+def _section_done(
+    request: AuthenticatedHttpRequest, project: Project, message: str
+) -> HttpResponse:
+    messages.success(request, message)
+    return hx_redirect(request, _project_url(project))
+
+
+@login_required
+@require_POST
+def section_add(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpResponse:
+    project = _owned(request, project_id)
+    form = SectionForm(request.POST)
+    if not form.is_valid():
+        return refuse(request, form_error_lines(form), fallback=_project_url(project))
+    if (response := limited(request, 'TODO_EDIT_USER')) is not None:
+        return response
+    try:
+        section = projects.create_section(project, form.cleaned_data['name'])
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), fallback=_project_url(project))
+    return _section_done(request, project, f'Added the section {section.name}.')
+
+
+@login_required
+@require_POST
+def section_edit(
+    request: AuthenticatedHttpRequest, project_id: UUID, section_id: UUID
+) -> HttpResponse:
+    project = _owned(request, project_id)
+    section = _section(project, section_id)
+    form = SectionForm(request.POST)
+    if not form.is_valid():
+        return refuse(request, form_error_lines(form), fallback=_project_url(project))
+    if (response := limited(request, 'TODO_EDIT_USER')) is not None:
+        return response
+    try:
+        projects.rename_section(section, form.cleaned_data['name'])
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), fallback=_project_url(project))
+    return _section_done(request, project, 'Section renamed.')
+
+
+@login_required
+@require_POST
+def section_delete(
+    request: AuthenticatedHttpRequest, project_id: UUID, section_id: UUID
+) -> HttpResponse:
+    """Delete a section (from the confirmation modal, a plain POST); its tasks stay in the project."""
+    project = _owned(request, project_id)
+    section = _section(project, section_id)
+    if (response := limited(request, 'TODO_EDIT_USER')) is not None:
+        return response
+    name = section.name
+    try:
+        count = projects.delete_section(section)
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), fallback=_project_url(project))
+    kept = (
+        f' Its {count} task{"s" if count != 1 else ""} stay{"" if count != 1 else "s"} in the project.'
+        if count
+        else ''
+    )
+    messages.success(request, f'Deleted the section {name}.{kept}')
+    return redirect(_project_url(project))
+
+
+@login_required
+@require_POST
+def section_reorder(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpResponse:
+    """Write the order of the project's sections (`ids[]`). Answers 204."""
+    project = _owned(request, project_id)
+    ids: list[UUID] = []
+    for raw in request.POST.getlist('ids[]')[:MAX_SECTIONS_PER_PROJECT]:
+        try:
+            ids.append(UUID(raw))
+        except ValueError:
+            return refuse(request, 'Could not read the new order.')
+    if (response := limited(request, 'TODO_EDIT_USER')) is not None:
+        return response
+    projects.reorder_sections(project, ids)
+    return HttpResponse(status=204)
 
 
 # -- Moving a task -------------------------------------------------------------------------------
@@ -306,14 +452,22 @@ def task_move(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     form = MoveForm(request.POST)
     if not form.is_valid():
         return refuse(request, form_error_lines(form), retarget=slot, fallback=fallback)
+    # `section` (only when the request has it: the task page's Section select) puts the task in a
+    # section of the project it ends up in; a move to another project alone leaves it in none.
+    with_section = 'section' in request.POST
     try:
         target = projects.check_move(task, form.cleaned_data['project'])
+        if with_section:
+            projects.clean_section(target, form.cleaned_data['section'])
     except ValidationError as exc:
         return refuse(request, validation_lines(exc), retarget=slot, fallback=fallback)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=slot)) is not None:
         return response
     try:
-        projects.move_task(task, target)
+        with transaction.atomic():
+            projects.move_task(task, target)
+            if with_section:
+                projects.set_section(task, form.cleaned_data['section'])
     except ValidationError as exc:
         return refuse(request, validation_lines(exc), retarget=slot, fallback=fallback)
     if not is_htmx(request):

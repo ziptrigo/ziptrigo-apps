@@ -11,7 +11,7 @@ from django.urls import reverse
 
 from apps.core.models import Notification
 
-from ..models import Project, Reminder, Task, TaskEvent, TodoSettings
+from ..models import Project, Reminder, Section, Task, TaskEvent, TodoSettings
 from ..services import (
     FilterParams,
     add_blocker,
@@ -895,3 +895,373 @@ class TestApi:
         response = post(client, '/filters', auth, {'name': 'x', 'params': {'projects': ['nope']}})
 
         assert response.status_code == 422
+
+
+# -- Sections and the manual order (part 2) --------------------------------------------------------
+
+
+class TestSections:
+    @pytest.fixture
+    def design(self, project) -> Section:
+        return projects.create_section(project, 'Design')
+
+    def test_create_rename_and_the_rules(self, project, design):
+        assert errors(projects.create_section, project, 'design') == {
+            'name': ['This project already has a section with this name.']
+        }
+        assert errors(projects.create_section, project, '  ') == {'name': ['Name is required.']}
+        assert errors(projects.create_section, project, 'x' * 81) == {
+            'name': ['Name is too long (at most 80 characters).']
+        }
+        content = projects.create_section(project, 'Content')
+
+        assert errors(projects.rename_section, content, 'DESIGN') == {
+            'name': ['This project already has a section with this name.']
+        }
+        assert projects.rename_section(content, ' Copy ').name == 'Copy'
+        assert [s.name for s in projects.list_sections(project)] == ['Design', 'Copy']
+
+    def test_another_project_may_reuse_the_name(self, funded_user, design):
+        other = projects.create_project(funded_user, 'Other')
+
+        assert projects.create_section(other, 'Design').name == 'Design'
+
+    def test_the_cap(self, project, monkeypatch):
+        monkeypatch.setattr(projects, 'MAX_SECTIONS_PER_PROJECT', 1)
+        projects.create_section(project, 'One')
+
+        assert errors(projects.create_section, project, 'Two') == {
+            '__all__': ['A project can have up to 1 sections.']
+        }
+
+    def test_an_archived_projects_sections_are_frozen(self, project, design):
+        projects.archive_project(project)
+
+        message = {'__all__': ['Unarchive the project to change its sections.']}
+        assert errors(projects.create_section, project, 'New') == message
+        assert errors(projects.rename_section, design, 'New') == message
+        assert errors(projects.delete_section, design) == message
+
+    def test_reorder_sections(self, project, design):
+        content = projects.create_section(project, 'Content')
+
+        assert projects.reorder_sections(project, [content.pk, design.pk]) == 2
+
+        assert [s.name for s in projects.list_sections(project)] == ['Content', 'Design']
+
+    def test_a_task_is_created_in_a_section_at_its_end(self, funded_user, project, design):
+        first = create_task(funded_user, title='A', project=project, section=design)
+        second = create_task(funded_user, title='B', project=project, section=str(design.pk))
+
+        assert first.section == design and second.section == design
+        assert second.project_position > first.project_position
+
+    def test_a_section_of_another_project_is_unknown(self, funded_user, project, design):
+        other = projects.create_project(funded_user, 'Other')
+
+        for kwargs in ({'project': other, 'section': design}, {'section': design}):
+            assert errors(create_task, funded_user, title='A', **kwargs) == {
+                'section': ['Unknown section.']
+            }
+        assert errors(create_task, funded_user, title='A', project=project, section='nope') == {
+            'section': ['Unknown section.']
+        }
+        assert not Task.objects.exists()
+
+    def test_a_subtask_has_its_parents_section(self, funded_user, project, design):
+        parent = create_task(funded_user, title='Parent', project=project, section=design)
+
+        assert create_task(funded_user, title='Sub', parent=parent).section == design
+
+    def test_set_section_moves_the_subtasks_and_is_logged(self, funded_user, project, design):
+        parent = create_task(funded_user, title='Parent', project=project)
+        sub = create_task(funded_user, title='Sub', parent=parent)
+
+        projects.set_section(parent, design)
+
+        assert reload(parent).section == design and reload(sub).section == design
+        assert log(parent)[0] == 'Moved to the section Design'
+        entry = TaskEvent.objects.filter(task=sub).first()
+        assert entry.automatic and 'with its parent' in describe(entry)
+
+        projects.set_section(parent, None)
+        assert log(parent)[0] == 'Removed from the section Design'
+
+    def test_set_section_refusals(self, funded_user, project, design):
+        loose = create_task(funded_user, title='Loose')
+        sub = create_task(
+            funded_user, title='Sub', parent=create_task(funded_user, title='P', project=project)
+        )
+
+        assert errors(projects.set_section, loose, design) == {'section': ['Unknown section.']}
+        assert errors(projects.set_section, sub, design) == {
+            'section': ["A subtask is in its parent's section. Move the parent instead."]
+        }
+
+    def test_moving_to_another_project_leaves_the_section(self, funded_user, project, design):
+        other = projects.create_project(funded_user, 'Other')
+        task = create_task(funded_user, title='A', project=project, section=design)
+
+        projects.move_task(task, other)
+
+        assert reload(task).section is None and reload(task).project == other
+
+    def test_deleting_a_section_keeps_its_tasks_in_the_project(self, funded_user, project, design):
+        task = create_task(funded_user, title='A', project=project, section=design)
+
+        assert projects.delete_section(design) == 1
+
+        fresh = reload(task)
+        assert fresh.section is None and fresh.project == project
+        entry = TaskEvent.objects.filter(task=task).first()
+        assert describe(entry) == 'The section Design was deleted: the task is in no section'
+        assert entry.automatic
+
+    def test_deleting_the_project_clears_the_section_too(self, funded_user, project, design):
+        task = create_task(funded_user, title='A', project=project, section=design)
+
+        projects.delete_project(project)
+
+        assert reload(task).section is None and not Section.objects.exists()
+
+    def test_the_next_occurrence_keeps_the_section(self, funded_user, project, design, wednesday):
+        task = create_task(
+            funded_user,
+            title='Water',
+            due_date=TODAY,
+            rrule='FREQ=DAILY',
+            project=project,
+            section=design,
+        )
+
+        close_task(task)
+
+        assert Task.objects.exclude(pk=task.pk).get().section == design
+
+    def test_a_task_moved_under_a_parent_takes_its_section(self, funded_user, project, design):
+        parent = create_task(funded_user, title='Parent', project=project, section=design)
+        loose = create_task(funded_user, title='Loose')
+
+        update_task(loose, changes={'parent': parent})
+
+        assert reload(loose).section == design
+
+
+class TestManualOrder:
+    def order(self, project, section=None) -> list[str]:
+        from ..services import order_tasks, project_tasks
+
+        rows = order_tasks(project_tasks(project).filter(section=section), 'project_manual')
+        return [task.title for task in rows]
+
+    def test_reorder_writes_the_order_of_one_list(self, funded_user, project):
+        a, b, c = (create_task(funded_user, title=t, project=project) for t in 'ABC')
+
+        assert projects.reorder_tasks(funded_user, project, None, [c.pk, a.pk, b.pk]) == 3
+
+        assert self.order(project) == ['C', 'A', 'B']
+
+    def test_a_row_dragged_into_a_section_joins_it_with_its_subtasks(self, funded_user, project):
+        design = projects.create_section(project, 'Design')
+        there = create_task(funded_user, title='There', project=project, section=design)
+        moved = create_task(funded_user, title='Moved', project=project)
+        sub = create_task(funded_user, title='Sub', parent=moved)
+
+        projects.reorder_tasks(funded_user, project, design, [moved.pk, there.pk])
+
+        assert self.order(project, design)[:2] == ['Moved', 'There']
+        assert reload(sub).section == design
+        assert log(moved)[0] == 'Moved to the section Design'
+
+    def test_a_subtask_dragged_alone_stays_with_its_parent(self, funded_user, project):
+        design = projects.create_section(project, 'Design')
+        parent = create_task(funded_user, title='Parent', project=project)
+        sub = create_task(funded_user, title='Sub', parent=parent)
+
+        assert projects.reorder_tasks(funded_user, project, design, [sub.pk]) == 0
+
+        assert reload(sub).section is None
+
+    def test_ids_of_other_projects_and_users_are_ignored(self, funded_user, other_user, project):
+        mine = create_task(funded_user, title='Mine', project=project)
+        elsewhere = create_task(funded_user, title='Elsewhere')
+
+        assert projects.reorder_tasks(funded_user, project, None, [elsewhere.pk, mine.pk]) == 1
+        assert errors(projects.reorder_tasks, other_user, project, None, [mine.pk]) == {
+            'project': ['Unknown project.']
+        }
+
+    def test_ordering_a_project_leaves_the_other_orders_alone(self, funded_user, project):
+        a, b = (create_task(funded_user, title=t, project=project) for t in 'AB')
+
+        projects.reorder_tasks(funded_user, project, None, [b.pk, a.pk])
+
+        for task in (reload(a), reload(b)):
+            assert (task.position, task.today_position, task.all_position) == (0, 0, 0)
+
+
+class TestSectionPages:
+    @pytest.fixture
+    def design(self, project) -> Section:
+        return projects.create_section(project, 'Design')
+
+    def url(self, project) -> str:
+        return reverse('todo:project', args=[project.pk])
+
+    def test_the_page_groups_tasks_by_section_and_defaults_to_manual(
+        self, web, funded_user, project, design
+    ):
+        create_task(funded_user, title='Loose one', project=project)
+        create_task(funded_user, title='Designed one', project=project, section=design)
+
+        page = text(web.get(self.url(project)))
+
+        assert page.index('Loose one') < page.index('id="project-sections"')
+        assert page.index(f'id="section-title-{design.pk}"') < page.index('Designed one')
+        assert 'aria-current="true" title="Drag the rows to put them in your own order"' in page
+        assert (
+            f'data-scope="project" data-project="{project.pk}" data-section="{design.pk}"' in page
+        )
+        assert 'Add a task to Design' in page and 'Add section' in page
+
+    def test_another_sort_keeps_the_sections_and_drops_the_handles(
+        self, web, funded_user, project, design
+    ):
+        create_task(funded_user, title='Designed one', project=project, section=design)
+
+        page = text(web.get(self.url(project) + '?sort=title'))
+
+        assert f'id="section-title-{design.pk}"' in page
+        assert 'data-scope="project"' not in page and 'section-handle' not in page
+
+    def test_show_closed_is_its_own_block(self, web, funded_user, project, design):
+        close_task(create_task(funded_user, title='Closed one', project=project, section=design))
+
+        page = text(web.get(self.url(project) + '?closed=1'))
+
+        assert page.index('id="closed-title"') < page.index('Closed one')
+
+    def test_an_archived_project_shows_sections_read_only(self, web, funded_user, project, design):
+        create_task(funded_user, title='Designed one', project=project, section=design)
+        projects.archive_project(project)
+
+        page = text(web.get(self.url(project)))
+
+        assert 'Designed one' in page and f'id="section-title-{design.pk}"' in page
+        assert 'Add section' not in page and 'Delete the section' not in page
+        assert 'data-scope="project"' not in page
+
+    def test_add_rename_and_delete_a_section(self, web, funded_user, project):
+        added = web.post(
+            reverse('todo:section-add', args=[project.pk]), {'name': 'Backlog'}, **HTMX
+        )
+        assert added['HX-Redirect'] == self.url(project)
+        section = Section.objects.get(project=project)
+
+        again = web.post(
+            reverse('todo:section-add', args=[project.pk]), {'name': 'backlog'}, **HTMX
+        )
+        assert again.status_code == 422
+        assert 'Name: This project already has a section with this name.' in text(again)
+
+        edit = reverse('todo:section-edit', args=[project.pk, section.pk])
+        assert web.post(edit, {'name': 'Later'}, **HTMX)['HX-Redirect'] == self.url(project)
+        create_task(funded_user, title='A', project=project, section=section)
+
+        deleted = web.post(
+            reverse('todo:section-delete', args=[project.pk, section.pk]), follow=True
+        )
+        assert 'Deleted the section Later. Its 1 task stays in the project.' in text(deleted)
+        assert not Section.objects.exists()
+
+    def test_reorder_sections_and_tasks_over_http(self, web, funded_user, project, design):
+        content = projects.create_section(project, 'Content')
+        a = create_task(funded_user, title='A', project=project)
+        b = create_task(funded_user, title='B', project=project)
+
+        sections = web.post(
+            reverse('todo:section-reorder', args=[project.pk]),
+            {'ids[]': [str(content.pk), str(design.pk)]},
+        )
+        rows = web.post(
+            reverse('todo:reorder'),
+            {
+                'scope': 'project',
+                'project': str(project.pk),
+                'section': str(design.pk),
+                'ids[]': [str(b.pk), str(a.pk)],
+            },
+        )
+
+        assert sections.status_code == 204 and rows.status_code == 204
+        assert [s.name for s in projects.list_sections(project)] == ['Content', 'Design']
+        assert reload(a).section == design and reload(b).section == design
+
+    def test_reorder_with_an_unknown_project_or_section_is_refused(self, web, project):
+        url = reverse('todo:reorder')
+
+        unknown = web.post(url, {'scope': 'project', 'project': 'nope'}, **HTMX)
+        bad = web.post(
+            url, {'scope': 'project', 'project': str(project.pk), 'section': 'nope'}, **HTMX
+        )
+
+        assert unknown.status_code == 422 and 'Unknown project.' in text(unknown)
+        assert bad.status_code == 422 and 'Section: Unknown section.' in text(bad)
+
+    def test_quick_add_into_a_section(self, web, project, design):
+        response = web.post(
+            reverse('todo:create'),
+            {
+                'title': 'New one',
+                'project': str(project.pk),
+                'section': str(design.pk),
+                'view': 'project',
+            },
+            **HTMX,
+        )
+
+        assert 'HX-Redirect' in response
+        assert Task.objects.get(title='New one').section == design
+
+    def test_the_task_page_sets_the_section(self, web, funded_user, project, design):
+        task = create_task(funded_user, title='A', project=project)
+        url = reverse('todo:move', args=[task.number])
+
+        page = text(web.get(reverse('todo:task', args=[task.number])))
+        assert 'id="task-section"' in page
+
+        response = web.post(
+            url, {'project': str(project.pk), 'section': str(design.pk), 'ctx': 'page'}, **HTMX
+        )
+
+        assert response.status_code == 200 and '/ Design' in text(response)
+        assert reload(task).section == design
+
+        refused = web.post(
+            url, {'project': str(project.pk), 'section': 'nope', 'ctx': 'page'}, **HTMX
+        )
+        assert refused.status_code == 422 and 'Section: Unknown section.' in text(refused)
+
+    def test_another_users_sections_are_404(self, stranger, project, design):
+        for name, args in (
+            ('section-add', [project.pk]),
+            ('section-reorder', [project.pk]),
+            ('section-edit', [project.pk, design.pk]),
+            ('section-delete', [project.pk, design.pk]),
+        ):
+            response = stranger.post(reverse(f'todo:{name}', args=args), {'name': 'x'})
+            assert response.status_code == 404, name
+
+    def test_the_page_makes_a_bounded_number_of_queries(
+        self, web, funded_user, project, design, django_assert_max_num_queries
+    ):
+        for index in range(12):
+            create_task(
+                funded_user,
+                title=f'Task {index}',
+                project=project,
+                section=design if index % 2 else None,
+            )
+
+        with django_assert_max_num_queries(32):
+            web.get(self.url(project))

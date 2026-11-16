@@ -26,6 +26,7 @@ from .models import (
     Reminder,
     ReminderDelivery,
     SavedFilter,
+    Section,
     Task,
     TaskBlocker,
     TaskEvent,
@@ -279,10 +280,27 @@ class LabelAdmin(ReadOnlyModelAdmin):
         return obj._task_count  # ty: ignore[missing-attribute]
 
 
+class SectionInline(admin.TabularInline):
+    """A project's sections, in their order. Read-only."""
+
+    model = Section
+    extra = 0
+    fields = ['name', 'position', 'created_at']
+    readonly_fields = fields
+    can_delete = False
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
 class ProjectAdmin(ReadOnlyModelAdmin):
     """A user's projects (issue #314). Read-only: archiving and deleting are the owner's."""
 
     list_display = ['name', 'user', 'color', 'archived', 'task_count', 'created_at']
+    inlines = [SectionInline]
     list_filter = [('archived_at', admin.EmptyFieldListFilter), 'created_at']
     search_fields = ['name', 'user__email']
     list_select_related = ['user']

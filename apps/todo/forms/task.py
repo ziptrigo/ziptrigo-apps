@@ -76,6 +76,7 @@ class TaskForm(forms.Form):
     # The quick-add box's Project (a project id, or empty for none): `services.projects` says whether
     # it is one of the user's. An existing task moves through `MoveForm`.
     project = forms.CharField(label='Project', required=False, max_length=36)
+    section = forms.CharField(label='Section', required=False, max_length=36)
 
     def __init__(self, *args, user: User, part: str = '', **kwargs):
         super().__init__(*args, **kwargs)
@@ -132,7 +133,7 @@ class TaskForm(forms.Form):
             # A request without the Repeat controls leaves the repeat rule alone (an empty `rrule`
             # would stop it).
             and (name not in ('rrule', 'recurrence_mode') or name in self.data)
-            and name not in ('state', 'blocked_by', 'project')
+            and name not in ('state', 'blocked_by', 'project', 'section')
         }
         if 'labels' in values:
             values['labels'] = list(values['labels'])
@@ -145,6 +146,10 @@ class TaskForm(forms.Form):
     def requested_project(self) -> str:
         """The id of the project the quick-add box chose ('' for none)."""
         return self.cleaned_data.get('project') or ''
+
+    def requested_section(self) -> str:
+        """The id of the section of that project a project page's quick add chose ('' for none)."""
+        return self.cleaned_data.get('section') or ''
 
     def requested_blockers(self) -> list[int]:
         """The numbers of the tasks the quick-add box said block the new one."""

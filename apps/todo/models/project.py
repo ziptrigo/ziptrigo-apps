@@ -10,7 +10,7 @@ from django.db.models.functions import Lower
 
 from apps.accounts.models import User
 
-from ..limits import PROJECT_NAME_MAX
+from ..limits import PROJECT_NAME_MAX, SECTION_NAME_MAX
 from .label import DEFAULT_LABEL_COLOR
 
 
@@ -79,3 +79,34 @@ class Project(models.Model):
         """How much of the project is closed, 0 to 100 (0 for an empty one)."""
         total = self.task_total
         return round(100 * self.closed_count / total) if total else 0
+
+
+class Section(models.Model):
+    """A named group inside a project (issue #314, part 2): Backlog, This week, Later. A task of the
+    project is in at most one of its sections, or in none; a subtask is always in its parent's.
+    Deleting a section keeps its tasks, which stay in the project with no section."""
+
+    objects: ClassVar['models.Manager']
+    DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
+    #: The reverse accessor of `Task.section`.
+    tasks: ClassVar['models.Manager']
+    pk: uuid.UUID
+    project_id: uuid.UUID
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = cast(
+        'Project',
+        models.ForeignKey(Project, on_delete=models.CASCADE, related_name='sections'),
+    )
+    name = cast(str, models.CharField(max_length=SECTION_NAME_MAX))
+    position = cast(int, models.PositiveIntegerField(default=0))
+    created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
+
+    class Meta:
+        ordering = ['position', 'created_at']
+        constraints = [
+            models.UniqueConstraint(Lower('name'), 'project', name='todo_section_name_project'),
+        ]
+
+    def __str__(self) -> str:
+        return self.name

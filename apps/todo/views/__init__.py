@@ -47,6 +47,10 @@ from .projects import (
     project_reorder,
     project_unarchive,
     projects_page,
+    section_add,
+    section_delete,
+    section_edit,
+    section_reorder,
     task_move,
 )
 from .reminders import reminder_add, reminder_delete, reminder_edit, reminder_history
@@ -115,6 +119,10 @@ __all__ = [
     'project_reorder',
     'project_unarchive',
     'projects_page',
+    'section_add',
+    'section_delete',
+    'section_edit',
+    'section_reorder',
     'task_move',
     'recurrence_stop',
     'reminder_add',

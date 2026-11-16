@@ -88,6 +88,11 @@
         });
         if (list.dataset.scope) body.set('scope', list.dataset.scope);
         if (list.dataset.parent) body.set('parent', list.dataset.parent);
+        // A project's page: which project, and which of its lists (a section, or '' for none).
+        if (list.dataset.project) {
+            body.set('project', list.dataset.project);
+            body.set('section', list.dataset.section || '');
+        }
         // `HX-Request` makes the views answer a refusal with their message partial.
         fetch(list.dataset.reorderUrl, {
             method: 'POST',
@@ -114,8 +119,13 @@
     function makeSortable(list) {
         if (typeof window.initSortableList !== 'function') return;
         window.initSortableList(list, {
-            handle: '.drag-handle',
+            // A project's sections are reordered by their own handle (`data-handle`).
+            handle: list.dataset.handle || '.drag-handle',
             item: '[data-task-id]',
+            // Lists that share a `data-sort-group` (the sections of a project) take each other's rows;
+            // a subtask row stays in its parent's section.
+            group: list.dataset.sortGroup || undefined,
+            canLeave: function (item) { return !item.dataset.subtask; },
             label: function (handle) { return handle.dataset.name || 'Item'; },
             onReorder: postOrder,
             // Today is sorted by state group (In progress, To do, On hold) and its manual order only

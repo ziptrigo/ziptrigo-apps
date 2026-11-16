@@ -11,7 +11,7 @@ from .inbox import (
     InboxCode,
 )
 from .label import DEFAULT_LABEL_COLOR, Label
-from .project import Project
+from .project import Project, Section
 from .recurrence import Recurrence, RecurrenceMode
 from .reference import TaskReference
 from .reminder import (
@@ -55,6 +55,7 @@ __all__ = [
     'RecurrenceMode',
     'Resolution',
     'SELECTABLE_STATES',
+    'Section',
     'Reminder',
     'ReminderChannel',
     'ReminderDelivery',

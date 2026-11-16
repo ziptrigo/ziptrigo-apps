@@ -13,6 +13,12 @@ LABEL_DESCRIPTION_MAX = 255
 #: A project's name and its Markdown description (issue #314).
 PROJECT_NAME_MAX = 80
 PROJECT_DESCRIPTION_MAX = 10_000
+#: A section of a project: its name, and how many one project can have.
+SECTION_NAME_MAX = 80
+MAX_SECTIONS_PER_PROJECT = 50
+#: The most open tasks a project's page lists (they are not paged: sections and the manual order
+#: work on the whole list); beyond it the page points at the search.
+PROJECT_PAGE_LIMIT = 500
 #: A saved filter's name, and how many saved filters one user can have (issue #181).
 SAVED_FILTER_NAME_MAX = 50
 MAX_SAVED_FILTERS = 50

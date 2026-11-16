@@ -6,7 +6,7 @@
    nothing when the row no longer belongs to the list (`views.tasks.after_action`); the <li> carries the
    target and the values every action sends. With `oob` the row is sent out of band, to refresh a row the action
    did not answer. {% endcomment %}
-<li id="task-{{ task.number }}" data-task-id="{{ task.pk }}" data-group="{{ task.state_group }}"{% if oob %} hx-swap-oob="true"{% endif %}
+<li id="task-{{ task.number }}" data-task-id="{{ task.pk }}" data-group="{{ task.state_group }}"{% if task.parent_id %} data-subtask="1"{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}
     hx-target="#task-{{ task.number }}" hx-swap="outerHTML swap:200ms"
     hx-vals='{"view": "{{ view }}", "ctx": "row"{% if sortable %}, "sortable": "1"{% endif %}}'
     class="task-row row-leave row-enter cursor-pointer flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">

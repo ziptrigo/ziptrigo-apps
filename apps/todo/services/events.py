@@ -45,6 +45,7 @@ gone; `services.event_text` writes the sentence):
   `title`, `resolution`. `moved`: `parent` (`{number, title}` or none: made top level).
 - `project` (issue #314): `from`, `to` (project names, or none), `via` (the parent a subtask moved
   with), `reason` (`deleted`: the project was deleted and the task is in no project).
+- `section` (part 2 of #314): `from`, `to` (section names, or none), `via`, `reason` (`deleted`).
 - `attachment_added`, `attachment_removed`: `filename`, `comment` (a comment's file).
 - `trashed`, `restored`: `via` (the parent that did it to its subtask).
 """

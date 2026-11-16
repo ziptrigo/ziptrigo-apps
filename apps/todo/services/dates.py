@@ -54,6 +54,7 @@ DEFAULT_DIRECTIONS = {
     MANUAL_SORT: 'asc',
     # The internal keys of the manual orders, so `order_tasks` can reverse them like any other sort.
     'all_manual': 'asc',
+    'project_manual': 'asc',
     'today_manual': 'asc',
 }
 UPCOMING_DAYS = 14
@@ -131,6 +132,8 @@ def _order_tasks(queryset: QuerySet, sort: str) -> QuerySet:
         return queryset.order_by('today_position', *default_order())
     if sort == 'all_manual':
         return queryset.order_by('all_position', *default_order())
+    if sort == 'project_manual':
+        return queryset.order_by('project_position', *default_order())
     return queryset.order_by(*default_order())
 
 

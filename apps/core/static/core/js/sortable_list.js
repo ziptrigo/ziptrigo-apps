@@ -13,6 +13,9 @@
 //     canMove(item, other) { return true; },  // false stops an item being dragged (or moved by key) past `other`
 //                                     //   (To-do's Today: a row stays inside its own state group)
 //     debounceMs: 400,                // quiet time after the last key press before onReorder runs
+//     group: 'name',                  // lists with the same group take each other's items by drag; the list an
+//                                     //   item lands in gets the onReorder (the arrow keys stay inside a list)
+//     canLeave(item) { return true; }, // false keeps an item in its own list when lists share a group
 //   });
 //
 // Idempotent per container: call it again after htmx swaps in the list. The options are fixed by the
@@ -71,14 +74,23 @@
       handle: config.handle,
       draggable: config.item,
       animation: 150,
+      group: config.group,
+      emptyInsertThreshold: 12,
       onMove: function (event) {
         // Returning false cancels the move; `related` is the item the dragged one would pass.
+        if (event.to !== event.from && typeof config.canLeave === 'function' && config.canLeave(event.dragged) === false) return false;
         if (typeof config.canMove !== 'function') return true;
         if (!event.related || !event.related.matches(config.item)) return true;
         return config.canMove(event.dragged, event.related) !== false;
       },
       onEnd: function (event) {
-        if (event.oldIndex !== event.newIndex) reorder(container, config, false);
+        if (event.to !== event.from) {
+          // Dropped in another list of the group: that list saves its new order (and takes the item).
+          const other = configs.get(event.to);
+          if (other) reorder(event.to, other, false);
+        } else if (event.oldIndex !== event.newIndex) {
+          reorder(container, config, false);
+        }
       },
     });
   }

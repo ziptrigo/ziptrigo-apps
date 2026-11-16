@@ -17,6 +17,14 @@ the same project; a task it blocks stays Blocked.
 **Deleting** a project (`delete_project`) removes only the project: its tasks are kept and are then
 in no project.
 
+**Sections** (part 2) are named groups inside a project. A task is in at most one section of *its*
+project, or in none; a subtask is in its parent's (`set_section` moves them together). A task that
+moves to another project leaves its section. Deleting a section keeps its tasks, in the project with
+no section. **The manual order** of a project's page is `Task.project_position`, an order among the
+tasks of one section (or of the tasks without one): `reorder_tasks` writes it for the rows of one
+list, and puts a row dragged in from another section into that section. A new or moved task goes to
+the end of its group.
+
 Every write takes the user's `TodoAccount` row first (`accounts.lock_account`), like the other
 To-do writes that touch more than one task (`services.blockers`' note on locking).
 """
@@ -33,11 +41,24 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 
-from ..models import MUTED_STATES, EventKind, Project, Task, TaskBlocker, TodoSettings
+from ..models import (
+    MUTED_STATES,
+    EventKind,
+    Project,
+    Section,
+    Task,
+    TaskBlocker,
+    TodoSettings,
+)
 from . import events, reminders
 from .accounts import get_account, lock_account
 from .labels import clean_color
-from .limits import PROJECT_DESCRIPTION_MAX, PROJECT_NAME_MAX
+from .limits import (
+    MAX_SECTIONS_PER_PROJECT,
+    PROJECT_DESCRIPTION_MAX,
+    PROJECT_NAME_MAX,
+    SECTION_NAME_MAX,
+)
 from .task_state import lock_tasks
 
 logger = logging.getLogger(__name__)
@@ -45,6 +66,9 @@ logger = logging.getLogger(__name__)
 DUPLICATE_MESSAGE = 'You already have a project with this name.'
 ARCHIVED_MESSAGE = 'This project is archived. Unarchive it to add tasks to it.'
 UNKNOWN_MESSAGE = 'Unknown project.'
+UNKNOWN_SECTION_MESSAGE = 'Unknown section.'
+SECTION_DUPLICATE_MESSAGE = 'This project already has a section with this name.'
+ARCHIVED_SECTIONS_MESSAGE = 'Unarchive the project to change its sections.'
 SUBTASK_MESSAGE = "A subtask is in its parent's project. Move the parent instead."
 #: How many projects the sidebar lists before "and N more".
 SIDEBAR_LIMIT = 20
@@ -315,7 +339,9 @@ def delete_project(project: Project) -> int:
             return 0
         rows = list(Task.objects.filter(project=current).values_list('pk', 'user_id'))
         ids = [pk for pk, _ in rows]
-        Task.objects.filter(pk__in=ids).update(project=None, updated_at=now)
+        Task.objects.filter(pk__in=ids).update(
+            project=None, section=None, project_position=0, updated_at=now
+        )
         data = {'from': current.name, 'to': None, 'reason': 'deleted'}
         events.record_many(
             events.Entry(pk, user_id, EventKind.PROJECT, dict(data), True) for pk, user_id in rows
@@ -342,7 +368,8 @@ def check_move(task: Task, project: Project | str | UUID | None) -> Project | No
 
 
 def move_task(task: Task, project: Project | str | UUID | None) -> Task:
-    """Put the task in `project` (`None`: in no project). Its subtasks move with it, the closed
+    """Put the task in `project` (`None`: in no project), in no section, at the end of the project's
+    manual order. Its subtasks move with it, the closed
     and the trashed ones too. Open or closed, a task can move; one in the Trash, or a subtask on
     its own, cannot. Moving it out of an archived project releases the reminders it held.
 
@@ -371,7 +398,12 @@ def move_task(task: Task, project: Project | str | UUID | None) -> Task:
             task.project = target
             return task
         old = Project.objects.filter(pk=current.project_id).first() if current.project_id else None
-        Task.objects.filter(pk__in=list(locked)).update(project=target, updated_at=now)
+        Task.objects.filter(pk__in=list(locked)).update(
+            project=target,
+            section=None,  # a section belongs to the project left behind
+            project_position=next_position(target, None) if target is not None else 0,
+            updated_at=now,
+        )
         data: dict[str, Any] = {
             'from': old.name if old is not None else None,
             'to': target.name if target is not None else None,
@@ -388,5 +420,258 @@ def move_task(task: Task, project: Project | str | UUID | None) -> Task:
         if old is not None and old.is_archived:
             _release(_held_tasks(Task.objects.filter(pk__in=list(locked)), now), now)
     task.project = target
+    task.section = None
     task.updated_at = now
     return task
+
+
+# -- Sections ------------------------------------------------------------------------------------
+
+
+def clean_section_name(name: object) -> str:
+    cleaned = ' '.join(str(name or '').split())
+    if not cleaned:
+        raise _error('name', 'Name is required.')
+    if len(cleaned) > SECTION_NAME_MAX:
+        raise _error('name', f'Name is too long (at most {SECTION_NAME_MAX} characters).')
+    return cleaned
+
+
+def _check_section_unique(project: Project, name: str, *, exclude: Section | None = None) -> None:
+    taken = Section.objects.filter(project=project, name__iexact=name)
+    if exclude is not None:
+        taken = taken.exclude(pk=exclude.pk)
+    if taken.exists():
+        raise _error('name', SECTION_DUPLICATE_MESSAGE)
+
+
+def _require_active(project: Project) -> None:
+    if project.is_archived:
+        raise _error(NON_FIELD_ERRORS, ARCHIVED_SECTIONS_MESSAGE)
+
+
+def list_sections(project: Project) -> list[Section]:
+    """The project's sections in their order."""
+    return list(Section.objects.filter(project=project).order_by('position', 'created_at'))
+
+
+def clean_section(project: Project | None, section: Section | str | UUID | None) -> Section | None:
+    """`section` (a section, its id, or nothing) as a section of `project`, or `None` for none. One
+    of another project, an unknown or malformed id, and any section when there is no project, are
+    all "Unknown section."."""
+    if section is None or section == '':
+        return None
+    if project is None:
+        raise _error('section', UNKNOWN_SECTION_MESSAGE)
+    if not isinstance(section, Section):
+        try:
+            found = Section.objects.filter(project=project, pk=section).first()
+        except ValueError, ValidationError:  # a malformed id
+            found = None
+        if found is None:
+            raise _error('section', UNKNOWN_SECTION_MESSAGE)
+        return found
+    if section.project_id != project.pk:
+        raise _error('section', UNKNOWN_SECTION_MESSAGE)
+    return section
+
+
+def next_position(project: Project, section: Section | None) -> int:
+    """`Task.project_position` of a task that joins `section` of `project` (`None`: its tasks with
+    no section): after the others."""
+    top = Task.objects.filter(project=project, section=section, deleted_at__isnull=True).aggregate(
+        top=Max('project_position')
+    )['top']
+    return (top or 0) + 1
+
+
+def create_section(project: Project, name: str) -> Section:
+    """Add a section at the end of the project's. Names are unique in a project, ignoring case; at
+    most `MAX_SECTIONS_PER_PROJECT`. An archived project's sections can't be changed."""
+    cleaned = clean_section_name(name)
+    _require_active(project)
+    with transaction.atomic():
+        lock_account(project.user_id)
+        existing = Section.objects.filter(project=project)
+        if existing.count() >= MAX_SECTIONS_PER_PROJECT:
+            raise _error(
+                NON_FIELD_ERRORS, f'A project can have up to {MAX_SECTIONS_PER_PROJECT} sections.'
+            )
+        _check_section_unique(project, cleaned)
+        position = (existing.aggregate(top=Max('position'))['top'] or 0) + 1
+        try:
+            with transaction.atomic():
+                return Section.objects.create(project=project, name=cleaned, position=position)
+        except IntegrityError:  # a concurrent create of the same name
+            raise _error('name', SECTION_DUPLICATE_MESSAGE) from None
+
+
+def rename_section(section: Section, name: str) -> Section:
+    cleaned = clean_section_name(name)
+    _require_active(section.project)
+    _check_section_unique(section.project, cleaned, exclude=section)
+    section.name = cleaned
+    try:
+        with transaction.atomic():
+            section.save(update_fields=['name'])
+    except IntegrityError:
+        raise _error('name', SECTION_DUPLICATE_MESSAGE) from None
+    return section
+
+
+def delete_section(section: Section) -> int:
+    """Delete the section and keep its tasks, which stay in the project with no section, at the end
+    of that group (each gets an automatic log entry). Returns how many tasks were in it."""
+    _require_active(section.project)
+    now = timezone.now()
+    with transaction.atomic():
+        lock_account(section.project.user_id)
+        current = Section.objects.select_related('project').filter(pk=section.pk).first()
+        if current is None:
+            return 0
+        rows = list(
+            Task.objects.filter(section=current)
+            .order_by('project_position', 'created_at')
+            .values_list('pk', 'user_id')
+        )
+        start = next_position(current.project, None)
+        for index, (pk, _) in enumerate(rows):
+            Task.objects.filter(pk=pk).update(
+                section=None, project_position=start + index, updated_at=now
+            )
+        data = {'from': current.name, 'to': None, 'reason': 'deleted'}
+        events.record_many(
+            events.Entry(pk, user_id, EventKind.SECTION, dict(data), True) for pk, user_id in rows
+        )
+        current.delete()
+    return len(rows)
+
+
+def reorder_sections(project: Project, ids: Sequence[UUID]) -> int:
+    """Write `position = index` for the given ids (the project's own sections; others are ignored)."""
+    own = {section.pk: section for section in Section.objects.filter(project=project, pk__in=ids)}
+    changed = []
+    for index, pk in enumerate(ids):
+        section = own.get(pk)
+        if section is not None:
+            section.position = index
+            changed.append(section)
+    with transaction.atomic():
+        Section.objects.bulk_update(changed, ['position'])
+    return len(changed)
+
+
+def _family(task_ids: Sequence[UUID]) -> list[UUID]:
+    """The ids of the subtasks of `task_ids` (they follow their parent's section)."""
+    return list(Task.objects.filter(parent_id__in=list(task_ids)).values_list('pk', flat=True))
+
+
+def check_section(task: Task, section: Section | str | UUID | None) -> Section | None:
+    """What `set_section` would refuse that can be told without writing. Returns the cleaned
+    section."""
+    if task.is_trashed:
+        raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
+    if task.parent_id is not None:
+        raise _error('section', "A subtask is in its parent's section. Move the parent instead.")
+    project = task.project if task.project_id is not None else None
+    return clean_section(project, section)
+
+
+def set_section(task: Task, section: Section | str | UUID | None) -> Task:
+    """Put the task in `section` of its project (`None`: in no section), at the end of that group.
+    Its subtasks go with it. Logged on the task (and, automatically, on each subtask). The section
+    it already has is a no-op."""
+    target = check_section(task, section)
+    now = timezone.now()
+    with transaction.atomic():
+        lock_account(task.user_id)
+        subtask_ids = _family([task.pk])
+        locked = lock_tasks(task.pk, *subtask_ids)
+        current = locked.get(task.pk)
+        if current is None:
+            raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
+        target = check_section(current, target.pk if target is not None else None)
+        new_id = target.pk if target is not None else None
+        if current.section_id == new_id:
+            task.section = target
+            return task
+        old = Section.objects.filter(pk=current.section_id).first() if current.section_id else None
+        project = current.project
+        assert project is not None or target is None
+        Task.objects.filter(pk__in=list(locked)).update(
+            section=target,
+            project_position=next_position(project, target) if project is not None else 0,
+            updated_at=now,
+        )
+        _record_section(locked, task.pk, old, target, events.task_ref(current))
+    task.section = target
+    task.updated_at = now
+    return task
+
+
+def _record_section(
+    locked: dict[UUID, Task],
+    parent_pk: UUID,
+    old: Section | None,
+    new: Section | None,
+    via: dict[str, Any],
+) -> None:
+    data: dict[str, Any] = {
+        'from': old.name if old is not None else None,
+        'to': new.name if new is not None else None,
+    }
+    events.record_many(
+        events.entry(
+            item,
+            EventKind.SECTION,
+            data | ({} if pk == parent_pk else {'via': via}),
+            automatic=pk != parent_pk,
+        )
+        for pk, item in locked.items()
+    )
+
+
+def reorder_tasks(
+    user: User, project: Project, section: Section | None, ids: Sequence[UUID]
+) -> int:
+    """Write the manual order of one list of the project's page: the tasks `ids` (the user's own
+    non-trashed tasks of `project`; others are ignored) get `project_position` 0, 1, 2, ... in the
+    order sent. A task listed that is in another section (a row dragged across) is put in `section`
+    first, with its subtasks, and that move is logged; a subtask never changes section on its own
+    (it keeps its parent's, and only its place in the order is written). Returns how many tasks
+    were positioned."""
+    if project.user_id != user.pk:
+        raise _error('project', UNKNOWN_MESSAGE)
+    _require_active(project)
+    section = clean_section(project, section)
+    section_id = section.pk if section is not None else None
+    now = timezone.now()
+    with transaction.atomic():
+        lock_account(user.pk)
+        rows = {
+            task.pk: task
+            for task in Task.objects.filter(
+                user=user, project=project, deleted_at__isnull=True, pk__in=list(ids)
+            ).select_related('user')
+        }
+        positioned = 0
+        for index, pk in enumerate(dict.fromkeys(ids)):
+            task = rows.get(pk)
+            if task is None:
+                continue
+            if task.section_id != section_id:
+                if task.parent_id is not None:
+                    continue  # stays with its parent
+                family = {sub.pk: sub for sub in Task.objects.filter(parent=task)}
+                old = (
+                    Section.objects.filter(pk=task.section_id).first() if task.section_id else None
+                )
+                Task.objects.filter(pk__in=[task.pk, *family]).update(
+                    section=section, updated_at=now
+                )
+                _record_section(
+                    {task.pk: task, **family}, task.pk, old, section, events.task_ref(task)
+                )
+            Task.objects.filter(pk=pk).update(project_position=index, updated_at=now)
+            positioned += 1
+    return positioned

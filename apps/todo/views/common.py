@@ -52,6 +52,7 @@ FIELD_LABELS = {
     'blocker': 'Blocker',
     'blocked_by': 'Blocked by',
     'project': 'Project',
+    'section': 'Section',
 }
 
 

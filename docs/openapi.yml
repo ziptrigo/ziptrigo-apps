@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.9.0
+  version: 2.10.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -8552,6 +8552,7 @@ components:
           - subtask_closed
           - moved
           - project
+          - section
           - attachment_added
           - attachment_removed
           - trashed

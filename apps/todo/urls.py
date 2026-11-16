@@ -31,6 +31,22 @@ urlpatterns = [
         name='project-unarchive',
     ),
     path('projects/<uuid:project_id>/delete/', views.project_delete, name='project-delete'),
+    path('projects/<uuid:project_id>/sections/', views.section_add, name='section-add'),
+    path(
+        'projects/<uuid:project_id>/sections/reorder/',
+        views.section_reorder,
+        name='section-reorder',
+    ),
+    path(
+        'projects/<uuid:project_id>/sections/<uuid:section_id>/edit/',
+        views.section_edit,
+        name='section-edit',
+    ),
+    path(
+        'projects/<uuid:project_id>/sections/<uuid:section_id>/delete/',
+        views.section_delete,
+        name='section-delete',
+    ),
     path('reminders/history/', views.reminder_history, name='reminder-history'),
     path('settings/', views.settings_page, name='settings'),
     path('settings/inbox/', views.inbox_update, name='settings-inbox'),
