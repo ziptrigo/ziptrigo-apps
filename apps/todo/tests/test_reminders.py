@@ -1372,6 +1372,70 @@ class TestSettings:
         assert reminders_of(task)[0].fire_at == utc(2026, 10, 28, 6, 55)
 
 
+class TestOneNoticePerTask:
+    """A task's new reminder notice replaces its earlier one; other notices are left alone."""
+
+    def test_a_second_reminder_of_the_task_replaces_the_first_notice(self, funded_user, wednesday):
+        task = timed_task(funded_user)
+        reminders.add_reminder(task, minutes_before=60, channel='in_app')
+        assert reminders.deliver_due(utc(2026, 10, 28, 13, 31)) == 1  # 1 hour before
+        first = Notification.objects.get(user=funded_user)
+
+        assert reminders.deliver_due(utc(2026, 10, 28, 14, 26)) == 1  # 5 minutes before
+
+        [notice] = Notification.objects.filter(user=funded_user)
+        assert notice.pk != first.pk
+        assert notice.key == reminders.notice_key(task)
+        assert ReminderDelivery.objects.filter(notification_id=first.pk).exists()
+
+    def test_a_read_or_dismissed_earlier_notice_goes_too(self, funded_user, wednesday):
+        task = timed_task(funded_user)
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+        Notification.objects.update(read_at=utc(2026, 10, 28, 14, 30))
+        postpone_task(task, preset='tomorrow')
+
+        reminders.deliver_due(utc(2026, 10, 29, 14, 26))
+
+        [notice] = Notification.objects.filter(user=funded_user)
+        assert notice.read_at is None
+
+    def test_a_notice_from_before_keys_is_replaced(self, funded_user, wednesday):
+        task = timed_task(funded_user)
+        url = reverse('todo:task', args=[task.number])
+        Notification.objects.create(user=funded_user, source='todo', title='Pay rent', url=url)
+
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+
+        [notice] = Notification.objects.filter(user=funded_user)
+        assert notice.key == reminders.notice_key(task)
+
+    def test_other_notices_about_the_task_are_left_alone(self, funded_user, wednesday):
+        task = timed_task(funded_user)
+        url = reverse('todo:task', args=[task.number])
+        keep = [
+            # Another To-do notice about the same task, with a key of its own.
+            Notification.objects.create(
+                user=funded_user, source='todo', title='Unblocked', url=url, key='todo_unblocked:x'
+            ),
+            # Another app's keyless notice with the same link.
+            Notification.objects.create(user=funded_user, source='core', title='x', url=url),
+        ]
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+
+        remaining = set(Notification.objects.filter(user=funded_user).values_list('pk', flat=True))
+        assert {n.pk for n in keep} < remaining and len(remaining) == 3
+
+    def test_another_tasks_notice_stays(self, funded_user, wednesday):
+        first = timed_task(funded_user, hour=14)
+        second = timed_task(funded_user, hour=15)
+
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+        reminders.deliver_due(utc(2026, 10, 28, 15, 26))
+
+        keys = set(Notification.objects.filter(user=funded_user).values_list('key', flat=True))
+        assert keys == {reminders.notice_key(first), reminders.notice_key(second)}
+
+
 class TestRearming:
     """A due date the user changes arms an already sent reminder for the new date; the zone and the
     default due time never do."""
@@ -1386,7 +1450,9 @@ class TestRearming:
         [reminder] = reminders_of(task)
         assert reminder.sent_at is None and reminder.fire_at == utc(2026, 10, 29, 14, 25)
         assert reminders.deliver_due(utc(2026, 10, 29, 14, 26)) == 1
-        assert Notification.objects.filter(user=funded_user).count() == 2
+        # The new notice replaces the first one: the bell shows one per task.
+        [notice] = Notification.objects.filter(user=funded_user)
+        assert notice.body == 'Due Oct 29, 2026, 2:30 PM'
 
     def test_rescheduling_all_overdue_to_today_reminds_again(self, funded_user, wednesday):
         task = create_task(
@@ -1399,7 +1465,7 @@ class TestRearming:
         [reminder] = reminders_of(task)
         assert reminder.sent_at is None and reminder.fire_at == utc(2026, 10, 28, 22, 55)
         assert reminders.deliver_due(utc(2026, 10, 28, 22, 56)) == 1
-        assert Notification.objects.filter(user=funded_user).count() == 2
+        assert Notification.objects.filter(user=funded_user).count() == 1
 
     @pytest.mark.parametrize(
         'changes',

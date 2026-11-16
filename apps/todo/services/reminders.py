@@ -70,7 +70,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.accounts.services.timezones import local_datetime, user_today, user_tz
 from apps.core.datetime_format import PUBLIC, WEEKDAY_NAMES, format_date, format_time
-from apps.core.models import PushAction, PushSubscription
+from apps.core.models import Notification, PushAction, PushSubscription
 from apps.core.services import notifications, push
 from apps.core.services.email import send_email
 
@@ -116,6 +116,8 @@ SNOOZE_MESSAGE = 'Choose 15 minutes, 1 hour, 8 hours or 1 day.'
 
 #: The `kind` of a pushed reminder (`core.PushAction.kind`), and its two buttons.
 PUSH_KIND = 'todo.reminder'
+# The in-app notice of a task's reminder; one per task: a new reminder replaces the earlier notice.
+NOTICE_KEY = 'todo_reminder:{task_id}'
 ACTION_COMPLETE = 'complete'
 ACTION_SNOOZE = 'snooze'
 #: The Snooze button's label for each `TodoAccount.snooze_minutes`.
@@ -644,6 +646,20 @@ def _queue_email(reminder: Reminder, fire_token: UUID, now: datetime) -> None:
     transaction.on_commit(_enqueue)
 
 
+def notice_key(task: Task) -> str:
+    """The key of a task's reminder notice (`notifications.notify`)."""
+    return NOTICE_KEY.format(task_id=task.pk)
+
+
+def _delete_earlier_notices(task: Task, url: str, key: str) -> None:
+    """Delete the task's earlier reminder notice, so the bell shows one per task (the latest: a
+    task postponed after its reminder came, then reminded again, must not list both). Notices
+    written before they had a key are recognised as To-do's keyless ones linking to the task page:
+    every other To-do notice that links there has a key of its own (unblocked, recurrence)."""
+    notifications.delete_for_key(task.user_id, key, source='todo')
+    Notification.objects.filter(user_id=task.user_id, source='todo', key='', url=url).delete()
+
+
 def _deliver(
     reminder: Reminder, now: datetime, fire_token: UUID, channel: str | None = None
 ) -> None:
@@ -653,12 +669,16 @@ def _deliver(
     task_row = reminder.task
     channel = channel or reminder.channel
     if channel in (ReminderChannel.IN_APP, ReminderChannel.BOTH):
+        url = reverse('todo:task', args=[task_row.number])
+        key = notice_key(task_row)
+        _delete_earlier_notices(task_row, url, key)
         notification = notifications.notify(
             task_row.user,
             source='todo',
             title=_truncate(task_row.title, NOTICE_TITLE_MAX),
             body=due_label(task_row),
-            url=reverse('todo:task', args=[task_row.number]),
+            url=url,
+            key=key,
         )
         _record(
             reminder,

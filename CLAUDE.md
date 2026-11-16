@@ -5629,8 +5629,12 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
     2026, 2:30 PM', url=reverse('todo:task', ...))` (`Due today` for a date-only task due on the
     owner's today, `Due Oct 30, 2026` for a date-only one on another day, with a reminder set days
     ahead; always the public wording, whatever the owner's date and time format: a message is written
-    by a job, issue #245) and a `ReminderDelivery` with the notification's id. No `key`: nothing deletes the
-    notice later.
+    by a job, issue #245) and a `ReminderDelivery` with the notification's id. **One notice per task**: it carries the key
+    `todo_reminder:<task id>` (`reminders.notice_key`), and delivering a new in-app reminder of the task
+    first deletes the earlier one (read or dismissed alike), so a task postponed after its reminder came,
+    or with two reminders, shows only the latest in the bell (`_delete_earlier_notices`; a notice written
+    before the key existed is recognised as To-do's keyless one linking to the task page, since every
+    other To-do notice that links there has a key). The delivery history keeps every row.
   - *Email*: `send_reminder_email(reminder_id, fire_token)` (`default` queue, queued on commit by
     `_queue_email`; if queuing raises, it is logged and a `ReminderDelivery` with `note='failed'` is
     recorded, since the reminder is already marked sent) renders `todo/emails/reminder.{txt,html}` (autoescaped HTML; the text

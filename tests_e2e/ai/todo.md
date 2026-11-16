@@ -500,6 +500,7 @@ The delivery steps 9, 11 and 14 are shell steps (the scheduler does not run on t
 | 12 | In **Settings** choose "Get no reminder", **Save**, then add a task `No reminder please` with a date. | Its page says "No reminders." and its row has no bell. Restore the setting (5 minutes) afterwards. |
 | 13 | Complete a repeating task that has a reminder (create `Pay rent`, Repeat = Week, with a 15 minute reminder, then **Complete**). Open the new occurrence. | It has the same reminder ("15 minutes before"), unsent, firing before the new date. |
 | 14 | (Only if step 9 ran.) Postpone `Call the bank` to **Tomorrow** (the Postpone action on its row or the task page) and open `/todo/<T_BANK>/`. | The reminder it already delivered is armed again: the Reminders block shows "Fires" (not "Sent") with tomorrow's date at 10:55 PM. (shell step) Running `send_reminders()` now delivers nothing (it is not due yet). |
+| 15 | (Only if step 14 ran.) (shell step) Make the reminder due again with the first command of step 9, run `send_reminders()`, and open the notification bell. | One `Call the bank` notification only: the new one, saying "Due <tomorrow's date>, 11:00 PM", replaced the one from step 9 (the bell shows one reminder notice per task). The task's **History** lists both deliveries. |
 
 ### TODO-22 Search
 
