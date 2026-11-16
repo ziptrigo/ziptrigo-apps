@@ -136,6 +136,35 @@ def test_get_object_bytes_within_max_bytes(stubbed):
     assert storage.get_object_bytes('a/b', max_bytes=5) == b'12345'
 
 
+def test_get_object_range_asks_for_the_bytes_and_returns_them(stubbed):
+    storage, stubber = stubbed
+    stubber.add_response(
+        'get_object',
+        {'Body': _body(b'12345')},
+        {'Bucket': BUCKET, 'Key': 'a/b', 'Range': 'bytes=0-4'},
+    )
+    assert storage.get_object_range('a/b', 0, 4) == b'12345'
+
+
+def test_get_object_range_of_an_empty_object_is_empty(stubbed):
+    storage, stubber = stubbed
+    stubber.add_client_error('get_object', service_error_code='InvalidRange')
+    assert storage.get_object_range('a/b', 0, 4) == b''
+
+
+def test_get_object_range_other_errors_propagate(stubbed):
+    storage, stubber = stubbed
+    stubber.add_client_error('get_object', service_error_code='NoSuchKey')
+    with pytest.raises(ClientError):
+        storage.get_object_range('a/b', 0, 4)
+
+
+def test_get_object_range_rejects_a_bad_range(stubbed):
+    storage, _ = stubbed
+    with pytest.raises(ValueError):
+        storage.get_object_range('a/b', 5, 4)
+
+
 def test_get_object_bytes_over_max_bytes_raises_before_reading(stubbed):
     storage, stubber = stubbed
     raw = _ReadSpy(b'123456')
@@ -539,7 +568,14 @@ def test_presigned_get_url_inline_with_content_type():
 
 @pytest.mark.parametrize(
     'content_type',
-    ['text/html', 'image/svg+xml', 'application/xhtml+xml', 'application/octet-stream'],
+    [
+        'text/html',
+        'text/markdown',
+        'image/svg+xml',
+        'application/xhtml+xml',
+        'application/octet-stream',
+        'video/x-matroska',
+    ],
 )
 def test_presigned_get_url_inline_rejects_content_types_that_could_run_script(content_type):
     storage, client = _mock_storage()

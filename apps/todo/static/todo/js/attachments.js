@@ -6,8 +6,9 @@
  * Rows for the uploads in flight live in #attachment-uploads; when a file lands its row goes and
  * the list of attached files (#attachment-list) is fetched again.
  *
- * The drop zone (files and folders) is `initDropZone` from core's `core/js/drop_zone.js`, loaded
- * before this script, and `uploader.js` is loaded before both.
+ * The drop zone (files and folders) is `initDropZone` from core's `core/js/drop_zone.js`, pasting an
+ * image `initClipboardPaste` from `core/js/clipboard_paste.js`, both loaded before this script, and
+ * `uploader.js` is loaded before all of them.
  */
 (function () {
     'use strict';
@@ -48,5 +49,15 @@
         });
         // Core's `drop_zone.js`; an empty drop is ignored here (no alert), as on the Receipts page.
         initDropZone(dropZone, uploader.addFiles, { onEmpty: function () {} });
+        // Core's `clipboard_paste.js`: an image pasted anywhere on the page outside a comment form (those
+        // register themselves, `comment_files.js`) is attached to the task like a picked file.
+        if (window.initClipboardPaste) {
+            // `skipEditable`: an image pasted into the description or title editor, the subtask or reminder fields
+            // is not an attachment (the comment forms take theirs through their own registration).
+            initClipboardPaste(uploader.addFiles, {
+                hint: document.getElementById('attachment-paste-hint'),
+                skipEditable: true,
+            });
+        }
     }
 })();

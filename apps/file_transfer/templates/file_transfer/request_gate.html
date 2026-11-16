@@ -6,7 +6,7 @@
 <div class="container mx-auto px-4 py-16 max-w-xl">
     <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
         {% if access == 'needs_password' %}
-        <h1 class="text-2xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">{{ transfer.title }}</h1>
+        <h1 class="text-2xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">{% if transfer.title %}{{ transfer.title }}{% else %}File request{% endif %}</h1>
         <form method="post" action="{% url 't:unlock' transfer.slug %}" class="space-y-3">
             {% csrf_token %}
             <label for="{{ password_form.password.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">

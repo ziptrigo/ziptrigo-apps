@@ -15,6 +15,19 @@ if TYPE_CHECKING:
     from django.db.models import Manager
 
 
+class PreviewStatus(models.TextChoices):
+    """The state of a file's downsized preview (issue #311, `services.renditions`): none built
+    yet, being built, built (`TransferFile.preview_pages` WebP pages in the bucket), failed
+    (a transient problem: the next Preview click tries again) or unavailable (this file can't be
+    reduced -- unreadable, or over the size limits: a verdict, kept)."""
+
+    NONE = 'none', 'Not built'
+    BUILDING = 'building', 'Building'
+    READY = 'ready', 'Ready'
+    FAILED = 'failed', 'Failed'
+    UNAVAILABLE = 'unavailable', 'Unavailable'
+
+
 class TransferFile(models.Model):
     """One file within a `Transfer`, stored in S3 at `storage_key`
     (`transfers/<transfer_id>/<file_id>/<filename>`, see `apps.file_transfer.services.storage`).
@@ -65,6 +78,71 @@ class TransferFile(models.Model):
             'to match a file the sender re-selects after a page reload back to this row, so its '
             'upload can resume instead of restarting (spec: resumable uploads) -- see '
             'apps.file_transfer.services.uploads.',
+        ),
+    )
+
+    preview_type = cast(
+        str,
+        models.CharField(
+            max_length=40,
+            blank=True,
+            default='',
+            db_default='',
+            help_text='The content type the public download page may preview this file as '
+            '(`image/png`, `application/pdf`, `text/plain`, ...), read from its '
+            "first bytes when the upload completed -- never from its name or the uploader's "
+            'claimed type. Empty: no preview (including files uploaded before this column '
+            'existed, until `file_transfer_backfill_previews` runs). See '
+            '`apps.file_transfer.services.preview`.',
+        ),
+    )
+
+    # The downsized preview of an image or PDF (issue #311; `services.renditions`): WebP pages at
+    # `transfers/<transfer id>/previews/<file id>/<n>.webp`, built on the first Preview click and
+    # reused. Not billed and not part of `size_bytes`. All with database defaults (the #102 lesson).
+    preview_status = cast(
+        str,
+        models.CharField(
+            max_length=16,
+            choices=PreviewStatus.choices,
+            default=PreviewStatus.NONE,
+            db_default=PreviewStatus.NONE,
+        ),
+    )
+    preview_pages = cast(
+        int,
+        models.PositiveSmallIntegerField(
+            default=0,
+            db_default=0,
+            help_text='How many WebP pages the downsized preview has (1 for an image).',
+        ),
+    )
+    preview_total_pages = cast(
+        int,
+        models.PositiveIntegerField(
+            default=0,
+            db_default=0,
+            help_text="A PDF's real page count; `preview_pages` is capped at "
+            '`services.renditions.MAX_PREVIEW_PAGES`.',
+        ),
+    )
+    preview_started_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='When the current (or latest) preview build claimed `preview_status='
+            'building`: a build older than its lease can be claimed again.',
+        ),
+    )
+    preview_last_used_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='When a preview page was last shown (bumped at most once an hour); the '
+            'daily `purge_previews` job deletes the pages of a file unused for '
+            '`services.renditions.PREVIEW_CACHE_DAYS` days.',
         ),
     )
 

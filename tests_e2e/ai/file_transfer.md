@@ -18,7 +18,13 @@ The `apps/file_transfer` web UI, against the real local S3 (Floci) and real emai
 - the public download page `/t/<slug>/` (file list, per-file download with the right name and
   bytes, password gate, "Download all (.zip)" built by streaming from S3, the **QR code** popup of
   the page's own link, no expiry text for a transfer that never expires, the neutral "no longer
-  available" page, "Report this transfer");
+  available" page, "Report this transfer", and **file previews** (issue #311: the hint line, the
+  Preview buttons and the dialog; a preview is a **sample**: a downsized image, a PDF's downsized
+  pages, the first 64 KB of a text file; "View full image / document" counts as a download;
+  FT-64, FT-65, FT-67 to FT-69);
+- sending **without recipients** (issue #310: FT-06 and FT-66);
+- **pasting an image** from the clipboard into the send, anonymous send and request upload pages (issue #313: FT-70);
+- the **optional title** of a send and of a request (issue #318: FT-02, FT-54 and FT-71);
 - the daily jobs' visible effects (metering, suspension and its in-app notification, re-enabling
   on a top-up, the suspension grace period, the expiry reminder, natural expiry, the deferred file
   deletion after the last allowed download), triggered with shell steps because the scheduler does
@@ -260,7 +266,7 @@ read: check it on a real click, where the browser saves the file under that name
 | 1 | On `/transfer/`, click **New transfer**. | `/transfer/send/` opens. Title "Send files - ZipTrigo", heading **Send files**. |
 | 2 | Read the line under the heading. | "Your balance: 100 credits. Sending needs at least 1." -- no "Buy credits" link (the balance is enough). |
 | 3 | Look at the **Files** card. | A dashed drop zone with a cloud icon, "Drag & drop files or folders here, or", and two buttons **Choose files** and **Add folder**. The file list below it is empty. |
-| 4 | Look at the options form. | Fields in order: **Recipients** (textarea, help text "One email address per line (or separated by commas)."), **Message** (textarea), **Expiry** (select), **Max downloads** (number), **Password (optional)** (password input with an eye button), and a checkbox "Email me when a file is downloaded" that is **checked**. |
+| 4 | Look at the options form. | Fields in order: **Title (optional)** (a text box, help text "Optional. Shown on the download page and in your dashboard.", `maxlength` 100, not `required`), **Recipients** (textarea, help text "One email address per line (or separated by commas)."), **Message** (textarea), **Expiry** (select), **Max downloads** (number), **Password (optional)** (password input with an eye button), and a checkbox "Email me when a file is downloaded" that is **checked**. |
 | 5 | Open the **Expiry** select. | Options: "1 day", "5 days", "15 days", "30 days", "Set a date", "No expiration"; "No expiration" is selected. No date picker is visible. |
 | 6 | Choose "Set a date". | A date button reading "Select a date" with a calendar icon appears under the select. Click it: a calendar for the current month opens with "Previous month"/"Next month" arrows, weekday headers, days before today greyed out and disabled, and **Clear** / **Today** at the bottom. Press Escape to close it, then set Expiry back to "No expiration" (the date button hides). |
 | 7 | Type `abc` in the password field, click the eye button, then click it again. | The password becomes readable (`abc`, eye-slash icon, button label "Hide password"), then hidden again ("Show password"). Clear the field. |
@@ -309,9 +315,9 @@ read: check it on a real click, where the browser saves the file under that name
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Leave **Recipients** empty and click **Send**. | The browser's own "fill out this field" bubble appears on Recipients; no request is sent. |
-| 2 | Enter three spaces in Recipients and click **Send**. | A red box appears above the Files card with "Recipients: This field is required." |
-| 3 | Enter `,` and click **Send**. | The red box now reads "Add at least one recipient." (it replaces the previous message, it doesn't add to it). |
+| 1 | Read the **Recipients** field. | The label is "Recipients (optional)" and the help text "One email address per line (or separated by commas). Leave it empty to just get a link to share yourself." The textarea has no `required` attribute (issue #310; FT-65 sends with it empty). |
+| 2 | Set Recipients to three spaces and Expiry to "Set a date" without a date, then click **Send**. | The red box shows only "Expiry date: Provide a date for a custom expiry." -- no recipients error, nothing is sent. |
+| 3 | Set Recipients to `,` and click **Send** again. | Still only the expiry message (an empty recipient list is fine). Set Expiry back to "No expiration" before the next step. |
 | 4 | Enter `qa.recipient1@example.com, not-an-email` and click **Send**. | Red box: `Recipients: "not-an-email" is not a valid email address.` |
 | 5 | Fill Recipients with 21 addresses: run `document.getElementById('id_recipients').value = Array.from({length: 21}, (_, i) => 'qa.many' + (i + 1) + '@example.com').join('\n')`, then click **Send**. | Red box: "A transfer can have at most 20 recipients." |
 | 6 | Set Recipients to `qa.recipient1@example.com`, choose Expiry "Set a date" without picking a date, click **Send**. | Red box: "Expiry date: Provide a date for a custom expiry." |
@@ -1027,9 +1033,9 @@ pay). Use the **Visitor window** for the anonymous uploader and a second private
 |---|---|---|
 | 1 | Open `/transfer/`. | Next to **Send files** (green) a grey **Request files** button. Under the heading two tabs, **Sent** (current) and **Requests**. |
 | 2 | Click **Requests**. | `/transfer/?kind=request`: the **Active | Ended** control, and the empty state "No requests yet" ("Ask anyone to upload files to you with a link.") with a **Request files** button. **Ended** says "No ended requests". |
-| 3 | Click **Request files**. | `/transfer/request/new/`: heading **Request files**, "It is free to create; what they upload is stored on your account and billed to you per day like a transfer's storage." and "Your balance: N credits. A request needs at least 1." Fields: **Title**, **Message (optional)**, **Who can upload** (radios **Anyone with the link** selected, **Anyone signed in to ZipTrigo**, **Only these people**), **Max files** ("Up to 100. Blank: the site maximum."), **Max total size (GB)** ("Blank: the site maximum."), **Expiry** (No expiration selected), **Password (optional)** with a show/hide eye, and **Create the request**. The email box is hidden. |
+| 3 | Click **Request files**. | `/transfer/request/new/`: heading **Request files**, "It is free to create; what they upload is stored on your account and billed to you per day like a transfer's storage." and "Your balance: N credits. A request needs at least 1." Fields: **Title (optional)** ("Optional. Shown to the people you ask, on the upload page."), **Message (optional)**, **Who can upload** (radios **Anyone with the link** selected, **Anyone signed in to ZipTrigo**, **Only these people**), **Max files** ("Up to 100. Blank: the site maximum."), **Max total size (GB)** ("Blank: the site maximum."), **Expiry** (No expiration selected), **Password (optional)** with a show/hide eye, and **Create the request**. The email box is hidden. |
 | 4 | Pick **Only these people**. | A **Their email addresses** box appears ("One email address per line (or separated by commas). They are emailed the link, and need an account with that address to upload."). Back to **Anyone with the link**: it hides again. |
-| 5 | **Create the request** with everything empty. | Red box "Title: This field is required." and the same message under Title (red border). Nothing is created. |
+| 5 | Pick **Only these people** and **Create the request** with everything else empty. | Red box "Their email addresses: Add at least one email address." and the same message under the box. No title error: the title is optional (issue #318; FT-70 creates one without). Nothing is created. Pick **Anyone with the link** again. |
 | 6 | Title of 101 characters (`'T'.repeat(101)` typed or pasted into the box, whose `maxlength` is 100: remove it first with `document.getElementById('id_title').removeAttribute('maxlength')`). | "Title: Keep the title to 100 characters or fewer." |
 | 7 | Title `QA photos`, Max files `0`. | "Max files: Ensure this value is greater than or equal to 1." With `101`: "Max files: Max files must be between 1 and 100." |
 | 8 | Max files empty, Max total size `0`, then `21`. | "Max total size (GB): Ensure this value is greater than or equal to 0.01." then "Max total size (GB): Max total size must be at most 20.0 GB." |
@@ -1185,9 +1191,189 @@ pay). Use the **Visitor window** for the anonymous uploader and a second private
 | 3 | Keyboard only on the upload page: Tab to the buttons and the trash button, Enter on trash. | The "Remove this file?" dialog takes focus on **Cancel**; Escape closes it; Enter on **Remove** removes. **Mark as done** is reachable and its dialog behaves the same. |
 | 4 | The upload and request pages' title (browser tab). | `<request title> - ZipTrigo` and `Request files - ZipTrigo`; the dashboard tab's links have `aria-current="page"` on the chosen tab. |
 
+## Previews and optional recipients
+
+### FT-64 Previewing files before downloading them
+
+**Purpose:** the download page says previews exist, opens nothing by itself, and shows each kind of file safely and as a sample.
+**Preconditions:** sign in as `qa.user@example.com` and send one transfer `PREV`
+with these files (create them with the browser tool's file input; names matter, contents are given):
+`pic.png` (a real PNG at least 2400 px wide), `doc.pdf` (a real PDF of 3 or more pages), `clip.mp4` or `clip.webm` (a real tiny video, if you can
+make one; skip the video steps otherwise), `tone.wav` (a real tiny WAV), `a.txt` (`line 1` + newline + `<b>x</b>`),
+`photo.png` (the **text** `<html><body><script>document.title='PWNED'</script></body></html>`, not an image: a
+renamed HTML file), `blob.bin` (a few KB of random bytes) and `fake.png` (2 KB of zero bytes). No recipients. Open the link
+`/t/<slug>/` in the Visitor window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Read the top of the file list. | A line with an eye icon: "N of 8 files can be previewed before you download them." where N counts `pic.png`, `doc.pdf`, `a.txt` and `photo.png` only (**not** `blob.bin`, `fake.png`, the video or the audio: video and audio have **no preview**, playing them would be downloading them). Nothing is open. |
+| 2 | Look at the rows. | Each row has a file-type icon. Previewable rows: the name is a button, a **Preview** button (eye icon, accessible name "Preview <name>") sits left of **Download**. `blob.bin`, `fake.png`, the video and the audio read "<size> - no preview" and have only **Download**. |
+| 3 | Reload and wait. | No dialog opens by itself. |
+| 4 | Click **Preview** on `pic.png`. | A dialog opens (focus on **Close**): header with the icon, "pic.png", the size and "k of N" with Previous and Next file buttons. The first time, "Preparing preview..." may flash; then a **smaller version** of the image shows (its width at most 1600 px: right-click > open image in a new tab to read it, or the footer note "A smaller version of the image."). Footer: **View full image**, **Download**, **Close**. The page behind does not scroll. There is no text claiming the preview is not a download, and no "This counted as a download." yet. |
+| 5 | Click **Next file** until `doc.pdf`, then `a.txt`. | The PDF shows its first page as a downsized image with a bar "Previous page / Page 1 of N / Next page" (distinct from the round file buttons) and the note "Smaller versions of the pages."; **View full document** is offered. `a.txt` shows the text `line 1` and `<b>x</b>` **literally** (the tags are visible, nothing bold); it is not cut, so no "Showing the first 64 KB." and no **View full document**. |
+| 6 | Click the name `photo.png` in the list (close the dialog first). | The dialog opens on `photo.png` and shows the **source text** `<html><body><script>...` -- as text. The tab title does not become `PWNED`, no alert. No Formatted / Raw switch. |
+| 7 | Press ArrowRight and ArrowLeft with the dialog open. | The dialog moves among the previewable **files** only (never `blob.bin` / `fake.png`) and wraps around; the position text updates. With a PDF shown, Page Down / Page Up move among its **pages**, not files. |
+| 8 | Press Tab repeatedly; press Shift+Tab. | Focus stays inside the dialog (Close, Previous, Next, View full, Download...). |
+| 9 | Press Escape. | The dialog closes and focus returns to the button that opened it. Open it again and click the backdrop: it closes. |
+| 10 | The sender's dashboard row of `PREV`: look at the download log. | No download was recorded by all this previewing. Then click a **Download** link in the dialog: the log now has exactly that download. |
+| 11 | Visit `/t/<slug>/preview/<id of fake.png>/` and of `blob.bin` (read the ids from the Download links). | Both 404 -- the type comes from the bytes, not the name. |
+| 12 | Visit `/t/<slug>/preview/<id of photo.png>/`. | The browser shows the HTML **as plain text** (response `text/plain; charset=utf-8`), not a page. |
+| 13 | Visit `/t/<slug>/preview/<id of pic.png>/` and of `doc.pdf`. | Both 404: a preview of an image or a PDF is never the file itself (its downsized pages are under `.../status/` and `.../page/<n>/`). |
+| 14 | Send a second transfer `PREV2` with `pic.png`, password `pw1`, no recipients, and open its link in a clean window. | The hint reads "You can preview this file once you enter the password.", the row shows **Locked** with no Preview button, and `/t/<slug2>/preview/<id>/status/` answers 403. After entering `pw1` the hint reads "You can preview this file before you download it." and the Preview button works. |
+| 15 | Send a third transfer with only `blob.bin`. | No hint line and no "no preview" text; only **Download**. |
+| 16 | Phone width (375 px) and dark mode with the dialog open. | The dialog fits the screen with the footer wrapping; readable in dark mode; Previous / Next and the page bar stay reachable. |
+| 17 | Open the dialog on `pic.png` in the browser's network panel while the page's `fetch` calls are visible, and block its page image (devtools > block request URL for `*/previews/*`). | The dialog shows "This file can't be previewed here. You can still download it." with Download working: never a blank dialog. Same when the status answers an error (switch the network to offline and click another file). |
+
+### FT-65 Markdown files: Formatted and Raw
+
+**Purpose:** Markdown is shown formatted with a switch to the raw text, never trusting what is in the file.
+**Preconditions:** FT-64's sender. Send a transfer `MD` with `notes.md` containing:
+```
+# Title
+
+Some **bold** text, a [link](https://example.com) and <script>document.title='PWNED'</script>
+
+![pic](https://example.com/x.png)
+
+| a | b |
+|---|---|
+| 1 | 2 |
+```
+`page.html` (`<h1>Hi</h1><script>document.title='PWNED'</script>`) and `blob.md` (a few KB of random bytes named `.md`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the link and **Preview** `notes.md`. | Shown **Formatted**: a heading "Title", "bold" in bold, a link, a table. The `<script>` text appears as visible literal text (escaped), the tab title does not become `PWNED`, and there is no image (the Markdown image shows only as its link text). In the footer a segmented control **Formatted | Raw** with Formatted pressed (`aria-pressed="true"`). |
+| 2 | Click **Raw** (or Tab to it and press Enter/Space). | The exact Markdown source is shown as text; Raw is pressed, Formatted not; the footer says nothing about a cut (the file is small). Click **Formatted**: back to the rendering. |
+| 3 | Close, open `notes.md` again. | Formatted is the default again. |
+| 4 | Preview `page.html`. | The raw source `<h1>Hi</h1><script>...` as text; **no** Formatted / Raw switch; no `PWNED`. |
+| 5 | `blob.md` in the list. | "no preview" (random bytes are not text, whatever the name). |
+| 6 | Visit `/t/<slug>/preview/<notes.md id>/`. | JSON (`application/json`) with `text` and a sanitised `html` (the `<script>` is `&lt;script&gt;`); `/t/<slug>/preview/<page.html id>/` is `text/plain`. |
+
+### FT-66 Sending without recipients
+
+**Purpose:** recipients are optional: the sender gets a link to share.
+**Preconditions:** signed in as `qa.user@example.com` (100 credits) on `/transfer/send/` with a fresh draft and one uploaded file `solo.txt`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Leave Recipients empty and click **Send**. | The page goes to the sent page: heading **Your files are ready**, "Share this link with anyone you like. We also emailed it to you.", the link in a read-only input and **Copy** (which turns **Copied**). It does **not** say "We emailed the recipients". |
+| 2 | `/__e2e__/mail/` (reload until it arrives). | Exactly one email, to `qa.user@example.com`, subject `Your transfer "solo.txt" is ready to share`; text "Your transfer "solo.txt" is ready. Nobody was emailed: share the link below." with `Download link: <BASE>/t/<slug>/` and the manage link. No email to anyone else. |
+| 3 | Open the link in the Visitor window and download the file. | It works like any transfer; the sender gets the "was downloaded" email if notify was checked. |
+| 4 | Open `/transfer/`, **Manage** on the new row. | The Recipients list reads "No recipients: nobody was emailed. Share the link yourself, or add recipients below to email it." |
+| 5 | Add `qa.late@example.com` with **Add**. | The recipient is listed with **Resend**, and an email "solo.txt was sent to you via ZipTrigo" arrives for it. |
+| 6 | Anonymous sending (`/transfer/send/anon/`, if enabled in FT-31). | Its Recipients field is still required ("Add at least one recipient."): unchanged. |
+
+### FT-67 Downsized previews, "View full" and the download count
+
+**Purpose:** a preview is a sample, never the file; "View full image / document" counts as exactly one download, and the Download after it does not count again.
+**Preconditions:** sign in as `qa.user@example.com` and send a transfer `SAMP` with **Max downloads = 3**, no recipients, and the files `big.png` (a real PNG about 3000 x 2000), `doc.pdf` (a real PDF of 25 pages) and `tiny.png` (a real 40 x 30 PNG). Open its link in the Visitor window. On the sender's dashboard row **Manage** shows the download log and "x of 3 downloads" (reload it between steps).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | **Preview** `big.png`. | After "Preparing preview..." (only the first time), a smaller image: open it in a new tab and read its size: the longer side is **1600 px** at most (3000 x 2000 shows as 1600 x 1067) and the file type is WebP. The footer says "A smaller version of the image." and offers **View full image**. The dashboard log still shows **0 downloads**, and "3 downloads left" (or the equivalent). |
+| 2 | Close and **Preview** `big.png` again. | The sample shows at once (no "Preparing preview..."): it was built once and reused. |
+| 3 | **Preview** `tiny.png`. | Shown at its own size (40 x 30): a small image is **never enlarged**. |
+| 4 | **Preview** `doc.pdf`. | After "Preparing preview...", page 1 as an image, "Page 1 of 20" in a bar with **Previous page** (disabled) and **Next page**, and the note "Smaller versions of the first 20 of 25 pages." Click **Next page** to page 20: **Next page** is then disabled. **Previous page**, Page Up and Page Down work; the round Previous / Next buttons over the viewer and the arrow keys move between *files* (so the page bar is a different control). |
+| 5 | The dashboard row. | Still **0 downloads**. The sender's "was downloaded" email has not arrived (`/__e2e__/mail/`). |
+| 6 | With `big.png` in the dialog click **View full image**. | The full image shows (open it: 3000 px wide), **View full image** is gone and the footer says "This counted as a download." The dashboard now logs **1 download** of `big.png` ("2 downloads left") and the sender's "was downloaded" email arrives. An **Open in new tab** button is now in the footer: it opens the full image in a new tab (a `blob:` address, no new request in the network panel) and the log still shows **1** download. A text file's full view has no such button. |
+| 7 | Click **Download** in the dialog, and then **Download** on the row of `big.png`. | The file saves with the name `big.png`. In the browser's network panel the dialog's Download makes **no request** (the browser saves what it already has). The log still shows **1** download after the dialog's Download. The row's Download link, on the other hand, goes to the server: because this session's View full counted that file, it is the one free repeat and the log still says 1 (a link opened in a **new tab** of this session behaves the same, once). Click the row's Download **again**: now it is a real download and the log shows 2. |
+| 8 | Click **View full document** on `doc.pdf`. | The whole PDF shows in the browser's PDF viewer inside the dialog, "This counted as a download.", the log has the download of `doc.pdf` (one more). The footer's Download saves `doc.pdf` and adds nothing. **Open in new tab** opens the same PDF in a tab of its own (a `blob:` address); the log still has one download of `doc.pdf`. |
+| 9 | **Max downloads edge.** On the dashboard set Max downloads of `SAMP` to the number of downloads used plus 1, then in the Visitor window **View full image** on `tiny.png`. | It works and shows the file; the transfer has now reached its limit. Reload the page in a clean window: the neutral "no longer available" page. In the first window the dialog is still open: click **Download** in it: it saves `tiny.png` (the blob). Now close and try the row's **Download** link: it saves `tiny.png` once (the guard), and the log still counts that one download only. A second click on it is the neutral "no longer available" page. |
+| 10 | In a clean window (another visitor) with the link of a fresh transfer `SAMP2` (Max downloads 1, `big.png`): **View full image**. | Counts as the last download: the page is "no longer available" for everyone else straight away; this visitor's dialog keeps showing the image and its Download works (once). |
+| 11 | The **fallback** when the browser may not read the bucket: in devtools block every request to the bucket's host for `fetch`/XHR (or run the visitor window with the bucket's CORS rule removed) and **View full image** on another file of a fresh transfer. | The full image is still shown (from the bucket's URL directly); "This counted as a download."; the **Download** that follows is served from the server and the log shows **one** download for that file. |
+| 12 | Sender's dashboard, **Manage** on `SAMP`, look at "Size" / the storage line, and the Costs page. | The stored size is the files' own: the preview pages are **not** part of it and not billed. |
+
+### FT-68 Text and Markdown are a 64 KB sample
+
+**Purpose:** a text preview shows only the start of a long file, and the whole file is one click (and one download) away.
+**Preconditions:** sign in as `qa.user@example.com` and send a transfer `TXT` (Max downloads 5, no recipients) with `short.txt` (`hello`), `long.txt` (a file of the line `line N` repeated up to about 200 KB), `huge.txt` (the line `x` repeated to about 6 MB) and `long.md` (a Markdown file with a `# Title` and then about 100 KB of paragraphs). Open the link in the Visitor window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | **Preview** `short.txt`. | The text; no cut note, no **View full document**. |
+| 2 | **Preview** `long.txt`. | The first lines; the footer says "Showing the first 64 KB." and offers **View full document**. Scroll to the end of the text: it ends near 64 KB (about 5,500 lines), not at 200 KB. Press ArrowLeft / ArrowRight with the focus **inside** the text (click in it): the text scrolls, the dialog does **not** switch file; with the focus on the dialog's buttons the arrows switch files. |
+| 3 | **Preview** `huge.txt`. | The first 64 KB and the note "Showing the first 64 KB. Download the file to read all of it." There is **no** View full document (the file is over 5 MB). |
+| 4 | **Preview** `long.md`. | Formatted by default with the switch; the formatted note about the start of the file may show; **View full document** is offered. |
+| 5 | Click **View full document** on `long.txt`. | The whole file shows (scroll to the end: line 40,000-ish), the footer says "Showing the whole file as plain text." and "This counted as a download."; the dashboard log shows 1 download of `long.txt` (and the downloads-left count went down by one). Click it again after closing and reopening: no extra download is logged. |
+| 6 | **View full document** on `long.md`. | The whole Markdown source as text (the formatted view belongs to the sample), counted once. |
+| 7 | Visit `/t/<slug>/preview/<long.txt id>/` twice. | Both answer `text/plain; charset=utf-8`, at most 65,536 bytes, and no download is logged. Visit `/t/<slug>/preview/<short.txt id>/full/`: 404 (nothing more to show). |
+
+### FT-69 Preview pages are kept, reused and cleaned up
+
+**Purpose:** the downsized pages live with the transfer and are deleted with it, with the file, and by the daily job when nobody uses them.
+**Preconditions:** FT-67's sender and transfer `SAMP` with `big.png` and `doc.pdf` previewed at least once. Shell steps use `python tests_e2e/ai/manage.py` (see the README).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Shell: list the bucket's objects under `transfers/<transfer id>/` (e.g. with the Floci CLI or `S3Storage.list_keys`). | Besides one object per file there are `previews/<file id>/1.webp` for `big.png` and `previews/<file id>/1.webp` ... `20.webp` for `doc.pdf`. |
+| 2 | Shell: `from apps.file_transfer.models import TransferFile; print(list(TransferFile.objects.values_list('name', 'preview_status', 'preview_pages', 'preview_total_pages')))`. | `big.png` ready 1 1; `doc.pdf` ready 20 25. |
+| 3 | Shell: set `preview_last_used_at` of `big.png` to 15 days ago, then run `python tests_e2e/ai/manage.py shell -c "from apps.file_transfer import jobs; jobs.purge_previews()"`. | `big.png`'s `previews/` object is gone and its status is `none`; `doc.pdf`'s pages are still there. The `/admin/core/scheduledjob/` page lists `file_transfer.purge_previews` with a description. |
+| 4 | **Preview** `big.png` again in the Visitor window. | "Preparing preview..." again, then the image: it was built again. |
+| 5 | Sender's dashboard row of a transfer: **Delete now** (a transfer with previews built). | The files **and** the `previews/` objects under the transfer's prefix are gone. |
+| 6 | In a request (FT-54 onwards) that has an image uploaded by a visitor and previewed after it was marked done (**Preview** shows after Done), the owner **Remove** the file in the dashboard. | The file's `previews/<file id>/` objects are deleted with it. |
+| 7 | Take down a transfer that has previews (admin, ADM-21). | The previews are deleted with the files; the public page is the neutral one. |
+| 8 | Upload a corrupt "PNG" (the PNG signature followed by garbage, 2 KB) and **Preview** it. | The dialog says "Preview not available for this file." (no retry button) and still offers **View full image** and **Download**. A second click gives the same without "Preparing preview...". |
+| 9 | Upload a PDF over 50 MB and an image over 100 megapixels (a 12000 x 9000 PNG), **Preview** each. | Both say "Preview not available for this file." (they are never read for a preview / refused before decoding) and offer View full and Download. |
+
+### FT-70 Pasting an image from the clipboard
+
+**Purpose:** an image in the clipboard is one more way to add a file (issue #313): named after the time, converted to WebP, text ignored.
+**Preconditions:** signed in as `qa.user@example.com` on `/transfer/send/` with a fresh draft. A real browser can paste a real screenshot with Ctrl+V / Cmd+V (copy one first, e.g. Cmd+Shift+Ctrl+4 on a Mac); when the clipboard cannot be filled, run this in the page's console where a step says "paste" (the `selector` and `what` arguments are the last line):
+
+```js
+// Paste an image (or `what` = 'text' | 'pdf' | 'image+text') into `selector` (empty = the page).
+(async (selector, what) => {
+  const dt = new DataTransfer();
+  if (what.startsWith('image')) {
+    const c = Object.assign(document.createElement('canvas'), { width: 60, height: 40 });
+    c.getContext('2d').fillRect(0, 0, 60, 40);
+    dt.items.add(new File([await new Promise(r => c.toBlob(r, 'image/png'))], 'image.png', { type: 'image/png' }));
+  }
+  if (what === 'pdf') dt.items.add(new File(['%PDF-1.4 x'], 'doc.pdf', { type: 'application/pdf' }));
+  if (what === 'text' || what === 'image+text') dt.setData('text/plain', 'just some text');
+  const e = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+  (selector ? document.querySelector(selector) : document.body).dispatchEvent(e);
+  return e.defaultPrevented;   // true = the page took it
+})('', 'image')
+```
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Look under the drop zone's buttons. | The small line "You can also paste an image: Ctrl+V" (**⌘V** on a Mac) is visible. It is not shown on a phone or tablet with no mouse. |
+| 2 | Copy some text, click on the page background and paste (Ctrl+V). | Nothing happens: no row is added, no error. |
+| 3 | Paste an image (a screenshot). | A row appears named like `2026-11-15-21-03-07.webp` (the local time of the paste; `.webp` in Chrome and Firefox), with a size and a progress bar, and ends with the green check. A screen reader hears "Pasted ... from the clipboard." |
+| 4 | Paste two images within the same second (the console snippet with `'image'` twice in one call, or paste, paste quickly). | The names differ: the second ends `-2` before the extension. |
+| 5 | Focus the Message field of the send form, copy some text and paste. | The text goes into the field as usual; no file is added. |
+| 6 | Paste a PDF file copied in the file manager. | Nothing is added (only images are taken); the Choose files button is the way. |
+| 7 | **Send** the transfer with the pasted images and open the link in the Visitor window. | The files are listed and download with their timestamp names; the downloaded `.webp` opens as the image that was pasted. |
+| 5b | Focus the Message (or recipients) box and paste an image alone (a screenshot). | Nothing is added and nothing is uploaded: the browser does what it does with an image in a text box. |
+| 5c | In the file manager copy a real image file (`diagram.png`, then a `.jpg`) and paste on the page background. | Rows named `<time>.png` and `<time>.jpg`: the original format and bytes are kept (compare the size with the file's). A screenshot, in contrast, ends in `.webp`. |
+| 5d | Cut the network (DevTools > Offline) in the middle of a pasted image's upload, then go online. | The row is **Paused** with "Upload interrupted by a network error." and a **Retry** button (not "Choose the file"); Retry finishes the upload. |
+| 8 | Open the anonymous send page (`/transfer/send/anon/`, if enabled) and a file request link (FT-54) in the Visitor window and paste an image on each. | Both take it the same way (hint, row, check). On a request that is **Done** (the download page) there is no hint and a paste does nothing. |
+
+### FT-71 Titles: optional on a send and on a request
+
+**Purpose:** a send and a request can have a title; without one the dashboard names a send by its first file and a request "Untitled request", and a title is never in an email subject (issue #318).
+**Preconditions:** signed in as `qa.user@example.com` with credits; the mail page `/__e2e__/mail/` works (emails.md MAIL-01). Uses fresh drafts; each send needs one uploaded file (`titled.txt`, `plain.txt`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/transfer/send/`, upload `titled.txt`. Title `Q3 <b>report</b>`, Recipients `qa.title@example.com`, **Send**. | The sent page shows "Q3 <b>report</b>" as plain text above the heading (no bold) and "Your transfer is on its way". |
+| 2 | `/transfer/` > Sent. | The row is named **Q3 <b>report</b>** (not `titled.txt`), with "1 file". |
+| 3 | Open the transfer's download link in the Visitor window. | The page heading is **Q3 <b>report</b>** (escaped text), the browser title "Q3 <b>report</b> - ZipTrigo", and the file `titled.txt` is listed below. |
+| 4 | `/__e2e__/mail/?to=qa.title@example.com` and `?to=qa.user@example.com`. | Recipient: subject `titled.txt was sent to you via ZipTrigo` (no title), body starting `Title: Q3 <b>report</b>`, a blank line, then "You have received a file: titled.txt." The sender's copy: subject `Your transfer "titled.txt" is on its way`, body `Your transfer "Q3 <b>report</b>" was sent to: ...`. |
+| 5 | New send with `plain.txt` and **no** title. | The row is named `plain.txt`; the download page heading is `plain.txt`; no `Title:` line in the recipient email; the sent page has no title line. |
+| 6 | New send: Title of 101 characters (remove the `maxlength` first, as FT-54 step 6), **Send**. | Red box "Title: Ensure this value has at most 100 characters (it has 101)."; nothing is sent, the file stays listed. |
+| 7 | `/transfer/request/new/`: leave **Title (optional)** empty, **Create the request**. | The created page says "Share this link with the people you want files from." (no title after the colon). The Requests tab names the row **Untitled request**; its Manage > Settings **Title** box is empty and not required. |
+| 8 | Open that request's link in the Visitor window. | The heading is **Upload files** (and the browser title "Upload files - ZipTrigo"); "Untitled request" appears nowhere on the public page. |
+| 9 | Settings of a titled request: clear **Title**, **Save**. | The row becomes **Untitled request**; saving works with an empty title. |
+| 10 | Anonymous sending (`/transfer/send/anon/`, if enabled in FT-31): the form has **Title (optional)** after Recipients; a title typed there shows on the anonymous sent page and the download page after confirmation. | As the logged-in send; the confirmation email subject has no title. |
+| 11 | (API / CLI, shell) With a token from `inv filetransfer login`, `inv filetransfer send local <file> --title "CLI title"` then `inv filetransfer list local`; `inv filetransfer request-create local --signed-in`; `inv filetransfer requests local`. | The send is listed as `CLI title`; the request is created with no title and listed as `(untitled)`. |
+
 ## Out of scope
 
-- **Rate limits** (`FT_UPLOAD_USER`, `FT_DOWNLOAD_IP`, `FT_UNLOCK_*`, `FT_REPORT_*`,
+- **Rate limits** (`FT_UPLOAD_USER`, `FT_DOWNLOAD_IP`, `FT_PREVIEW_IP`, `FT_UNLOCK_*`, `FT_REPORT_*`,
   `FT_RECIPIENT_EMAIL_USER`, the anonymous ones): switched off on this server. Unit tests cover
   them.
 - **Admin moderation** (takedown, the block list and its "Sending isn't available" page, the

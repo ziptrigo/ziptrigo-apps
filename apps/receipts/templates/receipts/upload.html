@@ -46,6 +46,7 @@
                 <i class="fas fa-camera mr-2" aria-hidden="true"></i>Take photo
             </button>
         </div>
+        {% include 'core/partials/paste_hint.html' with id='paste-hint' %}
         <p class="text-xs text-gray-500 dark:text-gray-400">
             {{ allowed_labels|join:', ' }} &middot; up to {{ max_file_bytes|human_size }} &middot;
             {% if price_per_file %}{{ price_per_file }} credit{{ price_per_file|pluralize }} each{% else %}free{% endif %}
@@ -68,5 +69,6 @@
 
 {% block receipts_js %}
 <script src="{% static 'core/js/drop_zone.js' %}"></script>
+<script src="{% static 'core/js/clipboard_paste.js' %}"></script>
 <script src="{% static 'receipts/js/upload.js' %}"></script>
 {% endblock %}

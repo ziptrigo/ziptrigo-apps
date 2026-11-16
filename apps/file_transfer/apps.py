@@ -89,6 +89,19 @@ class FileTransferConfig(AppConfig):
         )
         register_job(
             JobSpec(
+                name='file_transfer.purge_previews',
+                func=jobs.purge_previews,
+                description=(
+                    'Deletes the downsized preview pages of images and PDFs that nobody has '
+                    'previewed for 14 days; they are built again the next time someone '
+                    'clicks Preview.'
+                ),
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
+        register_job(
+            JobSpec(
                 name='file_transfer.send_request_notices',
                 func=jobs.send_request_notices,
                 description=(

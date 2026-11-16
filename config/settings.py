@@ -579,6 +579,12 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'FT_RECIPIENT_EMAIL_USER': (30, 60 * 60),
     # -- file_transfer: public download page (`/t/<slug>/`) --
     'FT_DOWNLOAD_IP': (120, 60),
+    # File previews (issue #311, `/t/<slug>/preview/<file id>/`), per IP, charged like the
+    # download page's (before anything is looked up). Every preview the dialog opens, or steps
+    # to with the arrow keys, is one request; text and media files each cost an S3 read or a
+    # signature, and nothing is counted as a download. A person looking through a transfer of a
+    # hundred photos stays well inside it; a script does not.
+    'FT_PREVIEW_IP': (240, 60),
     # Password attempts (issue #53 code review, same split as login): `FT_UNLOCK_IP` stays a
     # strict, every-attempt-counts per-IP limit; `FT_UNLOCK_TRANSFER` becomes a looser per-transfer
     # ceiling that counts only *wrong* passwords, so a third party who merely knows (or guesses) a
@@ -902,6 +908,19 @@ RECEIPTS_DOCUMENT_MEMORY_MB = int(os.getenv('RECEIPTS_DOCUMENT_MEMORY_MB', '1024
 RECEIPTS_DOCUMENT_CPU_SECONDS = float(os.getenv('RECEIPTS_DOCUMENT_CPU_SECONDS', '25'))
 RECEIPTS_DOCUMENT_TIMEOUT_SECONDS = float(os.getenv('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', '60'))
 RECEIPTS_DOCUMENT_CHILD_USER = os.getenv('RECEIPTS_DOCUMENT_CHILD_USER', 'nobody')
+
+# File transfer's downsized previews of images and PDFs (issue #311) are decoded the same way, in a
+# child process under a budget (`apps.file_transfer.services.renditions`; `rendition_render.py` is
+# the child). The defaults match Receipts'. Off under pytest: unit tests reduce in-process.
+FILE_TRANSFER_PREVIEW_SANDBOX = os.getenv(
+    'FILE_TRANSFER_PREVIEW_SANDBOX', 'False' if _RUNNING_TOOLING else 'True'
+).lower() in ('true', '1')
+FILE_TRANSFER_PREVIEW_MEMORY_MB = int(os.getenv('FILE_TRANSFER_PREVIEW_MEMORY_MB', '1024'))
+FILE_TRANSFER_PREVIEW_CPU_SECONDS = float(os.getenv('FILE_TRANSFER_PREVIEW_CPU_SECONDS', '25'))
+FILE_TRANSFER_PREVIEW_TIMEOUT_SECONDS = float(
+    os.getenv('FILE_TRANSFER_PREVIEW_TIMEOUT_SECONDS', '60')
+)
+FILE_TRANSFER_PREVIEW_CHILD_USER = os.getenv('FILE_TRANSFER_PREVIEW_CHILD_USER', 'nobody')
 
 RECEIPTS_S3_BUCKET = os.getenv('RECEIPTS_S3_BUCKET', '')
 RECEIPTS_S3_REGION = os.getenv('RECEIPTS_S3_REGION', AWS_REGION)

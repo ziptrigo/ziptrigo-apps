@@ -19,7 +19,7 @@ from apps.core.datetime_format import format_utc
 from apps.core.services.email import send_email
 
 from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
-from .naming import transfer_display_name
+from .naming import transfer_display_name, transfer_file_label
 
 
 def dashboard_url() -> str:
@@ -36,7 +36,9 @@ def send_transfer_notification(transfer_id: str, recipient_email: str) -> None:
 
     name = transfer_display_name(transfer)
     names = [f.name for f in transfer.files.filter(uploaded=True)]
-    body_lines = [_received_line(names, name), '']
+    # The sender's optional title (issue #318) leads the body, never the subject.
+    body_lines = [f'Title: {transfer.title}', ''] if transfer.title else []
+    body_lines += [_received_line(names, name), '']
     if transfer.message:
         body_lines += [transfer.message, '']
     body_lines.append(f'Download: {transfer.absolute_download_url}')
@@ -45,7 +47,7 @@ def send_transfer_notification(transfer_id: str, recipient_email: str) -> None:
 
     # The same list as the body: `name` is the first file of any state, which may be one still
     # uploading and so not part of the transfer.
-    first = names[0] if names else name
+    first = names[0] if names else transfer_file_label(transfer)
     others = len(names) - 1
     subject_name = (
         f'{first} and {others} more file{"s" if others != 1 else ""}' if others > 0 else first
@@ -85,17 +87,22 @@ def send_sender_copy(transfer_id: str) -> None:
         return
 
     name = transfer_display_name(transfer)
+    # The subject names the first file, never the title (free text; issue #318).
+    subject_name = transfer_file_label(transfer)
     recipients = ', '.join(r.email for r in transfer.recipients.all())
+    if recipients:
+        first_line = f'Your transfer "{name}" was sent to: {recipients}.'
+        subject = f'Your transfer "{subject_name}" is on its way'
+    else:
+        # A transfer with no recipients (issue #310): nobody was emailed, the sender shares it.
+        first_line = f'Your transfer "{name}" is ready. Nobody was emailed: share the link below.'
+        subject = f'Your transfer "{subject_name}" is ready to share'
     body = (
-        f'Your transfer "{name}" was sent to: {recipients}.\n\n'
+        f'{first_line}\n\n'
         f'Download link: {transfer.absolute_download_url}\n'
         f'Manage this transfer: {dashboard_url()}'
     )
-    send_email(
-        to=transfer.owner.email,
-        subject=f'Your transfer "{name}" is on its way',
-        text_body=body,
-    )
+    send_email(to=transfer.owner.email, subject=subject, text_body=body)
 
 
 @task
@@ -143,7 +150,7 @@ def send_expires_soon_notification(transfer_id: str) -> None:
     name = transfer_display_name(transfer)
     send_email(
         to=transfer.owner.email,
-        subject=f'Your transfer "{name}" expires tomorrow',
+        subject=f'Your transfer "{transfer_file_label(transfer)}" expires tomorrow',
         text_body=(
             f'Your transfer "{name}" expires tomorrow'
             f'{f" ({format_utc(transfer.expires_at)} UTC)" if transfer.expires_at else ""}.\n\n'
@@ -170,7 +177,7 @@ def send_suspended_notification(transfer_id: str) -> None:
     needed = daily_cost(transfer)
     send_email(
         to=transfer.owner.email,
-        subject=f'Your transfer "{name}" was suspended (out of credits)',
+        subject=f'Your transfer "{transfer_file_label(transfer)}" was suspended (out of credits)',
         text_body=(
             f'Your transfer "{name}" ran out of credits and has been suspended: the download '
             'link is no longer working.\n\n'
@@ -208,12 +215,12 @@ def send_files_deleted_notification(transfer_id: str) -> None:
 
     name = transfer_display_name(transfer)
     if transfer.status == TransferStatus.TAKEN_DOWN:
-        subject = f'Your transfer "{name}" was removed'
+        subject = f'Your transfer "{transfer_file_label(transfer)}" was removed'
         body_lines = [f'Your transfer "{name}" was removed and its files are no longer available.']
         if transfer.takedown_reason:
             body_lines += ['', f'Reason: {transfer.takedown_reason}']
     else:
-        subject = f'Files for "{name}" have been deleted'
+        subject = f'Files for "{transfer_file_label(transfer)}" have been deleted'
         body_lines = [
             f'The files for your transfer "{name}" have been deleted and are no longer available.'
         ]

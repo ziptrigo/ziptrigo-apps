@@ -97,7 +97,7 @@ def test_send_submit_validation_error_returns_422(client, draft_transfer, upload
 
     response = client.post(
         url,
-        data={'recipients': '', 'expiry_choice': 'none'},
+        data={'recipients': 'not an email', 'expiry_choice': 'none'},
         HTTP_HX_REQUEST='true',
     )
 
@@ -118,6 +118,79 @@ def test_send_submit_success_redirects_to_sent_page(client, draft_transfer, uplo
     assert response['HX-Redirect'] == reverse('file_transfer:sent', args=[draft_transfer.id])
     draft_transfer.refresh_from_db()
     assert draft_transfer.status == TransferStatus.ACTIVE
+
+
+def test_send_page_says_recipients_are_optional(client, funded_user):
+    client.force_login(funded_user)
+    html = client.get(reverse('file_transfer:send')).content.decode()
+    assert 'Recipients (optional)' in html
+    assert 'Leave it empty to just get a link to share yourself.' in html
+    assert 'required' not in html.split('id="id_recipients"')[1].split('>')[0]
+
+
+def test_send_without_recipients_succeeds_and_the_sent_page_hands_over_the_link(
+    client, draft_transfer, uploaded_file
+):
+    """Issue #310: recipients are optional; the sent page doesn't claim anyone was emailed."""
+    client.force_login(draft_transfer.owner)
+    url = reverse('file_transfer:send-submit', args=[draft_transfer.id])
+
+    response = client.post(
+        url, data={'recipients': '', 'expiry_choice': 'none'}, HTTP_HX_REQUEST='true'
+    )
+
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.ACTIVE
+    assert not draft_transfer.recipients.exists()
+    sent = client.get(response['HX-Redirect']).content.decode()
+    assert 'Your files are ready' in sent
+    assert 'We emailed the recipients' not in sent
+    assert draft_transfer.absolute_download_url in sent
+    assert 'copy-link-btn' in sent
+
+
+def test_sent_page_with_recipients_still_says_they_were_emailed(
+    client, draft_transfer, uploaded_file
+):
+    client.force_login(draft_transfer.owner)
+    url = reverse('file_transfer:send-submit', args=[draft_transfer.id])
+    client.post(
+        url, data={'recipients': 'a@example.com', 'expiry_choice': 'none'}, HTTP_HX_REQUEST='true'
+    )
+    sent = client.get(reverse('file_transfer:sent', args=[draft_transfer.id])).content.decode()
+    assert 'We emailed the recipients' in sent
+
+
+def test_dashboard_row_of_a_transfer_with_no_recipients(client, draft_transfer, uploaded_file):
+    client.force_login(draft_transfer.owner)
+    client.post(
+        reverse('file_transfer:send-submit', args=[draft_transfer.id]),
+        data={'recipients': '', 'expiry_choice': 'none'},
+        HTTP_HX_REQUEST='true',
+    )
+    response = client.get(reverse('file_transfer:dashboard'))
+    assert response.status_code == 200
+    assert 'No recipients: nobody was emailed' in response.content.decode()
+
+
+def test_recipients_can_be_added_later_to_a_transfer_sent_with_none(
+    client, draft_transfer, uploaded_file, sent_emails, django_capture_on_commit_callbacks
+):
+    client.force_login(draft_transfer.owner)
+    client.post(
+        reverse('file_transfer:send-submit', args=[draft_transfer.id]),
+        data={'recipients': '', 'expiry_choice': 'none'},
+        HTTP_HX_REQUEST='true',
+    )
+    with django_capture_on_commit_callbacks(execute=True):
+        response = client.post(
+            reverse('file_transfer:add-recipients', args=[draft_transfer.id]),
+            data={'recipients': 'late@example.com'},
+            HTTP_HX_REQUEST='true',
+        )
+    assert response.status_code == 200
+    assert list(draft_transfer.recipients.values_list('email', flat=True)) == ['late@example.com']
 
 
 def test_send_submit_insufficient_credits(client, draft_transfer, uploaded_file):
@@ -171,7 +244,7 @@ def test_send_submit_error_names_the_field_for_the_page(client, draft_transfer, 
     url = reverse('file_transfer:send-submit', args=[draft_transfer.id])
 
     response = client.post(
-        url, data={'recipients': '', 'expiry_choice': 'none'}, HTTP_HX_REQUEST='true'
+        url, data={'recipients': 'nope', 'expiry_choice': 'none'}, HTTP_HX_REQUEST='true'
     )
     html = response.content.decode()
 

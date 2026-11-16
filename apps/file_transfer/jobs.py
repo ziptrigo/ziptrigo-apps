@@ -1,4 +1,4 @@
-"""The four jobs `file_transfer` registers with `apps.core.scheduler` (spec section 10), wired up
+"""The jobs `file_transfer` registers with `apps.core.scheduler` (spec section 10), wired up
 from `apps/file_transfer/apps.py`. Every job is idempotent: the scheduler is at-least-once, so a
 job can run twice for the same tick.
 """
@@ -27,6 +27,7 @@ from .services.metering import (
     meter_transfer,
     reenable_suspended_transfers_for_user,
 )
+from .services.renditions import purge_unused as purge_unused_previews
 from .services.request_notices import send_due_notices
 from .services.requests import cleanup_abandoned_files
 from .services.storage import GET_URL_EXPIRES_SECONDS
@@ -224,6 +225,13 @@ def purge_download_ips() -> None:
     TransferFile.objects.filter(created_at__lte=cutoff, uploader_ip__isnull=False).update(
         uploader_ip=None
     )
+
+
+def purge_previews() -> None:
+    """Daily: delete the downsized preview pages (issue #311) of files nobody previewed for
+    `renditions.PREVIEW_CACHE_DAYS` days and reset them, so the next click builds them again. A
+    file that fails is logged and skipped inside `purge_unused`."""
+    purge_unused_previews()
 
 
 def send_request_notices() -> None:

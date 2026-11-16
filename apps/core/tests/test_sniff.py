@@ -1,6 +1,6 @@
 import pytest
 
-from apps.core.services.sniff import sniff_inline_type
+from apps.core.services.sniff import looks_like_text, sniff_inline_type
 from apps.core.services.storage import INLINE_CONTENT_TYPES
 
 pytestmark = [pytest.mark.unit]
@@ -38,3 +38,36 @@ def test_recognises_the_inline_types(head, expected):
 )
 def test_anything_else_is_none(head):
     assert sniff_inline_type(head) is None
+
+
+@pytest.mark.parametrize(
+    'head',
+    [
+        b'hello world\n',
+        'café, naïve 日本語\n'.encode(),
+        b'\xef\xbb\xbfwith a byte order mark',
+        b'a,b,c\r\n1,2,3\r\n\tx\x0c',
+        b'<!DOCTYPE html><script>alert(1)</script>',  # text, which a caller shows inert
+        'abcé'.encode()[:-1],  # a multi-byte character cut at the end
+    ],
+)
+def test_looks_like_text(head):
+    assert looks_like_text(head)
+
+
+@pytest.mark.parametrize(
+    'head',
+    [
+        b'',
+        b'\x00',
+        b'abc\x00def',
+        b'\x89PNG\r\n\x1a\n',
+        b'\xff\xfe a\x00b\x00',  # UTF-16
+        b'\xc3\x28 invalid utf-8',
+        b'bell\x07',
+        b'escape\x1b[0m',
+        b'del\x7f',
+    ],
+)
+def test_does_not_look_like_text(head):
+    assert not looks_like_text(head)

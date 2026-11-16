@@ -370,7 +370,7 @@ class Transfer(models.Model):
             blank=True,
             default='',
             db_default='',
-            help_text="A request's title (required for a request, blank for a send).",
+            help_text='An optional title the owner gave the transfer or request (issue #318).',
         ),
     )
     upload_audience = cast(
@@ -539,10 +539,12 @@ class Transfer(models.Model):
         return self.held_for_review_at is not None
 
     @property
-    def display_name(self) -> str:
-        """The dashboard/email name for a transfer: its first file's name (spec section 2 -- there's
-        no title field). A plain model property (rather than only a service function) so templates
-        can use it directly.
+    def file_label(self) -> str:
+        """What a *send* is called when the owner gave it no title: its first file's name ("Untitled
+        transfer" when there is no file yet). It is also what the email subjects of a send use,
+        since a send's title is free text the owner typed (issue #318). A request has no files of
+        its own to name it by, so its label is its title ("Untitled request" without one), as
+        its owner-only emails always named it.
 
         Deliberately `self.files.first()` rather than `self.files.order_by(...).first()`:
         `TransferFile.Meta.ordering` already sorts by `('created_at', 'id')`, and an explicit
@@ -554,6 +556,14 @@ class Transfer(models.Model):
             return self.title or 'Untitled request'
         first = self.files.first()
         return first.name if first else 'Untitled transfer'
+
+    @property
+    def display_name(self) -> str:
+        """The dashboard/page/email-body name for a transfer: the owner's optional title (issue
+        #318), else `file_label`. A plain model property (rather than only a service function) so
+        templates can use it directly. `display_name` relies on `files` being prefetched, as
+        `file_label` does, when there is no title."""
+        return self.title or self.file_label
 
     @property
     def download_count(self) -> int:

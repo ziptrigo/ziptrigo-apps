@@ -2,7 +2,7 @@
 flipping a draft to `ACTIVE` (spec section 2, logged-in senders only in phase 1).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from django.core.exceptions import ValidationError
@@ -24,7 +24,8 @@ MIN_BALANCE_TO_SEND = 1
 
 @dataclass(slots=True)
 class SendOptions:
-    recipients: list[str]
+    recipients: list[str] = field(default_factory=list)
+    title: str = ''
     message: str = ''
     expiry_choice: str = 'none'
     expiry_date: datetime | None = None
@@ -36,11 +37,12 @@ class SendOptions:
 def validate_send_options(options: SendOptions, settings_row: FileTransferSettings) -> list[str]:
     """Validate everything about `options` except the sender's balance and the files themselves
     (those are checked separately, since the view surfaces them differently). Returns the
-    deduplicated recipient list."""
+    deduplicated recipient list, which may be empty."""
+    limits.clean_title(options.title)
     limits.validate_message(options.message)
+    # Recipients are optional (issue #310): with none, nobody is emailed and the sender shares
+    # the link themselves. (An anonymous send still needs one: `services.anonymous`.)
     recipients = limits.validate_recipients(options.recipients, settings_row)
-    if not recipients:
-        raise ValidationError('Add at least one recipient.')
     if options.max_downloads is not None and options.max_downloads < 1:
         raise ValidationError('Max downloads must be at least 1.')
     # Raises if the expiry choice/date themselves are invalid; the resolved value is recomputed
@@ -51,7 +53,8 @@ def validate_send_options(options: SendOptions, settings_row: FileTransferSettin
 
 def finalize_send(transfer: Transfer, options: SendOptions, *, ip: str | None = None) -> Transfer:
     """Complete a draft transfer: verify files and balance, apply the sender's options, mark it
-    `ACTIVE`, and queue the recipient + sender emails.
+    `ACTIVE`, and queue the recipient + sender emails (no recipient email when there are no
+    recipients: the sender still gets their own copy, with the link).
 
     Raises:
         ValidationError: an option is invalid, no files have finished uploading, or the owner's
@@ -88,6 +91,7 @@ def finalize_send(transfer: Transfer, options: SendOptions, *, ip: str | None = 
                 f'You need at least {MIN_BALANCE_TO_SEND} credit to send a transfer.'
             )
 
+        locked.title = limits.clean_title(options.title)
         locked.message = options.message
         locked.expires_at = resolve_expiry(options.expiry_choice, options.expiry_date)
         locked.max_downloads = options.max_downloads

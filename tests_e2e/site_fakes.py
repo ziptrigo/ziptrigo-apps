@@ -69,7 +69,13 @@ class FileTransferE2EStorage(FakeS3Storage):
         )
 
     def presigned_get_url(self, key: str, filename: str, *args, **kwargs) -> str:
-        return f'{settings.BASE_URL}/__e2e__/ft-s3/{key}?filename={quote(filename)}'
+        super().presigned_get_url(key, filename, *args, **kwargs)
+        url = f'{settings.BASE_URL}/__e2e__/ft-s3/{key}?filename={quote(filename)}'
+        if kwargs.get('disposition', 'attachment') == 'inline':
+            url += '&disposition=inline'
+        if kwargs.get('content_type'):
+            url += f'&type={quote(kwargs["content_type"])}'
+        return url
 
 
 @csrf_exempt
@@ -91,9 +97,13 @@ def ft_fake_bucket(request: HttpRequest, key: str) -> HttpResponse:
         data = fake.objects.get(key)  # ty: ignore[unresolved-attribute]
         if data is None:
             return HttpResponse('NoSuchKey', status=404)
-        response = HttpResponse(data, content_type='application/octet-stream')
+        # Like S3 with `ResponseContentType` / `ResponseContentDisposition` in the URL.
+        response = HttpResponse(
+            data, content_type=request.GET.get('type', 'application/octet-stream')
+        )
         filename = request.GET.get('filename', 'download')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        disposition = 'inline' if request.GET.get('disposition') == 'inline' else 'attachment'
+        response['Content-Disposition'] = f'{disposition}; filename="{filename}"'
         return response
     return HttpResponse(status=405)
 

@@ -77,15 +77,16 @@ class ReceiptsServer:
         self.password = password
         self._env = env
 
-    def shell(self, code: str) -> None:
-        """Run `code` in a Django shell against the same database as the server."""
-        subprocess.run(
+    def shell(self, code: str) -> str:
+        """Run `code` in a Django shell against the same database as the server; what it prints."""
+        result = subprocess.run(
             [sys.executable, 'manage.py', 'shell', '-c', code],
             env=self._env,
             check=True,
             capture_output=True,
             text=True,
         )
+        return result.stdout
 
     def login(self, page) -> None:
         page.goto(f'{self.url}/account/login/')

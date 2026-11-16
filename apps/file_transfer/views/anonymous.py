@@ -37,7 +37,7 @@ from apps.core.services.email_verification import (
 )
 
 from .. import services
-from ..forms import AnonymousSendOptionsForm, ConfirmCodeForm
+from ..forms import AnonymousSendOptionsForm, ConfirmCodeForm, add_service_errors
 from ..models import FileTransferSettings, Transfer, TransferStatus
 from ..services.blocklist import is_blocked
 from ..services.storage import PART_SIZE_BYTES
@@ -195,7 +195,7 @@ def start_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpResp
             transfer, form.to_anonymous_send_options(), ip=client_ip(request), cookie_id=cookie_id
         )
     except ValidationError as exc:
-        form.add_error(None, exc.messages[0])
+        add_service_errors(form, exc)
         return _finish(request, _upload_errors(request, form), cookie_id)
     except ResendTooSoon as exc:
         form.add_error(None, f'Please wait {exc.retry_after_seconds}s before trying again.')
