@@ -106,8 +106,10 @@ def render_page(
         'sidebar_filters': saved_filters,
         'sidebar_more': more_filters,
         'show_sidebar_search': True,
-        **projects_context(request.user),
     }
+    # A view that already read the projects (`projects_context`) passes them in its context.
+    if not context or 'sidebar_projects' not in context:
+        page_context.update(projects_context(request.user))
     page_context.update(context or {})
     return render(request, template, page_context, status=status)
 
@@ -115,10 +117,12 @@ def render_page(
 def projects_context(user) -> dict:
     """What the sidebar's Projects block and the project controls of every page need (the quick-add
     select, the Move dialog): the active projects with their open counts, and how many are
-    archived. One query for all of it."""
+    archived. One query for all of it. `all_projects` is every project (archived ones too), for a
+    view that needs them without asking again."""
     everything = list(projects.list_projects(user, archived=None))
     active = [project for project in everything if not project.is_archived]
     return {
+        'all_projects': everything,
         'todo_projects': active,
         'sidebar_projects': active[: projects.SIDEBAR_LIMIT],
         'sidebar_projects_more': max(len(active) - projects.SIDEBAR_LIMIT, 0),

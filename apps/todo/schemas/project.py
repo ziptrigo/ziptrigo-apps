@@ -108,7 +108,8 @@ class ProjectTaskOrderSchema(Schema):
     """Body for `POST /projects/{id}/tasks/reorder`: the hand-made order of **one list** of the
     project's page. `section` is the list: a section id, or `null` for the tasks with no section.
     `ids` are task ids (not numbers) in the order wanted; ids that are not the caller's non-trashed
-    tasks of this project are ignored. A task listed that is in another section **joins this one**,
+    tasks of this project are ignored. **The list need not be complete**: the tasks sent swap the
+    places they already hold in the list, and the others keep theirs. A task listed that is in another section **joins this one**,
     with its subtasks; a subtask listed alone stays with its parent."""
 
     model_config = ConfigDict(extra='forbid')

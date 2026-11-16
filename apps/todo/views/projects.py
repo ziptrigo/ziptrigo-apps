@@ -14,7 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -69,10 +69,12 @@ def _tab(request: AuthenticatedHttpRequest) -> str:
 
 
 def _list_context(request: AuthenticatedHttpRequest, tab: str) -> dict:
-    everything = list(projects.list_projects(request.user, archived=None))
+    listed = projects_context(request.user)  # one read for the list and the sidebar
+    everything = listed['all_projects']
     active = [project for project in everything if not project.is_archived]
     archived = [project for project in everything if project.is_archived]
     return {
+        **listed,
         'tab': tab,
         'tabs': [(key, label, len(active if key == 'active' else archived)) for key, label in TABS],
         'projects': archived if tab == 'archived' else active,
@@ -88,7 +90,7 @@ def _list_response(request: AuthenticatedHttpRequest) -> HttpResponse:
     if not is_htmx(request):
         return redirect(_list_url(tab))
     context = _list_context(request, tab)
-    context.update(projects_context(request.user), clear_msg=True, oob_sidebar=True)
+    context.update(clear_msg=True, oob_sidebar=True)
     return render(request, 'todo/partials/project_list.html', context)
 
 
@@ -111,6 +113,15 @@ def _create(request: AuthenticatedHttpRequest) -> HttpResponse:
     form = ProjectForm(request.POST)
     if not form.is_valid():
         return refuse(request, form_error_lines(form), retarget=SLOT, fallback=_list_url())
+    try:  # a refusal spends no budget
+        projects.check_new_project(
+            request.user,
+            form.cleaned_data['name'],
+            form.cleaned_data['color'],
+            form.cleaned_data['description'],
+        )
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), retarget=SLOT, fallback=_list_url())
     if (response := limited(request, 'TODO_EDIT_USER', retarget=SLOT)) is not None:
         return response
     try:
@@ -261,8 +272,12 @@ def project_page(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpRes
     `priority`, `created`, `title` with `?dir=`). `?closed=1` adds the closed tasks in their own
     block below, 50 a page (`?page=`). The open tasks are not paged (sections and dragging work on
     the whole list); beyond `PROJECT_PAGE_LIMIT` the page points at the search."""
-    project = projects.with_counts(_owned(request, project_id))
     user = request.user
+    listed = projects_context(user)  # every project with its counts: this one is among them
+    project = next((item for item in listed['all_projects'] if item.pk == project_id), None)
+    if project is None:
+        raise Http404('Project not found')
+    project.user = user
     today = user_today(user)
     sort = request.GET.get('sort', '')
     sort = sort if sort in PROJECT_SORTS else PROJECT_SORT_DEFAULT
@@ -311,6 +326,7 @@ def project_page(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpRes
         'page_url': _project_url(project),
         'default_color': DEFAULT_LABEL_COLOR,
         'current_project_id': project.pk,
+        **listed,
     }
     if show_closed:
         closed = decorate(
@@ -367,6 +383,10 @@ def section_add(request: AuthenticatedHttpRequest, project_id: UUID) -> HttpResp
     form = SectionForm(request.POST)
     if not form.is_valid():
         return refuse(request, form_error_lines(form), fallback=_project_url(project))
+    try:  # a refusal spends no budget
+        projects.check_new_section(project, form.cleaned_data['name'])
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), fallback=_project_url(project))
     if (response := limited(request, 'TODO_EDIT_USER')) is not None:
         return response
     try:
@@ -386,6 +406,10 @@ def section_edit(
     form = SectionForm(request.POST)
     if not form.is_valid():
         return refuse(request, form_error_lines(form), fallback=_project_url(project))
+    try:  # a refusal spends no budget
+        projects.check_section_name(section, form.cleaned_data['name'])
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), fallback=_project_url(project))
     if (response := limited(request, 'TODO_EDIT_USER')) is not None:
         return response
     try:
@@ -434,6 +458,10 @@ def section_reorder(request: AuthenticatedHttpRequest, project_id: UUID) -> Http
             ids.append(UUID(raw))
         except ValueError:
             return refuse(request, 'Could not read the new order.')
+    try:
+        projects.require_active(project)  # an archived project's sections are frozen
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc))
     if (response := limited(request, 'TODO_EDIT_USER')) is not None:
         return response
     projects.reorder_sections(project, ids)
@@ -460,20 +488,24 @@ def task_move(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     # `section` (only when the request has it: the task page's Section select) puts the task in a
     # section of its project; a move to another project always leaves it in none.
     try:
-        target = projects.check_move(task, form.cleaned_data['project'])
-        # The Project and Section selects are one form, so a change of project also posts the
-        # section of the project being left: it only counts while the project stays the same.
-        same_project = (target.pk if target is not None else None) == task.project_id
+        posted = form.cleaned_data['project']
+        # The Project and Section selects are one form, so a change of section posts the project
+        # too, and a change of project posts the section of the project being left. The project
+        # the task already has is not judged again (an archived one would be refused as a
+        # target); the section only counts while the project stays the same.
+        same_project = str(posted or '') == str(task.project_id or '')
+        target = task.project if same_project else projects.check_move(task, posted)
         with_section = 'section' in request.POST and same_project
         if with_section:
-            projects.clean_section(target, form.cleaned_data['section'])
+            projects.check_section(task, form.cleaned_data['section'])
     except ValidationError as exc:
         return refuse(request, validation_lines(exc), retarget=slot, fallback=fallback)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=slot)) is not None:
         return response
     try:
         with transaction.atomic():
-            projects.move_task(task, target)
+            if not same_project:
+                projects.move_task(task, target)
             if with_section:
                 projects.set_section(task, form.cleaned_data['section'])
     except ValidationError as exc:

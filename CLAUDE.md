@@ -5103,7 +5103,9 @@ line says so).
   from its quick-add box answers `HX-Redirect` to the page. An archived project's page has no quick
   add, a note and Unarchive.
 - **Everywhere else.** `views.common.projects_context(user)` (one query: every project with its
-  counts) gives every page `todo_projects` (active), the sidebar's first `SIDEBAR_LIMIT` (20), "and
+  counts; a view that needs the projects itself -- the projects page, a project's page, the task
+  page, the search -- calls it and passes the result in its context, and `render_page` then does
+  not read them again) gives every page `todo_projects` (active), the sidebar's first `SIDEBAR_LIMIT` (20), "and
   N more" and "N archived" (`partials/sidebar_projects.html`, between the menu and Filters; counts
   are part of the render, a plain grouped count, unlike the saved filters' regex counts). A row
   shows the project as a chip (colour dot + name, a link) on every list but the project's own page
@@ -5115,7 +5117,11 @@ line says so).
   task page shows "In X" in its top line and, for a top-level task, a Project select under Details
   that saves on change (`todo:move` with `ctx=page`, answers the panel); a subtask says "with its
   parent"; a task of an archived project gets the `#archived-note`. `todo:move` runs `check_move`
-  before `TODO_EDIT_USER` is charged; every project write spends `TODO_EDIT_USER`, validated first.
+  before `TODO_EDIT_USER` is charged; every project write spends `TODO_EDIT_USER`, validated first: the lock-free
+  `check_new_project`, `check_project_name`, `check_new_section` and `check_section_name` (the
+  fields, a name already used, the caps, an archived project) run before the charge on the web and
+  in the API, and an empty reorder list spends nothing. The task page's Project select posts the
+  project the task already has when only the section changes: `todo:move` does not judge it again.
 - **Search and saved filters.** `FilterParams.projects` (project ids sorted, and `none`; a task in
   any of them) and `include_archived`. **Without `include_archived` the tasks of archived projects
   are left out of every search, filter and filter count, unless `projects` names projects**
@@ -5128,9 +5134,9 @@ line says so).
   `filters.label_names(user)` now maps project ids too (one dict for both). The search page has a
   Project checkbox group and "Include archived projects".
 - **The API and the CLI** (part 3; `api/projects.py`, `schemas/project.py`, `admin/todo.py`; no
-  migration; OpenAPI 2.13.0, additive). Every endpoint calls `services.projects` and adds no rule.
-  - *Projects.* `GET /projects?archived=false|true|all` (three queries whatever their number: the
-    sections of all of them are read at once), `POST /projects` (201), `POST /projects/reorder`,
+  migration; OpenAPI 2.13.0, additive; 2.13.1 is wording). Every endpoint calls `services.projects` and adds no rule.
+  - *Projects.* `GET /projects?archived=false|true|all` (the projects and their sections are two
+    queries whatever their number; a description that mentions tasks adds a lookup per number), `POST /projects` (201), `POST /projects/reorder`,
     `GET|PATCH|DELETE /projects/{id}` (`DELETE` keeps the tasks, 204), `POST
     /projects/{id}/archive|unarchive` (idempotent: the state it already has is answered and spends
     nothing). A project is `{id, name, color, description, description_html, position, archived_at,
@@ -5144,13 +5150,17 @@ line says so).
     checked by `check_new_task` before the budget is spent). `PATCH /tasks/{number}` takes
     `project` (`null`: out of its project) and `section` (`null`: out of its section; a section of
     the project the task ends up in): `check_move` / `clean_section` run before `TODO_EDIT_USER`,
-    the values the task already has are a no-op that spends nothing, and the move, the section and
-    the other fields are one transaction. `GET /tasks` takes `project` (comma ids and `none`; naming
+    the values the task already has are a no-op that spends nothing (never a refusal, also for a
+    subtask and for a task in an archived project, so a client may send back what it read), and
+    the move, the section and the other fields are one transaction. **They are judged against the
+    task as the same request leaves it** (`_plan_place`): with `parent` in the body, the parent it
+    will have (`{parent: null, project: X}` moves a subtask out and files it; a new parent with
+    another project is a 400 before the budget). `GET /tasks` takes `project` (comma ids and `none`; naming
     a project lists it even when archived; counts as a criterion, so it spends `TODO_SEARCH_USER`),
     `include_archived` (with `view=all`) and `sort=manual`, which needs exactly one project id and
     no `dir` (a 400 otherwise): sections in their order, the tasks with no section first, then
-    `project_position`. `today`, `upcoming` and `all` leave the tasks of archived projects out
-    unless `project` or `include_archived` says otherwise (`_view_queryset`); the filters themselves
+    `project_position`. `today` and `upcoming` **always** leave the tasks of archived projects out;
+    `all` leaves them out unless `project` or `include_archived` says otherwise (`_view_queryset`); the filters themselves
     run with `include_archived`, so a filter on `view=closed`, the Trash or a parent's subtasks
     never drops them. `FilterParamsSchema` has `projects` and `include_archived`.
   - *Status codes*: 400 for a service refusal (`project: Unknown project.`, `section: Unknown
@@ -5194,7 +5204,17 @@ line says so).
     in the order sent (ids that are not the user's non-trashed tasks of the project are ignored); a
     row listed that is in another section **joins this one**, with its subtasks, and that move is
     logged, and its subtasks take its place in the order (so they stay next to it); a subtask listed
-    alone in another section is skipped (it stays with its parent). The section is read again under
+    alone in another section is skipped (it stays with its parent). **The ids sent swap the places
+    they already hold in the list** and the whole list is then numbered by place (one bulk write for
+    the rows that changed), so a list that is not complete (an API client's, or the page's open rows
+    while closed ones keep their places) never makes two tasks tie; a row that joins lands right
+    after the listed row sent before it. **A subtask's place is its parent's** everywhere: a new
+    subtask, a task moved under a parent (`update_task`, which also logs the automatic `section`
+    entry), `move_task` and `set_section` all give it the parent's `project_position`, and the
+    default order then keeps it after the parent. **An archived project is frozen**: adding,
+    renaming, deleting and reordering its sections, reordering its tasks and changing a task's
+    section (`set_section`) are all `Unarchive the project to change its sections.`; a task can
+    still be moved out of it. The section is read again under
     the account lock, as it is in `create_task` (a section deleted meanwhile is "Unknown section.",
     never a foreign-key error; the next occurrence of a repeating task then goes to no section).
   - *Activity log.* `EventKind.SECTION` (`from`, `to`, `via`, `reason: 'deleted'`): "Moved to the
@@ -5231,7 +5251,9 @@ line says so).
 - **Not done:** filing emailed tasks (they are in no project), reading a project from the title, bulk moves, and
   the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
   To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
-- **Tests.** `apps/todo/tests/test_projects.py`; the AI plan has TODO-63 to TODO-68 and ADM-65.
+- **Tests.** `apps/todo/tests/test_projects.py`; the Playwright `tests_e2e/test_todo_projects.py` (the
+  confirmation modal from inside a section, collapse across a reload, the Move dialog, the task
+  page's Section select); the AI plan has TODO-63 to TODO-68 and ADM-65.
 
 #### Comments and references
 

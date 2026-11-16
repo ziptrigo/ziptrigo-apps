@@ -303,7 +303,7 @@ class TestTaskProject:
         assert detail(sub, {'project': str(project.pk)}) == (
             "project: A subtask is in its parent's project. Move the parent instead."
         )
-        assert detail(sub, {'section': None}) == (
+        assert detail(sub, {'section': str(design.pk)}) == (
             "section: A subtask is in its parent's section. Move the parent instead."
         )
         projects.archive_project(project)
@@ -372,3 +372,132 @@ class TestListFilter:
 
         with django_assert_max_num_queries(12):
             assert get(client, f'/tasks?project={project.pk}&limit=100', auth).json()['count'] == 30
+
+
+class TestPatchPlanning:
+    """`PATCH /tasks/{number}` judges `project` and `section` against the task as the same request
+    leaves it, and the values it will have anyway are a no-op."""
+
+    def test_the_values_it_has_never_refuse_the_rest(self, client, auth, funded, project):
+        task = create_task(funded, title='A', project=project)
+        sub = create_task(funded, title='Sub', parent=task)
+        projects.archive_project(project)
+
+        archived = patch(
+            client, f'/tasks/{task.number}', auth, {'title': 'B', 'project': str(project.pk)}
+        )
+        echoed = patch(
+            client,
+            f'/tasks/{sub.number}',
+            auth,
+            {'title': 'Sub B', 'project': str(project.pk), 'section': None},
+        )
+
+        assert archived.status_code == 200 and archived.json()['title'] == 'B'
+        assert echoed.status_code == 200 and echoed.json()['title'] == 'Sub B'
+
+    def test_made_top_level_and_moved_in_one_request(self, client, auth, funded, project):
+        other = projects.create_project(funded, 'Other')
+        parent = create_task(funded, title='P', project=project)
+        sub = create_task(funded, title='Sub', parent=parent)
+
+        body = patch(
+            client, f'/tasks/{sub.number}', auth, {'parent': None, 'project': str(other.pk)}
+        )
+
+        assert body.status_code == 200
+        assert body.json()['parent'] is None and body.json()['project']['name'] == 'Other'
+
+    def test_a_new_parent_with_another_project_is_refused_before_the_budget(
+        self, client, auth, funded, project, settings
+    ):
+        other = projects.create_project(funded, 'Other')
+        parent = create_task(funded, title='P', project=project)
+        task = create_task(funded, title='A')
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'TODO_EDIT_USER': (1, 60)}
+        url = f'/tasks/{task.number}'
+
+        refused = patch(client, url, auth, {'parent': parent.number, 'project': str(other.pk)})
+        followed = patch(client, url, auth, {'parent': parent.number, 'project': str(project.pk)})
+
+        assert refused.status_code == 400
+        assert refused.json()['detail'].startswith("project: A subtask is in its parent's project")
+        assert followed.status_code == 200 and followed.json()['project']['name'] == 'Website'
+
+    def test_a_section_change_in_an_archived_project_is_a_400(self, client, auth, funded, project):
+        design = projects.create_section(project, 'Design')
+        task = create_task(funded, title='A', project=project)
+        projects.archive_project(project)
+
+        response = patch(client, f'/tasks/{task.number}', auth, {'section': str(design.pk)})
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'Unarchive the project to change its sections.'
+
+    def test_today_never_lists_an_archived_project_even_when_named(
+        self, client, auth, funded, project
+    ):
+        from apps.accounts.services.timezones import user_today
+
+        create_task(funded, title='Due', project=project, due_date=user_today(funded))
+        projects.archive_project(project)
+
+        today = get(client, f'/tasks?view=today&project={project.pk}', auth).json()
+        everything = get(client, f'/tasks?view=all&project={project.pk}', auth).json()
+
+        assert today['count'] == 0 and everything['count'] == 1
+
+
+class TestBudgetAndOrder:
+    def test_refusals_that_need_no_write_spend_nothing(
+        self, client, auth, funded, project, settings
+    ):
+        projects.create_section(project, 'Design')
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'TODO_EDIT_USER': (1, 60)}
+        base = f'/projects/{project.pk}'
+
+        assert post(client, '/projects', auth, {'name': 'website'}).status_code == 400
+        assert post(client, f'{base}/sections', auth, {'name': 'design'}).status_code == 400
+        assert post(client, '/projects/reorder', auth, {'ids': []}).status_code == 200
+        assert post(client, f'{base}/sections/reorder', auth, {'ids': []}).status_code == 200
+        assert post(client, f'{base}/tasks/reorder', auth, {'ids': []}).json() == {'count': 0}
+        assert post(client, '/projects', auth, {'name': 'New'}).status_code == 201
+        assert post(client, '/projects', auth, {'name': 'Newer'}).status_code == 429
+
+    def test_archived_sections_cannot_be_reordered(self, client, auth, project):
+        section = projects.create_section(project, 'Design')
+        projects.archive_project(project)
+
+        response = post(
+            client, f'/projects/{project.pk}/sections/reorder', auth, {'ids': [str(section.pk)]}
+        )
+
+        assert response.status_code == 400
+
+    def test_a_partial_reorder_makes_no_ties(self, client, auth, funded, project):
+        tasks = [create_task(funded, title=title, project=project) for title in 'ABCDE']
+        url = f'/projects/{project.pk}/tasks/reorder'
+        post(client, url, auth, {'ids': [str(task.pk) for task in tasks]})
+
+        # Only D and B are sent, swapped: they trade the places they hold; the rest keep theirs.
+        post(client, url, auth, {'ids': [str(tasks[3].pk), str(tasks[1].pk)]})
+
+        listed = get(client, f'/tasks?project={project.pk}&sort=manual', auth).json()['results']
+        assert [task['title'] for task in listed] == ['A', 'D', 'C', 'B', 'E']
+        positions = [task['project_position'] for task in listed]
+        assert positions == sorted(set(positions))
+
+    def test_a_subtask_sits_at_its_parents_place(self, client, auth, funded, project):
+        a = create_task(funded, title='A', project=project)
+        create_task(funded, title='B', project=project)
+        create_task(funded, title='Sub of A', parent=a)
+
+        listed = get(client, f'/tasks?project={project.pk}&sort=manual', auth).json()['results']
+
+        assert [task['title'] for task in listed] == ['A', 'Sub of A', 'B']
+
+    def test_one_project_is_read_once(self, client, auth, project, django_assert_max_num_queries):
+        with django_assert_max_num_queries(4):  # the token's user, the project, its sections
+            assert get(client, f'/projects/{project.pk}', auth).status_code == 200

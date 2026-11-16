@@ -87,7 +87,8 @@ def _one(request, project_id: UUID) -> dict[str, Any]:
 @router.get('/projects', response=list[ProjectSchema])
 def list_projects(request, archived: str = 'false'):
     """The caller's projects in their order: the active ones (`archived=false`, the default), the
-    archived ones (`true`) or both (`all`). Three queries whatever their number."""
+    archived ones (`true`) or both (`all`). Their counts and sections are read in two queries
+    whatever their number (a description that mentions tasks adds a lookup per task number)."""
     which = choice('archived', archived.lower(), ARCHIVED_CHOICES)
     flag = {'false': False, 'true': True, 'all': None}[which]
     return _many(request, list(project_service.list_projects(request.auth, archived=flag)))
@@ -98,9 +99,10 @@ def create_project(request, payload: ProjectCreateSchema):
     """Add a project at the end of the list. A name another of your projects has (ignoring case),
     a bad colour, a description over 10,000 characters and the cap on projects are a 400."""
     with mapped_errors():
-        project_service.clean_name(payload.name)  # a refusal here spends no budget
-        clean_color(payload.color)
-        project_service.clean_description(payload.description)
+        # A refusal here spends no budget (the fields, a name already used, the cap).
+        project_service.check_new_project(
+            request.auth, payload.name, payload.color, payload.description
+        )
         charge(request, 'TODO_EDIT_USER')
         project = project_service.create_project(
             request.auth, payload.name, payload.color, payload.description
@@ -113,16 +115,16 @@ def create_project(request, payload: ProjectCreateSchema):
 def reorder_projects(request, payload: ProjectOrderSchema):
     """Put the projects in the order given; ids that aren't yours are ignored. Answers the active
     projects in their new order."""
-    charge(request, 'TODO_EDIT_USER')
-    project_service.reorder_projects(request.auth, payload.ids)
+    if payload.ids:  # nothing to order spends nothing
+        charge(request, 'TODO_EDIT_USER')
+        project_service.reorder_projects(request.auth, payload.ids)
     return _many(request, list(project_service.list_projects(request.auth)))
 
 
 @router.get('/projects/{project_id}', response=ProjectSchema)
 def get_project(request, project_id: UUID):
     """One project, archived or not, with its counts and sections."""
-    _owned(request, project_id)
-    return _one(request, project_id)
+    return _one(request, project_id)  # scoped to the caller: another user's is a 404
 
 
 @router.patch('/projects/{project_id}', response=ProjectSchema)
@@ -137,7 +139,7 @@ def update_project(request, project_id: UUID, payload: ProjectUpdateSchema):
     if changes:
         with mapped_errors():
             if 'name' in changes:  # a refusal here spends no budget
-                project_service.clean_name(changes['name'])
+                project_service.check_project_name(project, changes['name'])
             if 'color' in changes:
                 clean_color(changes['color'])
             if 'description' in changes:
@@ -190,8 +192,7 @@ def create_section(request, project_id: UUID, payload: SectionNameSchema):
     more than 50 sections, and an archived project are a 400. Answers the project."""
     project = _owned(request, project_id)
     with mapped_errors():
-        project_service.clean_section_name(payload.name)  # a refusal here spends no budget
-        project_service.require_active(project)
+        project_service.check_new_section(project, payload.name)  # a refusal spends no budget
         charge(request, 'TODO_EDIT_USER')
         project_service.create_section(project, payload.name)
     return 201, _one(request, project_id)
@@ -199,10 +200,14 @@ def create_section(request, project_id: UUID, payload: SectionNameSchema):
 
 @router.post('/projects/{project_id}/sections/reorder', response=ProjectSchema)
 def reorder_sections(request, project_id: UUID, payload: SectionOrderSchema):
-    """Put the project's sections in the order given; ids that aren't its own are ignored."""
+    """Put the project's sections in the order given; ids that aren't its own are ignored. A 400
+    for an archived project."""
     project = _owned(request, project_id)
-    charge(request, 'TODO_EDIT_USER')
-    project_service.reorder_sections(project, payload.ids)
+    with mapped_errors():
+        project_service.require_active(project)  # an archived project's sections are frozen
+        if payload.ids:
+            charge(request, 'TODO_EDIT_USER')
+            project_service.reorder_sections(project, payload.ids)
     return _one(request, project_id)
 
 
@@ -212,8 +217,7 @@ def rename_section(request, project_id: UUID, section_id: UUID, payload: Section
     project = _owned(request, project_id)
     section = _section(project, section_id)
     with mapped_errors():
-        project_service.clean_section_name(payload.name)
-        project_service.require_active(project)
+        project_service.check_section_name(section, payload.name)
         charge(request, 'TODO_EDIT_USER')
         project_service.rename_section(section, payload.name)
     return _one(request, project_id)
@@ -233,13 +237,16 @@ def delete_section(request, project_id: UUID, section_id: UUID):
 
 @router.post('/projects/{project_id}/tasks/reorder', response=CountSchema)
 def reorder_project_tasks(request, project_id: UUID, payload: ProjectTaskOrderSchema):
-    """Write the hand-made order of one list of the project (see `ProjectTaskOrderSchema`): what
+    """Write the hand-made order of one list of the project (see `ProjectTaskOrderSchema`; the ids
+    sent swap the places they already hold, so a partial list never makes two tasks tie): what
     `GET /tasks?project=<id>&sort=manual` follows. `count` is how many tasks were positioned. An
     archived project, and a `section` that is not one of the project's, are a 400."""
     project = _owned(request, project_id)
     with mapped_errors():
         project_service.require_active(project)
         project_service.clean_section(project, payload.section)
+        if not payload.ids:
+            return {'count': 0}
         charge(request, 'TODO_EDIT_USER')
         count = project_service.reorder_tasks(
             request.auth, project, payload.section, list(payload.ids)

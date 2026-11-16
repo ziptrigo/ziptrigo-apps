@@ -22,12 +22,18 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.services.timezones import user_today
 from apps.core.htmx import is_htmx
 
-from ..models import Label, Project, Resolution, SavedFilter, TaskState
+from ..models import Label, Resolution, SavedFilter, TaskState
 from ..services import SORTS, FilterParams, describe_params, filter_page, parse_filter_params
 from ..services.filters import DATE_RANGES, QUERY_KEYS, label_names
 from ..services.saved_filters import dropped_label_count, stored_params
 from ..services.search import MAX_QUERY_CHARS
-from .common import limited, message_response, render_page, validation_lines
+from .common import (
+    limited,
+    message_response,
+    projects_context,
+    render_page,
+    validation_lines,
+)
 from .lists import decorate
 
 SEARCH_MSG = '#search-msg'
@@ -73,6 +79,7 @@ def build_context(
     anything; a refusal is `error_lines`, with no results. Charge the rate limit before calling."""
     user = request.user
     labels = list(Label.objects.filter(user=user))
+    listed = projects_context(user)  # one read, also what the sidebar and the Move dialog show
     context: dict = {
         'view': 'search',
         'params': params,
@@ -82,7 +89,8 @@ def build_context(
         'labels': labels,
         'selected_labels': set(params.labels),
         # Every project, archived ones too (choosing one lists its tasks whatever its state).
-        'filter_projects': list(Project.objects.filter(user=user)),
+        'filter_projects': listed['all_projects'],
+        **listed,
         'selected_projects': set(params.projects),
         'selected_priorities': set(params.priorities),
         'state_choices': TaskState.choices,

@@ -1408,3 +1408,123 @@ class TestSectionPages:
 
         with django_assert_max_num_queries(32):
             web.get(self.url(project))
+
+
+# -- Fixes from the review of the whole of #314 ----------------------------------------------------
+
+
+class TestReviewFixes:
+    def test_a_new_subtask_sits_at_its_parents_place(self, funded_user, project):
+        a = create_task(funded_user, title='A', project=project)
+        create_task(funded_user, title='B', project=project)
+
+        sub = create_task(funded_user, title='Sub', parent=a)
+
+        assert sub.project_position == a.project_position
+
+    def test_a_reparented_task_takes_the_parents_place_and_logs_its_section(
+        self, funded_user, project
+    ):
+        design = projects.create_section(project, 'Design')
+        parent = create_task(funded_user, title='Parent', project=project, section=design)
+        loose = create_task(funded_user, title='Loose', project=project)
+
+        update_task(loose, changes={'parent': parent})
+
+        fresh = reload(loose)
+        assert fresh.section == design and fresh.project_position == parent.project_position
+        entry = TaskEvent.objects.filter(task=loose, kind='section').get()
+        assert entry.automatic and 'Moved to the section Design with its parent' in describe(entry)
+        assert not TaskEvent.objects.filter(task=loose, kind='project').exists()  # same project
+
+    def test_a_partial_reorder_swaps_places_and_makes_no_ties(self, funded_user, project):
+        tasks = [create_task(funded_user, title=title, project=project) for title in 'ABCD']
+        projects.reorder_tasks(funded_user, project, None, [task.pk for task in tasks])
+
+        projects.reorder_tasks(funded_user, project, None, [tasks[2].pk, tasks[0].pk])
+
+        rows = Task.objects.filter(project=project).order_by('project_position')
+        assert [task.title for task in rows] == ['C', 'B', 'A', 'D']
+        assert sorted(task.project_position for task in rows) == [0, 1, 2, 3]
+
+    def test_a_closed_task_keeps_its_place_when_the_open_ones_are_reordered(
+        self, funded_user, project
+    ):
+        a, b, c = (create_task(funded_user, title=title, project=project) for title in 'ABC')
+        projects.reorder_tasks(funded_user, project, None, [a.pk, b.pk, c.pk])
+        close_task(b)
+
+        projects.reorder_tasks(funded_user, project, None, [c.pk, a.pk])  # what the page sends
+
+        rows = Task.objects.filter(project=project).order_by('project_position')
+        assert [task.title for task in rows] == ['C', 'B', 'A']
+
+    def test_a_joining_row_lands_after_the_row_sent_before_it(self, funded_user, project):
+        design = projects.create_section(project, 'Design')
+        x, y = (create_task(funded_user, title=t, project=project, section=design) for t in 'XY')
+        joiner = create_task(funded_user, title='J', project=project)
+
+        projects.reorder_tasks(funded_user, project, design, [x.pk, joiner.pk, y.pk])
+
+        rows = Task.objects.filter(section=design).order_by('project_position')
+        assert [task.title for task in rows] == ['X', 'J', 'Y']
+
+    def test_an_archived_projects_sections_and_places_are_frozen(self, funded_user, project):
+        design = projects.create_section(project, 'Design')
+        task = create_task(funded_user, title='A', project=project)
+        projects.archive_project(project)
+        message = {'__all__': ['Unarchive the project to change its sections.']}
+
+        assert errors(projects.reorder_sections, project, [design.pk]) == message
+        assert errors(projects.set_section, reload(task), design) == message
+
+    def test_the_task_page_can_save_a_task_of_an_archived_project(self, web, funded_user, project):
+        """The Project select posts the project the task already has: it is not judged again."""
+        task = create_task(funded_user, title='A', project=project)
+        projects.archive_project(project)
+
+        response = web.post(
+            reverse('todo:move', args=[task.number]),
+            {'project': str(project.pk), 'ctx': 'page'},
+            **HTMX,
+        )
+
+        assert response.status_code == 200
+        assert reload(task).project == project
+
+    def test_refused_project_and_section_forms_spend_no_budget(
+        self, web, funded_user, project, settings
+    ):
+        projects.create_section(project, 'Design')
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'TODO_EDIT_USER': (1, 60)}
+        add_section = reverse('todo:section-add', args=[project.pk])
+
+        assert web.post(reverse('todo:projects'), {'name': 'website'}, **HTMX).status_code == 422
+        assert web.post(add_section, {'name': 'design'}, **HTMX).status_code == 422
+        assert web.post(add_section, {'name': 'Content'}, **HTMX)['HX-Redirect']
+
+    def test_the_pages_read_the_projects_once(
+        self, web, funded_user, project, django_assert_num_queries
+    ):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        task = create_task(funded_user, title='A', project=project)
+        for name, args in (
+            ('todo:projects', []),
+            ('todo:project', [project.pk]),
+            ('todo:task', [task.number]),
+            ('todo:search', []),
+        ):
+            with CaptureQueriesContext(connection) as queries:
+                assert web.get(reverse(name, args=args)).status_code == 200
+            reads = [
+                q['sql']
+                for q in queries
+                if 'FROM "todo_project"' in q['sql']
+                and 'todo_task' in q['sql'].split('FROM')[0] + q['sql']
+                and 'COUNT' in q['sql'].upper()
+                and 'GROUP BY' in q['sql'].upper()
+            ]
+            assert len(reads) == 1, (name, len(reads))
