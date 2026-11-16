@@ -46,6 +46,20 @@ def _terms_gate_off(request, monkeypatch):
     monkeypatch.setattr('apps.accounts.services.terms.needs_acceptance', lambda user: False)
 
 
+@pytest.fixture(autouse=True)
+def _restore_job_registry():
+    """`apps.core.scheduler`'s registry is process-wide, filled once by each app's `ready()`. Tests
+    of the scheduler empty it (`clear_registry()`) to work with jobs of their own; put the real
+    jobs back after every test, so a later test that reads them (`get_job('file_transfer....')`)
+    doesn't depend on the order the suite runs in."""
+    from apps.core.scheduler import registry
+
+    saved = dict(registry._registry)
+    yield
+    registry.clear_registry()
+    registry._registry.update(saved)
+
+
 class RateLimitClock:
     """The wall clock `apps.core.ratelimit.limiter` reads, frozen until a test moves it."""
 
