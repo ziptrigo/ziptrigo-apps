@@ -12,8 +12,8 @@
  * else -- in particular the body is a type-less Blob so no Content-Type is sent, which would
  * otherwise need to be allowed by the bucket's CORS rules.
  *
- * The drop zone (files and folders) is `initDropZone` from core's `core/js/drop_zone.js`, loaded
- * before this script.
+ * The drop zone (files and folders) is `initDropZone` from core's `core/js/drop_zone.js`, and pasting
+ * an image `initClipboardPaste` from `core/js/clipboard_paste.js`, both loaded before this script.
  */
 (function () {
     'use strict';
@@ -293,5 +293,15 @@
         bindPicker(takePhotoBtn, cameraInput);
         // Core's `drop_zone.js`; an empty drop is ignored here (no alert), as it always was.
         initDropZone(dropZone, addFiles, { onEmpty: function () {} });
+        // Core's `clipboard_paste.js`: an image pasted from the clipboard is added like a picked file.
+        // Receipts cannot read a GIF: a copied image file keeps its bytes when it is a type Receipts reads
+        // (`accept`), a screenshot-style bitmap keeps only JPEG and WebP (a PNG becomes WebP), and anything
+        // else becomes WebP; the checks of `addFiles` still apply.
+        initClipboardPaste(addFiles, {
+            keep: ['image/jpeg', 'image/webp'],
+            accept: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'],
+            skipEditable: true,
+            hint: document.getElementById('paste-hint'),
+        });
     }
 })();

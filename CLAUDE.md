@@ -1080,6 +1080,11 @@ the Android app wants one). Code: `services/login_otp.py` (its docstring is the 
   (`tests_e2e/conftest.py`, `tests_e2e/ai/serve.py`) mark their accounts accepted.
   `apps/accounts/tests/test_terms_acceptance.py`, `apps/core/tests/test_legal_pages.py`, AI cases
   ACC-49, ACC-50, CORE-27, ADM-55.
+- *Pasting an image to upload it (#313) needed no change to either document, and `TERMS_VERSION` was not bumped.* A pasted
+  image is read from the clipboard only at the moment the user presses paste (no permission, nothing read in the background; see
+  "Templates and static files" > "Paste an image to upload it"), and from then on it is a file the user uploads, kept, billed
+  and deleted exactly like one they picked; the policy already lists "the files you upload" (and the receipts, attachments and
+  transfers) as collected data. No new kind of data, processor, cookie or retention period.
 - *Not done:* self-service account deletion (the policy says to email `info@ziptrigo.com`), mirroring
   the links on the `ziptrigo.com` homepage (another repo), and the Google Cloud brand verification
   steps listed on the issue.
@@ -2085,6 +2090,9 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
   a literal reload otherwise starts a fresh, empty draft and strands the in-progress one. The
   anonymous flow needs none of this bookkeeping: `current_anonymous_transfer` already resumes the
   session's current draft (files included) on every reload regardless of file count.
+  **Pasting an image** (issue #313) is the third way in besides the picker and the drop zone: all three pages (`send.html`,
+  `anon_send.html`, `request_upload.html`) call `initClipboardPaste(upload.handleFileSelection, ...)`; see "Templates and static files"
+  > "Paste an image to upload it" (a pasted file has a unique timestamp name, so it never matches a file to resume).
 - **CLI**: `admin/filetransfer.py send --draft-id <id>` re-fetches that draft
   (`GET /transfers/{id}`, which is why that endpoint returns drafts) and matches its local files
   against its `files` list by name, size *and* `client_last_modified` (tracking which draft rows
@@ -2602,7 +2610,7 @@ the title (free text; MAIL-12), and the recipient's email starts with `Title: <t
 (suspension, expiry, deleted) still name it by its title in the subject, as before (a request has no file to name it by; they are
 `file_label`). The two request emails (invite, done) show the title only when there is one (no "Untitled request" to an invitee).
 Not done: editing the title of a *sent* transfer from the dashboard or `PATCH /transfers/{id}` (a request's title is editable).
-Tests: `apps/file_transfer/tests/test_titles.py`, `admin/tests/test_filetransfer.py` and `test_filetransfer_requests.py`; AI cases FT-02, FT-54, FT-70 and MAIL-12, MAIL-27. OpenAPI 2.10.1.
+Tests: `apps/file_transfer/tests/test_titles.py`, `admin/tests/test_filetransfer.py` and `test_filetransfer_requests.py`; AI cases FT-02, FT-54, FT-71 and MAIL-12, MAIL-27. OpenAPI 2.10.1.
 
 **Abuse reports, takedown and the block list** (issue #59, deferred from #55's phase 3 spec
 section 16): the download page has a "Report this transfer" link (an htmx-collapsed
@@ -3827,6 +3835,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     arrived stays `uploaded=False`, so each `complete` on it is a free S3 HEAD); the script waits out
     a 429 on either. Once the PUT has succeeded the row's cancel button is hidden and a cancel can no
     longer stop the `complete` (which would verify, queue and bill the receipt).
+  A **pasted image** (issue #313, `initClipboardPaste(addFiles, {keep: ['image/jpeg', 'image/webp'], accept: [...], skipEditable: true})`) is added like a picked
+    file, named `<time>.webp` (a copied JPEG, PNG, WebP or HEIC file keeps its format), and goes through the same type/size checks; the drop zone's hint says so (not while frozen).
   - **Trash** (`/receipts/trash/`): plain POST forms ending in a redirect with a flash message (restore;
     delete forever through a confirmation modal, an S3 error is a message, not a 500); how long is
     left comes from `ReceiptsSettings.trash_days`.
@@ -5237,6 +5247,9 @@ long reasoning.
   honoured up to 3 times; the drop zone is core's shared `initDropZone`. A completed attachment can
   be removed from a trashed task and while frozen (it saves money); an open task takes uploads, a
   trashed or completed one doesn't (the block hides the drop zone and doesn't load the script).
+  A **pasted image** (issue #313) anywhere on the page outside a comment form is attached to the task (`attachments.js` registers
+  `initClipboardPaste(uploader.addFiles, {skipEditable: true})` with no `within`; the comment forms register their own, `comment_files.js`, see
+  "Files on comments"); the hint is `#attachment-paste-hint`, shown only when the block is wired.
   `layout.html` shows the "Storage is paused" banner (with Top up) while `frozen_at` is set, and the
   settings page's "Files" section shows "N MB stored, about 0.02 credits a day" -- the **actual**
   rate (`metering.daily_storage_rate`, `describe_daily_rate`: fractions kept, "less than 0.01
@@ -5267,7 +5280,8 @@ long reasoning.
   task `attachments` leave `for_comment` files out**; everything else is shared: billing and the
   daily metering, the frozen state, the per-task cap on files (a comment's files count toward it), the
   size limit, deleting with the task or user. Deleting a comment keeps its files, still billed, until it
-  is restored or the task is deleted. No API endpoint adds files to a comment yet. The upload engine is
+  is restored or the task is deleted. No API endpoint adds files to a comment yet. **Pasting an image while the focus is in a comment form** (the text box included) adds it as a draft file of that comment
+  (`initClipboardPaste(uploader.addFiles, {within: form})`, hint inside the box); a text paste in the box is untouched. The upload engine is
   `static/todo/js/uploader.js` (`TodoUploader.create`), which `attachments.js` (the task's block) and
   `comment_files.js` both use; the script is wired from `htmx:load` because htmx swaps the comments
   section after every action, and the form's submit button is disabled (and a submit stopped) while a
@@ -7287,6 +7301,61 @@ badge/copy pops in `components.js`. **Themed select** (`core/components/select.h
 tags are one tinted pill from `apps/core/templatetags/core_ui.py` (`{% pill %}`, `pill_html`), which the
 products' own tags (`status_pill`, `link_status_pill`, `due_badge`, ...) wrap; an empty list is
 `core/partials/empty_state.html`. The only un-namespaced templates are core's `admin/` overrides.
+
+**Paste an image to upload it** (issue #313; `core/js/clipboard_paste.js`, `core/partials/paste_hint.html`; tests
+`tests_e2e/test_clipboard_paste.py`, the page tests of each product, AI cases FT-70, RCPT-62, TODO-62). One more way to add a
+file next to the picker and `initDropZone`: `initClipboardPaste(onFiles, {within, enabled, hint, keep, accept, skipEditable})` (a classic script loaded
+before the page script, like `drop_zone.js`) hands `File[]` to **the very callback the drop zone uses**, so a pasted image is
+checked, hashed and uploaded exactly like a picked one (same limits, same progress row, same error line). It is used by file
+transfer's send, anonymous send and file request pages (`handleFileSelection`), Receipts' upload page (`addFiles`) and To-do's task
+attachments and comment forms (`TodoUploader.addFiles`).
+- *Only an image is taken.* A `file` item of `clipboardData` whose type is `image/*`. Without one the paste is ignored entirely
+  (`preventDefault` is not called, so text pasted into a field still works): text, HTML, a file's path as text and a non-image file
+  (a PDF copied in Finder) are all "no image". In an input, textarea or contenteditable **the text wins**: an image together with
+  text (copying spreadsheet cells does that) is left to the field; an image alone is taken even there.
+- *Name and format.* The local time of the paste, `YYYY-MM-DD-HH-mm-SS.<ext>`, `-2`, `-3` for more in the same second (a
+  per-page counter, assigned before the async re-encode so the order is stable). The issue says "if the original format is
+  available keep it, otherwise WebP at 85%", so there are two kinds of clipboard image (`isRealFile`: the browser's generic
+  placeholder names, `image.png`, `image.jpg`, ... or no name, mean a bitmap; any other name means a file):
+  1. **A real file** (copied in Finder or Explorer; Chrome and Firefox hand over its bytes and its own name) **is the original**:
+     bytes and type are kept untouched, only the name becomes the timestamp with the original extension (`.png`, `.jpg`; the
+     real name is not kept, as the issue asks for timestamp names). `options.accept` (a list of MIME types; default: anything) is
+     for a page that cannot take every type as it is: other types are converted like a bitmap. Receipts passes JPEG, PNG, WebP and
+     HEIC, so a copied GIF becomes WebP (its first frame) while a copied PNG stays a PNG.
+  2. **An anonymous bitmap** (a screenshot, "Copy image": always a re-encoded PNG, the original format is not known) is
+     re-encoded as **WebP at 85% quality** with a canvas (`createImageBitmap` + `toBlob('image/webp', 0.85)`; alpha is kept; the
+     result is always WebP, even when a tiny PNG would be smaller). A browser that cannot write WebP (`toBlob` answers a PNG, as Safari
+     did) or cannot decode the image keeps the original with its own extension. **JPEG, WebP and GIF bitmaps are kept as they are**
+     (a GIF keeps its animation); `options.keep` changes that list: Receipts passes JPEG and WebP only, since it cannot read a GIF.
+  No server change: Receipts accepts WebP (`DEFAULT_ALLOWED_TYPES`, sniffed by magic bytes), file transfer and To-do accept anything.
+  The re-encode runs on the main thread (a very large screenshot can stall the tab for a moment; `OffscreenCanvas.convertToBlob`
+  or a "Preparing..." row state is a possible follow-up, not done). **Safari is unverified**: whether WebKit dispatches `paste`
+  with the focus on a non-editable element, and what it hands over, was not tested.
+- *`skipEditable`.* The page-level registration of the file transfer send pages, the file request page, the Receipts upload page
+  and the To-do task page passes `skipEditable: true`: a paste whose target is a text field outside every `within` registration
+  (a message or recipients box, the To-do description or title editor, the subtask or reminder fields) is left to the browser, so
+  an image pasted there is never uploaded (or billed, for To-do) behind the user's back. A comment form's own `within`
+  registration still takes an image pasted into its text box.
+- *A paused pasted upload* (file transfer: `resumable_upload.js`): the pasted `File` is kept in memory (`handleFileSelection(files,
+  {retain: true})`, `entry.retained`), so the paused row offers **Retry** (resumes with the same `File`) instead of "Choose the
+  file", which a pasted image (it has no file on disk) could never satisfy. After a page reload the row is hydrated from the
+  server without the `File`, so it shows "Choose the file" as any paused row does (the way out is Remove).
+- *Housekeeping.* The polite `role="status"` line is created at the first registration (not on the first paste, which many
+  screen readers do not announce), registrations whose `within` left the page are pruned at each registration and each paste (htmx
+  swaps `#task-comments`), and a failure in the re-encode or the callback is logged and announced as "Could not paste the image."
+- *Permissions: none.* The `paste` event gives the page `clipboardData` because the user pressed Ctrl+V / ⌘V (or used the browser's
+  Paste menu), with no prompt. Only the async `navigator.clipboard.read()` asks for permission, and **nothing here uses it** (no
+  "Paste" button): a page cannot read the clipboard unprompted, so nothing is uploaded unless the user pastes.
+- *Where a paste goes.* One document-level listener serves every registration. `within` (an element: a To-do comment form) takes a
+  paste whose target is inside it (the innermost wins; a registration whose element left the page is dropped, since htmx swaps the
+  comments); without `within` it is the page-level target (with `skipEditable`, not for a text field); `enabled()` is asked at paste time. **To-do task page: a paste with the
+  focus anywhere in a comment form (the text box included) is a file of that comment (a draft, `for_comment`); a paste anywhere else
+  is an attachment of the task.** No registration where the drop zone isn't rendered or wired: not on a completed or trashed task
+  (comment forms of a completed task still take one), not while storage is paused (`frozen`), not on a file request that is Done.
+- *Hint.* `core/partials/paste_hint.html` ("You can also paste an image: Ctrl+V", `hidden`, `data-paste-hint`) sits in each drop zone
+  and in the comment form; the script reveals it when it registers, so it never shows where pasting does not work, nor on a
+  touch-only device (`(any-pointer: fine)` false), and it reads **⌘V** on Apple platforms. A polite `role="status"` line says
+  "Pasted <name> from the clipboard." (the rows themselves are in each page's own list).
 
 **Colour schemes** (`apps/core/color_schemes.py`, the source of truth: a frozen `ColorScheme` per
 scheme with a 10-step accent scale and an 11-step tinted neutral scale, `DEFAULT = 'sage'`,

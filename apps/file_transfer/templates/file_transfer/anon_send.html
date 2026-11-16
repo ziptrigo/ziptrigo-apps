@@ -34,6 +34,7 @@
                     <i class="fas fa-folder-open mr-1"></i>Add folder
                 </button>
             </div>
+            {% include 'core/partials/paste_hint.html' with id='paste-hint' %}
         </div>
         <ul id="file-list" class="mt-4 space-y-2"></ul>
     </div>
@@ -87,6 +88,7 @@
 
 {{ existing_files|json_script:"existing-files-data" }}
 <script src="{% static 'core/js/drop_zone.js' %}"></script>
+<script src="{% static 'core/js/clipboard_paste.js' %}"></script>
 <script src="{% static 'file_transfer/js/resumable_upload.js' %}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
@@ -124,6 +126,12 @@ document.addEventListener('DOMContentLoaded', function () {
         folderInput.value = '';
     });
     initDropZone(dropZone, upload.handleFileSelection);
+    // Paste an image from the clipboard (core's `clipboard_paste.js`): the same path as a picked file.
+    // `skipEditable`: an image pasted into the message or recipients box is not an upload. `retain` keeps the
+    // pasted File so a paused row can be retried (there is no file on disk to choose again).
+    initClipboardPaste(function (files) {
+        upload.handleFileSelection(files, { retain: true });
+    }, { hint: document.getElementById('paste-hint'), skipEditable: true });
 });
 </script>
 {% endblock %}
