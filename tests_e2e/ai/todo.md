@@ -1218,6 +1218,24 @@ one`; a second user (Session B) with a task.
 | 7 | Click the empty space of a row (to the right of the title, or beside the chips) on All, Today, a search and the Trash. | The task page opens, as the title link does. Ctrl/Cmd-click opens it in a new tab. |
 | 8 | Click the state pill, the Postpone button, the trash button, the circle, a label chip's neighbours that are links (the parent link), and the drag handle; also select some title text by dragging. | Each does only its own thing (menu opens, task completes...); no navigation. Selecting text does not open the task. Closing the state menu by clicking elsewhere on the row does not open the task. |
 
+### TODO-62 Pasting an image: into the task and into a comment
+
+**Purpose:** a pasted image is attached to the task, or, with the focus in a comment form, to the comment (issue #313).
+**Preconditions:** an open task T with the Attachments block, signed in as `qa.user@example.com`. Where the clipboard cannot be filled, use the console snippet of FT-70 (`file_transfer.md`); its `selector` can be `textarea[name="body"]` to paste "into" the comment box.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Open T and look under **Add files**, and under the comment form's **Attach files**. | Both show a small "You can also paste an image: Ctrl+V" / "Paste an image here to attach it: Ctrl+V" (**⌘V** on a Mac). Neither is shown on a touch-only device. |
+| 2 | Click the page background (not a text box) and paste text, then a PDF. | Nothing is added. |
+| 3 | Paste a screenshot. | A row `YYYY-MM-DD-HH-mm-SS.webp` uploads and the file is listed under Attachments (Download, Open, Remove). |
+| 4 | Click in the comment box, type "my note", paste text. | The text is inserted as usual. |
+| 5 | Paste a screenshot with the focus in the comment box (and, separately, an image copied together with text, e.g. spreadsheet cells). | The screenshot becomes a chip under the comment form (a file of the comment, not of the task); the text in the box is unchanged. The cells paste as text, and no file is added. **Comment** saves it with the file, listed under that comment, and Attachments still shows only the first pasted file. |
+| 6 | Paste a screenshot while editing an existing comment (Edit, focus in its box). | It is added to that comment when saved. |
+| 6b | Click in the description editor (or the title box, the subtask box) and paste a screenshot alone. | Nothing is added: no row, no attachment (it would be billed storage); the page background still takes a screenshot. |
+| 7 | Complete T (Complete). | The Attachments block and its drop zone are gone: a paste outside a comment box does nothing; a paste into the comment box still attaches a file to a comment. |
+| 8 | Move T to the Trash, open it. | No drop zone, no comment form: pasting does nothing. |
+| 9 | Pause storage (TODO-31, frozen account) and open an open task. | "Uploads are paused until you add credits" and no paste hint; pasting does nothing. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it

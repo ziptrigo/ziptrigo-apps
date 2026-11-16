@@ -354,6 +354,10 @@ class TestViews:
         assert 'todo/js/comment_files.js' in html
         assert 'todo/js/uploader.js' in html
         assert 'data-comment-files' in html
+        # An image pasted into the comment form is a file of the comment (issue #313).
+        assert 'core/js/clipboard_paste.js' in html
+        assert html.index('core/js/clipboard_paste.js') < html.index('todo/js/comment_files.js')
+        assert 'Paste an image here to attach it:' in html
 
     def test_a_comment_start_works_on_a_completed_task(self, web, funded_user, task):
         complete_task(task)
