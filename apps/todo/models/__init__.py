@@ -11,6 +11,7 @@ from .inbox import (
     InboxCode,
 )
 from .label import DEFAULT_LABEL_COLOR, Label
+from .project import Project
 from .recurrence import Recurrence, RecurrenceMode
 from .reference import TaskReference
 from .reminder import (
@@ -49,6 +50,7 @@ __all__ = [
     'MutedOverdue',
     'Label',
     'Priority',
+    'Project',
     'Recurrence',
     'RecurrenceMode',
     'Resolution',

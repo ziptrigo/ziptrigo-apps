@@ -724,6 +724,12 @@ def sweep_stale(now: datetime) -> int:
                     task__completed_at__isnull=True,
                     task__deleted_at__isnull=True,
                 )
+                # So does an open task of an archived project (`projects.unarchive_project`).
+                .exclude(
+                    task__project__archived_at__isnull=False,
+                    task__completed_at__isnull=True,
+                    task__deleted_at__isnull=True,
+                )
                 .select_related('task', 'task__user')
                 .select_for_update(skip_locked=True, of=('self',))
                 .order_by('fire_at')[:BATCH]
@@ -783,6 +789,8 @@ def deliver_due(now: datetime | None = None) -> int:
                     task__user__status=User.STATUS_ACTIVE,
                 )
                 .exclude(task__state__in=MUTED_STATES)  # held until the task is unmuted
+                # ... and while its project is archived
+                .exclude(task__project__archived_at__isnull=False)
                 .exclude(pk__in=failed)
                 .select_related('task', 'task__user')
                 .select_for_update(skip_locked=True, of=('self',))

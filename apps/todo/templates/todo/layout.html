@@ -2,7 +2,7 @@
 {% load static %}
 
 {% comment %} Shared by every To-do page: the sidebar (a top bar on phones), the "Tasks are blocked" banner, the
-   page-level message slot and the one confirmation modal the whole page shares and the close dialog. Pages that reorder
+   page-level message slot and the one confirmation modal the whole page shares, the close dialog and the Move dialog. Pages that reorder
    load SortableJS and the shared helper (core/partials/sortable_script.html) in `todo_js_libs`. {% endcomment %}
 {% block content %}
 {% comment %} `data-scroll-hint` (tasks.js sets `data-more-right` while there is more to scroll to): on a phone the menus are
@@ -37,6 +37,7 @@
                 {% endfor %}
             </ul>
         </nav>
+        {% include 'todo/partials/sidebar_projects.html' %}
         {% include 'todo/partials/sidebar_filters.html' %}
         </div>
 
@@ -62,6 +63,7 @@
     </div>
     {% include 'core/partials/confirm_modal.html' %}
     {% include 'todo/partials/close_dialog.html' %}
+    {% include 'todo/partials/move_dialog.html' %}
 </div>
 {% endblock %}
 

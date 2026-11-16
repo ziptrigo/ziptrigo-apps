@@ -227,17 +227,37 @@ def open_tasks(user: User) -> QuerySet:
     return Task.objects.filter(user=user, completed_at__isnull=True, deleted_at__isnull=True)
 
 
+def not_archived() -> Q:
+    """A condition on a `Task`: it is in no project, or in one that is not archived. A task in an
+    archived project is muted as a whole (issue #314): off Today, Upcoming and All, never overdue,
+    its reminders held."""
+    return Q(project__isnull=True) | Q(project__archived_at__isnull=True)
+
+
+def listed_tasks(user: User) -> QuerySet:
+    """The user's open, non-trashed tasks that the lists show: `open_tasks` without the tasks of
+    archived projects. (`open_tasks` stays the set the cap on open tasks counts.)"""
+    return open_tasks(user).filter(not_archived())
+
+
+def project_tasks(project, *, include_closed: bool = False) -> QuerySet:
+    """The non-trashed tasks of `project` (subtasks included, each in its parent's project),
+    unordered: the open ones, or all of them with `include_closed`."""
+    queryset = Task.objects.filter(project=project, deleted_at__isnull=True)
+    return queryset if include_closed else queryset.filter(completed_at__isnull=True)
+
+
 def today_set(user: User) -> QuerySet:
     """Open, non-trashed tasks due today or earlier (the overdue ones included), unordered: what
     the count beside Today counts."""
-    return open_tasks(user).filter(due_date__lte=user_today(user))
+    return listed_tasks(user).filter(due_date__lte=user_today(user))
 
 
 def upcoming_set(user: User) -> QuerySet:
     """Open, non-trashed tasks due after today and within the next `UPCOMING_DAYS` days,
     unordered: what the Upcoming page lists."""
     today = user_today(user)
-    return open_tasks(user).filter(
+    return listed_tasks(user).filter(
         due_date__gt=today, due_date__lte=today + timedelta(days=UPCOMING_DAYS)
     )
 
@@ -268,7 +288,7 @@ def trash_set(user: User) -> QuerySet:
 def todays_tasks(user: User) -> QuerySet:
     """Open, non-trashed tasks due *today* (not the overdue ones), unordered: the list the user can
     drag into a manual order, and the set `today_position` is taken over."""
-    return open_tasks(user).filter(due_date=user_today(user))
+    return listed_tasks(user).filter(due_date=user_today(user))
 
 
 def subtasks_of(parent: Task) -> QuerySet:
@@ -280,13 +300,13 @@ def subtasks_of(parent: Task) -> QuerySet:
 def overdue_set(user: User) -> QuerySet:
     """Open, non-trashed tasks due before today that are not muted: what is overdue, what the Overdue
     section lists and what "Reschedule overdue to today" moves."""
-    return open_tasks(user).filter(due_date__lt=user_today(user)).exclude(state__in=MUTED_STATES)
+    return listed_tasks(user).filter(due_date__lt=user_today(user)).exclude(state__in=MUTED_STATES)
 
 
 def muted_overdue_set(user: User) -> QuerySet:
     """Open, non-trashed muted tasks due before today: never shown as overdue, never moved by
     "Reschedule overdue"; where they show on Today is `TodoAccount.muted_overdue`."""
-    return open_tasks(user).filter(due_date__lt=user_today(user), state__in=MUTED_STATES)
+    return listed_tasks(user).filter(due_date__lt=user_today(user), state__in=MUTED_STATES)
 
 
 def today_count(user: User, account: TodoAccount | None = None) -> int:

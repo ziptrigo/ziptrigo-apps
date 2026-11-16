@@ -36,6 +36,7 @@ from ..models import (
     EventKind,
     Label,
     Priority,
+    Project,
     Recurrence,
     RecurrenceMode,
     Resolution,
@@ -44,7 +45,7 @@ from ..models import (
     TaskState,
     TodoSettings,
 )
-from . import attachments, blockers, comments, dates, events, reminders
+from . import attachments, blockers, comments, dates, events, projects, reminders
 from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account, lock_account
 from .billing import cannot_afford, charge_task_creation
@@ -244,6 +245,7 @@ class _CleanedTask:
     mode: str
     state: str = TaskState.TODO
     blockers: list[Task] = field(default_factory=list)
+    project: Project | None = None
 
 
 def _clean_new_task(
@@ -261,6 +263,8 @@ def _clean_new_task(
     recurrence: Recurrence | None,
     state: str = TaskState.TODO,
     blocked_by: Iterable[int] = (),
+    project: Project | str | UUID | None = None,
+    allow_archived_project: bool = False,
 ) -> _CleanedTask:
     """Validate the fields of a new task (no writes, no locks): what `create_task` and
     `check_new_task` share."""
@@ -274,6 +278,12 @@ def _clean_new_task(
     cleaned_mode = recurrence_service.clean_mode(recurrence_mode)
     cleaned_state = clean_state(state)
     cleaned_blockers = blockers.clean_new(user, blocked_by)
+    # A subtask is in its parent's project, whatever was asked (read again under the lock).
+    cleaned_project = (
+        cleaned_parent.project
+        if cleaned_parent is not None
+        else projects.clean_project(user, project, allow_archived=allow_archived_project)
+    )
     if (cleaned_rule or recurrence is not None) and cleaned_parent is not None:
         raise _error('rrule', 'A subtask cannot repeat.')
     if recurrence is not None and (cleaned_rule or recurrence.user_id != user.pk):
@@ -292,6 +302,7 @@ def _clean_new_task(
         mode=cleaned_mode,
         state=cleaned_state,
         blockers=cleaned_blockers,
+        project=cleaned_project,
     )
 
 
@@ -309,6 +320,7 @@ def check_new_task(
     recurrence_mode: str = RecurrenceMode.FIXED,
     state: str = TaskState.TODO,
     blocked_by: Iterable[int] = (),
+    project: Project | str | UUID | None = None,
 ) -> date | None:
     """Everything `create_task` would refuse that can be told without writing anything, in the same
     order: the fields (`ValidationError`), a creation blocked by an unpaid repeating task
@@ -334,6 +346,7 @@ def check_new_task(
         recurrence=None,
         state=state,
         blocked_by=blocked_by,
+        project=project,
     )
     settings = TodoSettings.load()
     account = get_account(user)
@@ -361,6 +374,8 @@ def create_task(
     recurrence: Recurrence | None = None,
     state: str = TaskState.TODO,
     blocked_by: Iterable[int] = (),
+    project: Project | str | UUID | None = None,
+    allow_archived_project: bool = False,
     source: str = TaskSource.WEB,
     email_from: str = '',
     email_from_authenticated: bool = False,
@@ -386,6 +401,11 @@ def create_task(
     numbers, the quick-add box's "Blocked by") links the new task to those of the user's tasks and
     makes it Blocked when one of them is open (`services.blockers`).
 
+    `project` (one of the user's, or its id) files the task (issue #314); a subtask is always in
+    its parent's, whatever is passed. An archived project is refused unless
+    `allow_archived_project` (the next occurrence of a repeating task stays where it was). A
+    subtask added to a parent in an archived project is allowed and is muted with it.
+
     `email_from` and `email_from_authenticated` (a task made from an email, issue #186) are stored
     on the task so its page needs no lookup of the email: the From address and whether SES
     authenticated the sender.
@@ -409,6 +429,8 @@ def create_task(
         recurrence=recurrence,
         state=state,
         blocked_by=blocked_by,
+        project=project,
+        allow_archived_project=allow_archived_project,
     )
     cleaned_title, cleaned_description = cleaned.title, cleaned.description
     cleaned_priority, cleaned_time = cleaned.priority, cleaned.due_time
@@ -424,6 +446,20 @@ def create_task(
             # Locked and re-read: a concurrent move of the parent under another task (`update_task`)
             # would otherwise leave this a subtask of a subtask.
             cleaned_parent = clean_parent(user, _locked_parent(cleaned_parent))
+            if cleaned_parent is not None:
+                cleaned.project = cleaned_parent.project  # as it is now
+        if cleaned_parent is None and cleaned.project is not None:
+            # As it is now: a project deleted or archived since the fields were checked is a
+            # refusal, not a foreign-key error or a task filed where it can't be seen. The next
+            # occurrence of a repeating task goes to no project if its project is gone.
+            try:
+                cleaned.project = projects.clean_project(
+                    user, cleaned.project.pk, allow_archived=allow_archived_project
+                )
+            except ValidationError:
+                if not allow_archived_project:
+                    raise
+                cleaned.project = None
         if (
             dates.open_tasks(user).count() >= settings.max_open_tasks_per_user
         ):  # under the lock, so racing creations can't pass the cap together
@@ -438,6 +474,7 @@ def create_task(
             user=user,
             number=number,
             parent=cleaned_parent,
+            project=cleaned.project,
             title=cleaned_title,
             description=cleaned_description,
             priority=cleaned_priority,
@@ -479,6 +516,8 @@ def _record_created(task: Task, parent: Task | None, previous: Task | None, rrul
         data['previous'] = {'number': previous.number}
     if rrule:
         data['rrule'] = rrule
+    if parent is None and task.project_id is not None and task.project is not None:
+        data['project'] = task.project.name
     automatic = task.source in (TaskSource.RECURRENCE, TaskSource.EMAIL)
     entries = [events.entry(task, EventKind.CREATED, data, automatic=automatic)]
     if parent is not None and task.source != TaskSource.RECURRENCE:
@@ -607,6 +646,11 @@ def update_task(
                 if Task.objects.filter(parent=task).exists():
                     raise _error('parent', 'A task with subtasks cannot become a subtask.')
             values['position'] = next_position(new_parent)
+            if new_parent is not None:
+                # A subtask is in its parent's project (`services.projects`).
+                parent_project_id = locked[new_parent.pk].project_id
+                if parent_project_id != current.project_id:
+                    values['project'] = locked[new_parent.pk].project
         description_changed = (
             'description' in values and values['description'] != current.description
         )
@@ -623,11 +667,16 @@ def update_task(
             if moves and current.parent_id is not None
             else None
         )
+        left_project = current.project if 'project' in values else None
         for name, value in values.items():
             setattr(task, name, value)
         task.save(update_fields=[*values, 'updated_at'])
         if labels is not None:
             task.labels.set(labels)
+        if 'project' in values and new_parent is not None:
+            # It followed its new parent into that parent's project: logged, and the reminders an
+            # archived project held are released (`services.projects`).
+            projects.followed_parent(task, left_project, values['project'], new_parent)
         _record_update(
             task,
             current,

@@ -1,0 +1,119 @@
+{% load datetime_format %}
+{% comment %} The projects editor (issue #314): the Active / Archived tabs, each project with its progress, edit in place (name
+   and colour), drag to reorder (active ones: the sidebar's order, which shows it from the next page load), archive, unarchive and delete in the shared confirmation
+   modal, and the add form. Every add or edit re-renders this whole block into #projects (with the sidebar's block out of
+   band, `oob_sidebar`); a refusal is a 422 into #project-msg. Needs `tab`, `tabs` (key, label, count), `projects` (with
+   counts), `unfiled_count` and `default_color`. {% endcomment %}
+<nav data-tabs aria-label="Projects" class="mb-4 flex flex-wrap gap-x-1 border-b border-gray-200 dark:border-gray-700">
+    {% for key, label, count in tabs %}
+    <a href="{% url 'todo:projects' %}{% if key == 'archived' %}?tab=archived{% endif %}"
+       {% if tab == key %}aria-current="page"{% endif %}
+       class="-mb-px inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium {% if tab == key %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">{{ label }}<span class="ml-2 text-xs text-gray-500 dark:text-gray-400">{{ count }}</span></a>
+    {% endfor %}
+</nav>
+
+<ul class="mb-4 divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+    {% if tab == 'active' %}data-sortable data-reorder-url="{% url 'todo:project-reorder' %}" data-msg="#project-msg"{% endif %}>
+    {% for project in projects %}
+    <li x-data="{ editing: false }" data-task-id="{{ project.pk }}" class="flex items-center gap-3 px-3 py-3">
+        {% if tab == 'active' %}
+        <span class="drag-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
+              data-name="{{ project.name }}" aria-label="Reorder {{ project.name }}: use the up and down arrow keys" title="Drag to reorder, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+        {% endif %}
+        <span class="h-3 w-3 flex-shrink-0 rounded-full{% if project.is_archived %} opacity-60{% endif %}" style="background-color: {{ project.color }}" aria-hidden="true"></span>
+        <div class="min-w-0 flex-1">
+            <div x-show="!editing">
+                <a href="{% url 'todo:project' project.pk %}" class="rounded-md text-sm font-medium {% if project.is_archived %}text-gray-600 dark:text-gray-300{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline">{{ project.name }}</a>
+                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <div class="h-1.5 w-32 rounded-full bg-gray-200 dark:bg-gray-700" role="img" aria-label="{{ project.closed_count }} of {{ project.task_total }} task{{ project.task_total|pluralize }} closed">
+                        <div class="h-1.5 rounded-full bg-brand-primary" style="width: {{ project.progress_percent }}%"></div>
+                    </div>
+                    <span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ project.open_count }} open &middot; {{ project.closed_count }} closed</span>
+                    {% if project.is_archived %}<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">archived {{ project.archived_at|fdate }}</span>{% endif %}
+                </div>
+            </div>
+            <form x-show="editing" style="display: none" method="post" action="{% url 'todo:project-edit' project.pk %}"
+                  hx-post="{% url 'todo:project-edit' project.pk %}" hx-target="#projects" hx-swap="innerHTML"
+                  hx-disabled-elt="find button[type='submit']"
+                  class="flex flex-wrap items-center gap-2" @keydown.escape="editing = false; todoCancelEdit($el, '#project-msg')">
+                {% csrf_token %}
+                <input type="hidden" name="tab" value="{{ tab }}">
+                <label for="project-name-{{ project.pk }}" class="sr-only">Name</label>
+                <input id="project-name-{{ project.pk }}" name="name" type="text" value="{{ project.name }}" maxlength="80" required
+                       x-effect="if (editing) $nextTick(() => $el.focus())"
+                       class="min-w-[9rem] flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
+                <label for="project-color-{{ project.pk }}" class="sr-only">Colour</label>
+                <input id="project-color-{{ project.pk }}" name="color" type="color" value="{{ project.color }}"
+                       class="h-8 w-10 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-0.5">
+                <button type="submit" aria-label="Save the project" title="Save"
+                        class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                <button type="button" @click="editing = false; todoCancelEdit($el.form, '#project-msg')" aria-label="Cancel editing" title="Cancel"
+                        class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            </form>
+        </div>
+        <div x-show="!editing" class="flex flex-shrink-0 items-center">
+            <button type="button" @click="editing = true" aria-label="Edit {{ project.name }}" title="Edit"
+                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            {% if project.is_archived %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:project-unarchive' project.pk %}"
+                    data-title="Unarchive project"
+                    data-body="Make {{ project.name }} active again? Its {{ project.open_count }} open task{{ project.open_count|pluralize }} come{{ project.open_count|pluralize:'s,' }} back to your lists, with one reminder for each task that missed any."
+                    data-label="Unarchive" data-tone="primary"
+                    aria-label="Unarchive {{ project.name }}" title="Unarchive"
+                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-box-open text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            {% else %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:project-archive' project.pk %}"
+                    data-title="Archive project"
+                    data-body="Archive {{ project.name }}? Its {{ project.open_count }} open task{{ project.open_count|pluralize }} leave{{ project.open_count|pluralize:'s,' }} your lists and their reminders wait until you unarchive it. Nothing is deleted."
+                    data-label="Archive" data-tone="primary"
+                    aria-label="Archive {{ project.name }}" title="Archive"
+                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-box-archive text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            {% endif %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:project-delete' project.pk %}"
+                    data-title="Delete project"
+                    data-body="Delete {{ project.name }}? The project and its description are deleted.{% if project.task_total %} Its {{ project.task_total }} task{{ project.task_total|pluralize }} {{ project.task_total|pluralize:'is,are' }} kept, in no project.{% endif %} This can't be undone."
+                    data-label="Delete project"
+                    aria-label="Delete {{ project.name }}" title="Delete"
+                    class="btn p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-trash" aria-hidden="true"></i></button>
+        </div>
+    </li>
+    {% empty %}
+    <li class="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">{% if tab == 'archived' %}No archived projects.{% else %}No projects yet. Add your first below.{% endif %}</li>
+    {% endfor %}
+</ul>
+
+{% if tab == 'active' %}
+<p class="mb-8 flex items-center gap-2 px-3 text-sm text-gray-600 dark:text-gray-300">
+    <span class="h-3 w-3 flex-shrink-0 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true"></span>
+    <a href="{% url 'todo:search' %}?projects=none" class="font-medium text-sage-600 dark:text-sage-300 hover:underline">No project</a>
+    <span class="text-gray-500 dark:text-gray-400">{{ unfiled_count }} open task{{ unfiled_count|pluralize }} in no project</span>
+</p>
+
+<section aria-labelledby="new-project-title">
+    <h2 id="new-project-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">New project</h2>
+    <form method="post" action="{% url 'todo:projects' %}" hx-post="{% url 'todo:projects' %}" hx-target="#projects" hx-swap="innerHTML"
+          hx-disabled-elt="find button[type='submit']"
+          class="flex flex-col gap-3 sm:flex-row sm:items-end">
+        {% csrf_token %}
+        <div class="min-w-0 flex-1">
+            <label for="new-project-name" class="block mb-1 text-sm font-medium">Name</label>
+            <input id="new-project-name" name="name" type="text" maxlength="80" required
+                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+        </div>
+        <div>
+            <label for="new-project-color" class="block mb-1 text-sm font-medium">Colour</label>
+            <input id="new-project-color" name="color" type="color" value="{{ default_color }}"
+                   class="h-10 w-14 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1">
+        </div>
+        <button type="submit"
+                class="btn inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
+            <i class="fas fa-plus mr-2" aria-hidden="true"></i>Add project
+        </button>
+    </form>
+</section>
+{% endif %}
+{% if clear_msg %}{% comment %} A success clears a refusal an earlier request left in the message slot. {% endcomment %}<div id="project-msg" hx-swap-oob="true" class="mb-4 text-sm" aria-live="polite"></div>{% endif %}
+{% if oob_sidebar %}{% include 'todo/partials/sidebar_projects.html' with oob=True nav='projects' %}{% endif %}

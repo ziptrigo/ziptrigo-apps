@@ -1,0 +1,146 @@
+{% extends 'todo/layout.html' %}
+{% load datetime_format %}
+
+{% block title %}{{ project.name }} - To-do - ZipTrigo{% endblock %}
+
+{% comment %} One project's page (issue #314): its name, colour and counts, progress, the Markdown description (edited in
+   place), the quick-add box bound to the project, and its tasks (open ones; `?closed=1` adds the closed ones after them).
+   An archived project is read-only here: no quick add, an Unarchive button and the note about what archiving does. The
+   list is a plain page (sort, closed and page are links), its rows answer like any list's (`view='project'`). {% endcomment %}
+{% block todo_content %}
+<a href="{% url 'todo:projects' %}{% if project.is_archived %}?tab=archived{% endif %}"
+   class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Projects</a>
+
+<div x-data="{ editing: false }" class="mt-2">
+    <div x-show="!editing" class="flex flex-wrap items-start gap-3">
+        <span class="mt-3 h-3.5 w-3.5 flex-shrink-0 rounded-full{% if project.is_archived %} opacity-60{% endif %}" style="background-color: {{ project.color }}" aria-hidden="true"></span>
+        <div class="min-w-0 flex-1">
+            <h1 class="break-words text-3xl font-semibold tracking-tight {% if project.is_archived %}text-gray-600 dark:text-gray-300{% else %}text-gray-900 dark:text-gray-100{% endif %}">{{ project.name }}{% if project.is_archived %} <span class="ml-1 inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 align-middle text-xs font-medium text-gray-600 dark:text-gray-300">Archived</span>{% endif %}</h1>
+            <p id="project-counts" class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ project.open_count }} open &middot; {{ project.closed_count }} closed{% if overdue_count %} &middot; <span class="text-red-600 dark:text-red-400">{{ overdue_count }} overdue</span>{% endif %}{% if project.is_archived %} &middot; archived {{ project.archived_at|fdate }}{% endif %}</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <button type="button" @click="editing = true; $nextTick(() => $refs.name.focus())"
+                    class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit
+            </button>
+            {% if project.is_archived %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:project-unarchive' project.pk %}"
+                    data-title="Unarchive project"
+                    data-body="Make {{ project.name }} active again? Its {{ project.open_count }} open task{{ project.open_count|pluralize }} come{{ project.open_count|pluralize:'s,' }} back to your lists, with one reminder for each task that missed any."
+                    data-label="Unarchive" data-tone="primary"
+                    class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+                <i class="fas fa-box-open mr-2" aria-hidden="true"></i>Unarchive
+            </button>
+            {% else %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:project-archive' project.pk %}"
+                    data-title="Archive project"
+                    data-body="Archive {{ project.name }}? Its {{ project.open_count }} open task{{ project.open_count|pluralize }} leave{{ project.open_count|pluralize:'s,' }} your lists and their reminders wait until you unarchive it. A repeating task closed meanwhile still makes its next one, in this project.{% if outside_blocked %} {{ outside_blocked }} task{{ outside_blocked|pluralize }} outside it {{ outside_blocked|pluralize:'is,are' }} blocked by tasks in it and stay{{ outside_blocked|pluralize:'s,' }} blocked.{% endif %} Nothing is deleted."
+                    data-label="Archive" data-tone="primary"
+                    class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                <i class="fas fa-box-archive mr-2" aria-hidden="true"></i>Archive
+            </button>
+            {% endif %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:project-delete' project.pk %}"
+                    data-title="Delete project"
+                    data-body="Delete {{ project.name }}? The project and its description are deleted.{% if project.task_total %} Its {{ project.task_total }} task{{ project.task_total|pluralize }} {{ project.task_total|pluralize:'is,are' }} kept, in no project{% if project.is_archived and project.open_count %}, and the open one{{ project.open_count|pluralize }} come{{ project.open_count|pluralize:'s,' }} back to your lists{% endif %}.{% endif %} This can't be undone."
+                    data-label="Delete project"
+                    aria-label="Delete {{ project.name }}" title="Delete project"
+                    class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <i class="fas fa-trash" aria-hidden="true"></i>
+            </button>
+        </div>
+    </div>
+
+    <form x-show="editing" style="display: none" method="post" action="{% url 'todo:project-edit' project.pk %}"
+          hx-post="{% url 'todo:project-edit' project.pk %}" hx-disabled-elt="find button[type='submit']"
+          @keydown.escape="editing = false; todoCancelEdit($el, '#todo-msg')"
+          class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+        {% csrf_token %}
+        <input type="hidden" name="ctx" value="page">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div class="min-w-0 flex-1">
+                <label for="project-name" class="block mb-1 text-sm font-medium">Name</label>
+                <input id="project-name" x-ref="name" name="name" type="text" value="{{ project.name }}" maxlength="80" required
+                       class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+            </div>
+            <div>
+                <label for="project-color" class="block mb-1 text-sm font-medium">Colour</label>
+                <input id="project-color" name="color" type="color" value="{{ project.color }}"
+                       class="h-10 w-14 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1">
+            </div>
+        </div>
+        <label for="project-description" class="mt-3 block mb-1 text-sm font-medium">Description</label>
+        <textarea id="project-description" name="description" rows="6" maxlength="10000"
+                  class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 font-mono text-sm">{{ project.description }}</textarea>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Markdown, like a task's description; <code>#1234</code> links a task. Up to 10,000 characters.</p>
+        <div class="mt-3 flex items-center justify-end gap-3">
+            <button type="button" @click="editing = false; todoCancelEdit($el.form, '#todo-msg')"
+                    class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+            <button type="submit"
+                    class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save</button>
+        </div>
+    </form>
+</div>
+
+{% if project.task_total %}
+<div class="mt-4" role="img" aria-label="{{ project.closed_count }} of {{ project.task_total }} task{{ project.task_total|pluralize }} closed">
+    <div class="h-2 rounded-full bg-gray-200 dark:bg-gray-700"><div class="h-2 rounded-full bg-brand-primary" style="width: {{ project.progress_percent }}%"></div></div>
+    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ project.closed_count }} of {{ project.task_total }} task{{ project.task_total|pluralize }} closed</p>
+</div>
+{% endif %}
+
+{% if project.is_archived %}
+<div role="status" class="mt-4 flex gap-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+    <i class="fas fa-box-archive mt-0.5 text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+    <p><span class="font-medium text-gray-900 dark:text-gray-100">This project is archived.</span>
+        Its open tasks are not on Today, Upcoming or All, are never overdue, and their reminders wait.
+        Unarchive it to get them back, with one reminder for each task that missed any.</p>
+</div>
+{% endif %}
+
+{% if description_html %}
+<div id="project-description-text" class="todo-description mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3 text-sm text-gray-800 dark:text-gray-200 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-gray-100 [&_pre]:dark:bg-gray-900 [&_pre]:p-3 [&_code]:rounded [&_code]:bg-gray-100 [&_code]:dark:bg-gray-900 [&_code]:px-1 [&_blockquote]:border-l-4 [&_blockquote]:border-sage-200 [&_blockquote]:pl-3 [&_blockquote]:text-gray-600 [&_blockquote]:dark:text-gray-400 [&_a]:text-sage-600 [&_a]:dark:text-sage-300 [&_a]:underline [&_li.task-list-item]:list-none [&_li.task-list-item]:-ml-6">
+    {{ description_html }}
+</div>
+{% endif %}
+
+{% if not project.is_archived %}
+<div id="quick-add" class="mt-6">
+    {% include 'todo/partials/task_form.html' with mode='quick' %}
+</div>
+{% endif %}
+
+<div class="{% if project.is_archived %}mt-6 {% endif %}mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+    <span class="text-gray-500 dark:text-gray-400">Sort by</span>
+    {% for link in sort_links %}
+    <a href="{{ page_url }}{% if link.query %}?{{ link.query }}{% endif %}"
+       {% if link.active %}aria-current="true" title="Click to sort {% if link.direction == 'asc' %}descending{% else %}ascending{% endif %}"{% endif %}
+       class="rounded-md {% if link.active %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ link.label }}{% if link.active and link.direction %}<i class="fas fa-arrow-{% if link.direction == 'asc' %}up{% else %}down{% endif %} ml-1 text-xs" aria-hidden="true"></i><span class="sr-only">, sorted {% if link.direction == 'asc' %}ascending{% else %}descending{% endif %}</span>{% endif %}</a>
+    {% endfor %}
+    <a href="{{ page_url }}{% if closed_toggle_query %}?{{ closed_toggle_query }}{% endif %}"
+       class="ml-auto rounded-md text-sage-600 dark:text-sage-300 hover:underline">{% if show_closed %}Hide closed{% else %}Show closed{% endif %}</a>
+</div>
+
+<div id="task-list" class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
+        {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
+        {% empty %}
+        <li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">{% if project.is_archived or show_closed %}No tasks in this project.{% else %}No open tasks in this project. Add one above.{% endif %}</li>
+        {% endfor %}
+        <template data-empty-state><li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">No open tasks in this project.</li></template>
+    </ul>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="mt-6 flex items-center justify-between text-sm">
+    <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+    <div class="flex gap-4">
+        {% if page_obj.has_previous %}<a href="{{ page_url }}?{{ prev_query }}" class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-chevron-left mr-1 text-xs" aria-hidden="true"></i>Previous</a>{% endif %}
+        {% if page_obj.has_next %}<a href="{{ page_url }}?{{ next_query }}" class="text-sage-600 dark:text-sage-300 hover:underline">Next<i class="fas fa-chevron-right ml-1 text-xs" aria-hidden="true"></i></a>{% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

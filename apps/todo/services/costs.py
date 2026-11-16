@@ -44,7 +44,7 @@ def cost_section(user: User) -> CostSection:
         )
     lines += [
         storage('Attach files', 'Files on tasks and on comments.', unit='per day'),
-        free('Reading dates from a title, reminders, comments, search and saved filters'),
+        free('Projects, reading dates from a title, reminders, comments, search and saved filters'),
     ]
 
     # Read only: opening the Costs page must not create a To-do account.

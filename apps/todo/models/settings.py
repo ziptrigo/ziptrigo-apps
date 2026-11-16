@@ -64,6 +64,15 @@ class TodoSettings(models.Model):
             help_text='Labels a user may have.',
         ),
     )
+    max_projects_per_user = cast(
+        int,
+        models.PositiveIntegerField(
+            default=100,
+            db_default=100,
+            validators=[MinValueValidator(1)],
+            help_text='Projects a user may have, archived ones included.',
+        ),
+    )
 
     max_attachment_bytes = cast(
         int,

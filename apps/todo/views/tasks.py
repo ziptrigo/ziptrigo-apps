@@ -17,6 +17,7 @@ from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
@@ -37,7 +38,7 @@ from ..forms import (
 )
 from ..forms.reminder import PRESETS as REMINDER_PRESETS
 from ..forms.reminder import UNITS as REMINDER_UNITS
-from ..models import Label, ReminderChannel, Resolution, Task, TodoSettings
+from ..models import Label, Project, ReminderChannel, Resolution, Task, TodoSettings
 from ..services import (
     SUBTASKS_DONE,
     SUBTASKS_LEAVE,
@@ -73,6 +74,7 @@ from .common import (
     free_line,
     limited,
     owned_task,
+    projects_context,
     redirect_back,
     refuse,
     render_page,
@@ -90,7 +92,7 @@ CLEAR_PAGE_MSG = (
 
 def _view_of(request: AuthenticatedHttpRequest) -> str:
     view = VIEW_ALIASES.get(request.POST.get('view', ''), request.POST.get('view', ''))
-    return view if view in (*VIEWS, 'subtask', 'search') else 'all'
+    return view if view in (*VIEWS, 'subtask', 'search', 'project') else 'all'
 
 
 def _is_page(request: AuthenticatedHttpRequest) -> bool:
@@ -125,7 +127,9 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
     return {
         'reminders': reminders.task_reminders(task),
         'reminder_history': reminders.task_history(task),
-        'has_held_reminders': task.is_muted and reminders.has_held(task),
+        'has_held_reminders': (task.is_muted or task.in_archived_project)
+        and task.is_open
+        and reminders.has_held(task),
         'reminder_presets': REMINDER_PRESETS,
         'reminder_units': REMINDER_UNITS,
         'reminder_channels': ReminderChannel.choices,
@@ -138,6 +142,7 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
         'open_subtasks': open_subtasks,
         'labels': labels,
         'selected_label_ids': [str(label.pk) for label in task.labels.all()],
+        'todo_projects': list(Project.objects.filter(user=user, archived_at__isnull=True)),
         'today': user_today(user),
         'trash_view': task.is_trashed,
     }
@@ -269,10 +274,11 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
     if (response := limited(request, 'TODO_CREATE_USER', retarget='#quick-add-msg')) is not None:
         return response
     try:
-        create_task(
+        task = create_task(
             request.user,
             state=form.requested_state(),
             blocked_by=form.requested_blockers(),
+            project=form.requested_project(),
             **form.changes(),
         )
     except InsufficientCreditsError:
@@ -284,6 +290,20 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
         messages.success(request, 'Task added.')
         return redirect_back(request)
     view = request.POST.get('view', '')
+    if view == 'project':
+        # A project's own page is not an htmx list: reload it (the page the form is on, also when
+        # the task was put in another project or in none), with a message.
+        messages.success(request, 'Task added.')
+        back = request.headers.get('Referer', '')
+        if not url_has_allowed_host_and_scheme(
+            back, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+        ):
+            back = (
+                reverse('todo:project', args=[task.project_id])
+                if task.project_id is not None
+                else reverse('todo:today')
+            )
+        return hx_redirect(request, back)
     view = view if view in VIEWS else 'today'
     used, free = free_line(get_account(request.user), TodoSettings.load())
     context = list_context(request, view)
@@ -300,6 +320,7 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
             'free_total': free,
             'oob_nav': True,
             'today_count': today_count(request.user),
+            **projects_context(request.user),  # the quick-add box's Project select
         }
     )
     return render(request, 'todo/partials/task_list.html', context)

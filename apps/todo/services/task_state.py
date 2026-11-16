@@ -26,7 +26,7 @@ def lock_tasks(*pks: UUID) -> dict[UUID, Task]:
     write that locks more than one task takes the user's `TodoAccount` row first
     (`accounts.lock_account`), then the task acted on, then its subtasks, then its dependents."""
     rows: Iterable[Task] = (
-        Task.objects.select_related('user')
+        Task.objects.select_related('user', 'project')  # `write_state` asks whether it is archived
         .select_for_update(of=('self',))
         .filter(pk__in=pks)
         .order_by('pk')
@@ -53,6 +53,12 @@ def write_state(current: Task, state: str, now: datetime, *, release: bool = Tru
     Task.objects.filter(pk=current.pk).update(**fields)
     for name, value in fields.items():
         setattr(current, name, value)
-    if release and was_muted and state not in MUTED_STATES:
+    if (
+        release
+        and was_muted
+        and state not in MUTED_STATES
+        # In an archived project the reminders keep waiting, for the unarchive.
+        and not current.in_archived_project
+    ):
         reminders.release_held(current, now)
     return True

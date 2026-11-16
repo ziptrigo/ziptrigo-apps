@@ -346,7 +346,7 @@ class TestSmallerFixes:
 
         page = text(web.get(reverse('todo:today')))
 
-        assert page.count('<ul data-scroll-hint') == 2
+        assert page.count('<ul data-scroll-hint') == 3  # menu, projects, filters
         assert '[data-scroll-hint][data-more-right="true"]' in page
 
     def test_checklist_boxes_get_the_dark_native_look(self, web):

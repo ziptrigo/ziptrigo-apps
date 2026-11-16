@@ -1093,6 +1093,15 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | 6 | `/admin/core/scheduledjob/` after the scheduler ran (or the job's page). | `file_transfer.send_request_notices` exists: "Tells the owner of a file request that new files arrived, once the last upload of a batch is 15 minutes old (one notice per batch, in the app only)." Every minute, lease 5 minutes. |
 | 7 | The same page, and a transfer whose images were previewed (FT-67): the **Transfer files** inline of a transfer. | It also shows each file's **Preview type** (`image/png`, `application/pdf`, `text/plain`...), **Preview status** (`ready` after a preview, `none` before; `unavailable` for a corrupt image) and **Preview pages**. The job list has `file_transfer.purge_previews` (every 24 hours, lease 1 hour): "Deletes the downsized preview pages of images and PDFs that nobody has previewed for 14 days; they are built again the next time someone clicks Preview." FT-69 runs it. |
 
+### ADM-65 To-do projects in the admin
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | As `qa.admin@example.com`, open `/admin/todo/project/` (after `qa.user` made projects, TODO-63). | The list shows name, user, colour, an Archived mark, the number of tasks and the creation date; filter by archived (empty / not empty) and date; search by name and email. |
+| 2 | Open one. | Every field is read-only; there is no Add, Save or Delete. |
+| 3 | Open `/admin/todo/task/`. | The list has a **Project** column. |
+| 4 | Open `/admin/todo/todosettings/`. | "Max projects per user" (100) is there and editable. Set it to 1, save, and as `qa.user` (who has projects) add another: `You can have up to 1 project.` Restore 100. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

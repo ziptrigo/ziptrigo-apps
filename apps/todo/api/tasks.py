@@ -47,7 +47,7 @@ from ..services import (
     blockers,
     closed_set,
     has_manual_order,
-    open_tasks,
+    listed_tasks,
     order_tasks,
     order_today,
     reminders,
@@ -57,7 +57,7 @@ from ..services import (
     trash_set,
     upcoming_set,
 )
-from ..services.dates import DIRECTIONS
+from ..services.dates import DIRECTIONS, not_archived
 from ..services.filters import DATE_RANGES, NO_LABEL, PRIORITIES, RESOLUTIONS, STATES
 from ..services.search import MODES, attach_matches, order_results, prepare_query, search_guard
 from ..services.tasks import NOT_OPEN_MESSAGE
@@ -122,9 +122,10 @@ def _view_queryset(user, view: str, include_closed: bool, resolution: str = '') 
         return closed_set(user, resolution)
     if view == 'trash':
         return trash_set(user)
+    # Tasks of an archived project are left out of the plain lists, as on the website.
     if include_closed:
-        return Task.objects.filter(user=user, deleted_at__isnull=True)
-    return open_tasks(user)
+        return Task.objects.filter(user=user, deleted_at__isnull=True).filter(not_archived())
+    return listed_tasks(user)
 
 
 def _ordered(
@@ -258,6 +259,10 @@ def list_tasks(
             'states': _states(state),
             'priorities': _priorities(priority),
             'labels': _labels(label),
+            # The view decides about archived projects (`_view_queryset` leaves them out of `all`,
+            # `today` and `upcoming`); a filter on Closed, the Trash or a parent's subtasks must
+            # not drop their tasks.
+            'include_archived': ['1'],
             'date_range': [date_range or ''],
             'date_from': [str(parse_date('date_from', date_from) or '')],
             'date_to': [str(parse_date('date_to', date_to) or '')],

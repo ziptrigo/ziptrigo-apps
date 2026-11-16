@@ -12,6 +12,7 @@ from apps.core.markdown import normalize_for_search, search_text
 
 from ..limits import TITLE_MAX
 from .label import Label
+from .project import Project
 from .recurrence import Recurrence
 
 
@@ -96,6 +97,7 @@ class Task(models.Model):
     user_id: uuid.UUID
     parent_id: uuid.UUID | None
     recurrence_id: uuid.UUID | None
+    project_id: uuid.UUID | None
     # Set by `services.dates.with_subtask_counts` on the tasks a list shows (not stored).
     subtask_total: int
     subtask_done: int
@@ -230,6 +232,16 @@ class Task(models.Model):
         models.ManyToManyField(Label, blank=True, related_name='tasks'),
     )
 
+    #: The project the task is in, or `None` for none (issue #314). A subtask always has its
+    #: parent's (the services keep them equal, so a list can filter on this column alone). Deleting
+    #: a project leaves its tasks in no project.
+    project = cast(
+        'Project | None',
+        models.ForeignKey(
+            Project, null=True, blank=True, on_delete=models.SET_NULL, related_name='tasks'
+        ),
+    )
+
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['user', 'number'], name='todo_task_user_number'),
@@ -263,6 +275,21 @@ class Task(models.Model):
     def is_muted(self) -> bool:
         """An open task in a muted state (`MUTED_STATES`)."""
         return self.is_open and self.state in MUTED_STATES
+
+    @property
+    def in_archived_project(self) -> bool:
+        """Whether the task's project is archived: the task is then off Today, Upcoming and All,
+        never overdue, and its reminders wait (`services.projects`). Reads `project`, which the
+        lists and the task page load with the row."""
+        if self.project_id is None:
+            return False
+        project = self.project
+        return project is not None and project.archived_at is not None
+
+    @property
+    def is_dimmed(self) -> bool:
+        """Shown dimmed in a list: muted by its state, or in an archived project."""
+        return self.is_muted or (self.is_open and self.in_archived_project)
 
     @property
     def open_blockers(self) -> list['Task']:
@@ -326,12 +353,13 @@ class Task(models.Model):
 
     def is_overdue(self, today_local: date) -> bool:
         """Open, not muted, with a due date before `today_local` (the user's today): a muted task is
-        never overdue."""
+        never overdue, and neither is one in an archived project."""
         return (
             self.is_open
             and self.state not in MUTED_STATES
             and self.due_date is not None
             and self.due_date < today_local
+            and not self.in_archived_project
         )
 
     def clean(self) -> None:

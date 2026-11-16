@@ -48,7 +48,7 @@
     <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2">
             <a href="{% url 'todo:task' task.number %}"
-               class="task-title min-w-0 truncate text-sm font-medium {% if task.is_completed or task.is_trashed %}text-gray-500 dark:text-gray-400 line-through{% elif task.is_muted %}text-gray-500 dark:text-gray-400{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline rounded-md">{{ task.title }}</a>
+               class="task-title min-w-0 truncate text-sm font-medium {% if task.is_completed or task.is_trashed %}text-gray-500 dark:text-gray-400 line-through{% elif task.is_dimmed %}text-gray-500 dark:text-gray-400{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline rounded-md">{{ task.title }}</a>
             <span class="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">#{{ task.number }}</span>
         </div>
         <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -66,6 +66,10 @@
             <span class="text-xs text-gray-500 dark:text-gray-400" title="Comments"><i class="far fa-comment mr-1" aria-hidden="true"></i>{{ task.comment_count }}<span class="sr-only"> comment{{ task.comment_count|pluralize }}</span></span>
             {% endif %}
             {% for label in task.labels.all %}{% label_chip label %}{% endfor %}
+            {% if task.project_id and view != 'project' %}{% comment %}The project (issue #314), on every list but the project's own page; loaded with the row (`decorate`).{% endcomment %}
+            <a href="{% url 'todo:project' task.project_id %}" title="Project{% if task.project.is_archived %} (archived){% endif %}"
+               class="inline-flex max-w-[12rem] items-center gap-1.5 rounded-md text-xs text-gray-600 dark:text-gray-300 hover:underline"><span class="h-2 w-2 flex-shrink-0 rounded-full" style="background-color: {{ task.project.color }}" aria-hidden="true"></span><span class="min-w-0 truncate">{{ task.project.name }}</span>{% if task.project.is_archived %}<span class="sr-only"> (archived project)</span>{% endif %}</a>
+            {% endif %}
             {% if task.parent and view != 'subtask' %}
             <span class="text-xs text-gray-500 dark:text-gray-400">in <a href="{% url 'todo:task' task.parent.number %}" class="hover:underline">{{ task.parent.title }}</a></span>
             {% endif %}
@@ -98,6 +102,16 @@
         </button>
         {% else %}
         {% if not task.is_completed %}{% include 'todo/partials/postpone_menu.html' %}{% endif %}
+        {% if not task.parent_id %}{% comment %}Only a top-level task moves: a subtask is in its parent's project.{% endcomment %}
+        <button type="button"
+                @click="$dispatch('open-move-dialog', {url: $el.dataset.url, title: $el.dataset.title, project: $el.dataset.project, subtasks: $el.dataset.subtasks, trigger: $el})"
+                data-url="{% url 'todo:move' task.number %}" data-title="{{ task.title }}"
+                data-project="{{ task.project_id|default:'' }}" data-subtasks="{{ task.subtask_total|default:0 }}"
+                class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                aria-label="Move {{ task.title }} to a project" title="Move to project">
+            <i class="fas fa-folder text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+        </button>
+        {% endif %}
         {% if task.offers_stop_repeating %}
         <button type="button" @click="show($el)"
                 data-url="{% url 'todo:trash-task' task.number %}"

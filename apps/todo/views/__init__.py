@@ -39,6 +39,16 @@ from .lists import (
     upcoming_page,
 )
 from .parse import parse_view
+from .projects import (
+    project_archive,
+    project_delete,
+    project_edit,
+    project_page,
+    project_reorder,
+    project_unarchive,
+    projects_page,
+    task_move,
+)
 from .reminders import reminder_add, reminder_delete, reminder_edit, reminder_history
 from .search import search_list, search_page
 from .settings import settings_page
@@ -98,6 +108,14 @@ __all__ = [
     'labels_page',
     'open_blockers',
     'parse_view',
+    'project_archive',
+    'project_delete',
+    'project_edit',
+    'project_page',
+    'project_reorder',
+    'project_unarchive',
+    'projects_page',
+    'task_move',
     'recurrence_stop',
     'reminder_add',
     'reminder_delete',

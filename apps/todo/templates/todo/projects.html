@@ -1,0 +1,17 @@
+{% extends 'todo/layout.html' %}
+
+{% block title %}Projects - To-do - ZipTrigo{% endblock %}
+
+{% block todo_content %}
+<h1 class="mb-6 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Projects</h1>
+<p class="mb-6 text-sm text-gray-500 dark:text-gray-400">A task is in one project, or in none; its subtasks go with it. Projects are free. Archive one to put it away without deleting anything.</p>
+
+<div id="project-msg" class="mb-4 text-sm" aria-live="polite"></div>
+<div id="projects">
+    {% include 'todo/partials/project_list.html' %}
+</div>
+{% endblock %}
+
+{% block todo_js_libs %}
+{% include 'core/partials/sortable_script.html' %}
+{% endblock %}

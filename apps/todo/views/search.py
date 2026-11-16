@@ -22,7 +22,7 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.services.timezones import user_today
 from apps.core.htmx import is_htmx
 
-from ..models import Label, Resolution, SavedFilter, TaskState
+from ..models import Label, Project, Resolution, SavedFilter, TaskState
 from ..services import SORTS, FilterParams, describe_params, filter_page, parse_filter_params
 from ..services.filters import DATE_RANGES, QUERY_KEYS, label_names
 from ..services.saved_filters import dropped_label_count, stored_params
@@ -81,6 +81,9 @@ def build_context(
         'heading': saved.name if saved is not None else 'Search',
         'labels': labels,
         'selected_labels': set(params.labels),
+        # Every project, archived ones too (choosing one lists its tasks whatever its state).
+        'filter_projects': list(Project.objects.filter(user=user)),
+        'selected_projects': set(params.projects),
         'selected_priorities': set(params.priorities),
         'state_choices': TaskState.choices,
         'selected_states': set(params.states),

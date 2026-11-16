@@ -150,6 +150,8 @@ class TestFilters:
             'states': [],
             'priorities': [],
             'labels': [],
+            'projects': [],
+            'include_archived': False,
             'date_range': 'any',
             'date_from': None,
             'date_to': None,

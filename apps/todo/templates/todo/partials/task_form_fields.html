@@ -29,6 +29,16 @@
         {% for option in state_options %}<option value="{{ option.value }}"{% if option.value == 'todo' %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
     </select>
 </div>
+{% if todo_projects %}
+<div>
+    <label for="project-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Project</label>
+    <select id="project-{{ uid }}" name="project"
+            class="max-w-[12rem] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
+        <option value="">No project</option>
+        {% for project in todo_projects %}<option value="{{ project.pk }}"{% if project.pk == form_project_id %} selected{% endif %}>{{ project.name }}</option>{% endfor %}
+    </select>
+</div>
+{% elif form_project_id %}<input type="hidden" name="project" value="{{ form_project_id }}">{% endif %}
 <div>
     <label for="blocked-by-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Blocked by</label>
     <input id="blocked-by-{{ uid }}" name="blocked_by" type="text" maxlength="200" autocomplete="off" placeholder="e.g. 1200, 1201"

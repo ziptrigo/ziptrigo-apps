@@ -22,7 +22,7 @@ from apps.core.field_errors import validation_lines as core_validation_lines
 from apps.core.htmx import is_htmx
 
 from ..models import Task, TodoSettings
-from ..services import get_account, month_usage, sidebar_filters, today_count
+from ..services import get_account, month_usage, projects, sidebar_filters, today_count
 
 FIELD_LABELS = {
     'title': 'Title',
@@ -51,6 +51,7 @@ FIELD_LABELS = {
     'muted_overdue': 'On hold or blocked, and overdue',
     'blocker': 'Blocker',
     'blocked_by': 'Blocked by',
+    'project': 'Project',
 }
 
 
@@ -85,8 +86,8 @@ def render_page(
 ) -> HttpResponse:
     """Render a full To-do page. Makes sure the user's To-do account exists (created on first
     visit) and adds what the layout shows: the account, the "N of F free tasks used" line, the
-    count beside Today, the saved filters and the highlighted sidebar entry (`nav`). The saved
-    filters' counts are not here: the sidebar asks for them after the page loads."""
+    count beside Today, the projects, the saved filters and the highlighted sidebar entry (`nav`).
+    The saved filters' counts are not here: the sidebar asks for them after the page loads."""
     account = get_account(request.user)
     config = TodoSettings.load()
     used, free = free_line(account, config)
@@ -104,9 +105,24 @@ def render_page(
         'sidebar_filters': saved_filters,
         'sidebar_more': more_filters,
         'show_sidebar_search': True,
+        **projects_context(request.user),
     }
     page_context.update(context or {})
     return render(request, template, page_context, status=status)
+
+
+def projects_context(user) -> dict:
+    """What the sidebar's Projects block and the project controls of every page need (the quick-add
+    select, the Move dialog): the active projects with their open counts, and how many are
+    archived. One query for all of it."""
+    everything = list(projects.list_projects(user, archived=None))
+    active = [project for project in everything if not project.is_archived]
+    return {
+        'todo_projects': active,
+        'sidebar_projects': active[: projects.SIDEBAR_LIMIT],
+        'sidebar_projects_more': max(len(active) - projects.SIDEBAR_LIMIT, 0),
+        'archived_project_count': len(everything) - len(active),
+    }
 
 
 TASK_CHANGED = 'taskChanged'
@@ -138,7 +154,7 @@ def owned_task(
 ) -> Task:
     """The requester's task numbered `number`, or a 404. `trashed=False` (the default) also
     refuses a task in the Trash, `True` accepts only one that is, `None` accepts either."""
-    queryset = Task.objects.select_related('user', 'parent')
+    queryset = Task.objects.select_related('user', 'parent', 'project')
     task = get_object_or_404(queryset, user=request.user, number=number)
     if trashed is not None and task.is_trashed != trashed:
         raise Http404('Task not found')

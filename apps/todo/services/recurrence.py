@@ -595,6 +595,9 @@ def _create_occurrence(
         due_time=task.due_time,
         labels=list(task.labels.all()),
         recurrence=recurrence,
+        # The next one stays in the project, an archived one included (it is then muted with it).
+        project=task.project,
+        allow_archived_project=True,
         source=TaskSource.RECURRENCE,
         allow_unpaid=True,
         previous=task,

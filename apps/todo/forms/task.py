@@ -73,6 +73,9 @@ class TaskForm(forms.Form):
     # Only the quick-add box has it too: the numbers of the tasks blocking the new one ("1200,
     # 1201" or "#1200 #1201"). An existing task's blockers change through `BlockerForm`.
     blocked_by = forms.CharField(label='Blocked by', required=False, max_length=200)
+    # The quick-add box's Project (a project id, or empty for none): `services.projects` says whether
+    # it is one of the user's. An existing task moves through `MoveForm`.
+    project = forms.CharField(label='Project', required=False, max_length=36)
 
     def __init__(self, *args, user: User, part: str = '', **kwargs):
         super().__init__(*args, **kwargs)
@@ -129,7 +132,7 @@ class TaskForm(forms.Form):
             # A request without the Repeat controls leaves the repeat rule alone (an empty `rrule`
             # would stop it).
             and (name not in ('rrule', 'recurrence_mode') or name in self.data)
-            and name not in ('state', 'blocked_by')
+            and name not in ('state', 'blocked_by', 'project')
         }
         if 'labels' in values:
             values['labels'] = list(values['labels'])
@@ -138,6 +141,10 @@ class TaskForm(forms.Form):
     def requested_state(self) -> str:
         """The state the quick-add box asked for (To do when it didn't)."""
         return self.cleaned_data.get('state') or TaskState.TODO
+
+    def requested_project(self) -> str:
+        """The id of the project the quick-add box chose ('' for none)."""
+        return self.cleaned_data.get('project') or ''
 
     def requested_blockers(self) -> list[int]:
         """The numbers of the tasks the quick-add box said block the new one."""

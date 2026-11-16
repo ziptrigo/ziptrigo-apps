@@ -94,8 +94,25 @@ def _created(data: dict[str, Any]) -> str:
         text = 'Created'
     if data.get('parent'):
         text += f', as a subtask of {_ref(data["parent"])}'
+    if data.get('project'):
+        text += f', in the project {data["project"]}'
     if data.get('rrule'):
         text += f'. Repeats: {_rule(data["rrule"])}'
+    return text
+
+
+def _project(data: dict[str, Any]) -> str:
+    old, new = data.get('from'), data.get('to')
+    if data.get('reason') == 'deleted':
+        return f'The project {old} was deleted: the task is in no project'
+    if old and new:
+        text = f'Moved from the project {old} to {new}'
+    elif new:
+        text = f'Added to the project {new}'
+    else:
+        text = f'Removed from the project {old}'
+    if data.get('via'):
+        text += f' with its parent, {_ref(data["via"])}'
     return text
 
 
@@ -213,6 +230,8 @@ def describe(event: Any) -> str:
             if data.get('parent'):
                 return f'Moved under {_ref(data["parent"])}'
             return 'Made a top-level task'
+        case EventKind.PROJECT:
+            return _project(data)
         case EventKind.ATTACHMENT_ADDED | EventKind.ATTACHMENT_REMOVED:
             added = kind == EventKind.ATTACHMENT_ADDED
             where = ' to a comment' if data.get('comment') and added else ''

@@ -1,0 +1,60 @@
+{% comment %} The Move dialog (issue #314): what a row's "Move to project" button opens. One per page, in the layout; a button
+   opens it with `$dispatch('open-move-dialog', {url, title, project, subtasks, trigger})` (its task's `todo:move` URL, title,
+   current project id or '', and how many subtasks move with it). A plain POST, like the confirmation modal: the view
+   redirects back with a message. Needs `todo_projects` (the active projects). Escape, Cancel and a click outside close it and
+   give the focus back to the button that opened it. {% endcomment %}
+<div x-data="{
+         shown: false, url: '', title: '', project: '', subtasks: 0, trigger: null,
+         show(detail) {
+             this.url = detail.url; this.title = detail.title || ''; this.project = detail.project || '';
+             this.subtasks = parseInt(detail.subtasks || '0', 10) || 0; this.trigger = detail.trigger || null;
+             this.shown = true;
+             this.$nextTick(() => { if (this.shown) (this.$root.querySelector('input[name=project]:checked') || this.$refs.cancel).focus() });
+         },
+         hide() { this.shown = false; if (this.trigger) this.trigger.focus() },
+     }"
+     @open-move-dialog.window="show($event.detail)">
+    <div x-show="shown" style="display: none"
+         @keydown.escape.window="if (shown) hide()" @click.self="hide()"
+         x-transition:enter="transition-opacity duration-[220ms] ease-out"
+         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+         x-transition:leave="transition-opacity duration-[140ms] ease-in"
+         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70 backdrop-blur-[2px]">
+        <div x-show="shown" role="dialog" aria-modal="true" aria-labelledby="move-dialog-title"
+             x-transition:enter="transform transition duration-[220ms] ease-out"
+             x-transition:enter-start="opacity-0 translate-y-2 scale-[.97]" x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+             x-transition:leave="transform transition duration-[140ms] ease-in"
+             x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 translate-y-2 scale-[.97]"
+             class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4">
+            <form method="post" :action="url" class="p-6">
+                {% csrf_token %}
+                <p id="move-dialog-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Move to project</p>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4"><span x-text="title"></span><span x-show="subtasks > 0" x-text="subtasks === 1 ? ': its subtask moves with it.' : ': its ' + subtasks + ' subtasks move with it.'"></span></p>
+                <div role="radiogroup" aria-labelledby="move-dialog-title" class="mb-6 max-h-72 space-y-1 overflow-y-auto">
+                    <label class="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700">
+                        <input type="radio" name="project" value="" x-model="project" class="h-4 w-4 accent-sage-500">
+                        <span class="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true"></span>
+                        No project
+                    </label>
+                    {% for project in todo_projects %}
+                    <label class="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700">
+                        <input type="radio" name="project" value="{{ project.pk }}" x-model="project" class="h-4 w-4 accent-sage-500">
+                        <span class="h-2.5 w-2.5 flex-shrink-0 rounded-full" style="background-color: {{ project.color }}" aria-hidden="true"></span>
+                        <span class="min-w-0 truncate">{{ project.name }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                {% if not todo_projects %}
+                <p class="mb-6 text-sm text-gray-500 dark:text-gray-400">You have no projects yet. <a href="{% url 'todo:projects' %}" class="text-sage-600 dark:text-sage-300 underline">Create one</a>.</p>
+                {% endif %}
+                <div class="flex justify-end gap-3">
+                    <button type="button" x-ref="cancel" @click="hide()"
+                            class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Cancel</button>
+                    <button type="submit"
+                            class="btn px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400 transition-colors">Move</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

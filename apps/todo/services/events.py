@@ -31,7 +31,7 @@ The `data` of each kind (every value is a snapshot, so an entry reads right afte
 gone; `services.event_text` writes the sentence):
 
 - `created`: `source`, `parent` (`{number, title}`), `previous` (`{number}`: the occurrence it follows),
-  `rrule`.
+  `rrule`, `project` (the name of the project a top-level task was created in).
 - `state`: `from`, `to` (state values). `closed`: `resolution`, `via` (`{number, title}` of the parent that
   closed it), `subtasks` (how many open subtasks the same close closed) and `subtasks_resolution`.
   `reopened`: `to` (To do or Blocked). `resolution`: `from`, `to`.
@@ -43,6 +43,8 @@ gone; `services.event_text` writes the sentence):
   `removed`).
 - `subtask_added`, `subtask_removed`: `number`, `title`, `moved`. `subtask_closed`: `number`,
   `title`, `resolution`. `moved`: `parent` (`{number, title}` or none: made top level).
+- `project` (issue #314): `from`, `to` (project names, or none), `via` (the parent a subtask moved
+  with), `reason` (`deleted`: the project was deleted and the task is in no project).
 - `attachment_added`, `attachment_removed`: `filename`, `comment` (a comment's file).
 - `trashed`, `restored`: `via` (the parent that did it to its subtask).
 """
