@@ -8,7 +8,7 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 (#272), blockers (#273), the activity log (#274) and the polish of the E2E run (#224):
 
 - the sidebar (a search box, then Today with a count, Upcoming, All, Closed, Labels, Trash, Settings, then
-  a **Projects** section (issue #314: projects, the project page, moving, archiving, sections and the manual order, the API and CLI; TODO-62 to TODO-67) and
+  a **Projects** section (issue #314: projects, the project page, moving, archiving, sections and the manual order, the API and CLI; TODO-63 to TODO-68) and
   a **Filters** section; a top bar of scrolling rows on phones), the "Tasks are blocked" and "Storage is paused"
   banners;
 - **Today** `/todo/` (the quick-add box with the free-tasks line, the Overdue section with "Reschedule overdue to
@@ -1219,7 +1219,24 @@ one`; a second user (Session B) with a task.
 | 7 | Click the empty space of a row (to the right of the title, or beside the chips) on All, Today, a search and the Trash. | The task page opens, as the title link does. Ctrl/Cmd-click opens it in a new tab. |
 | 8 | Click the state pill, the Postpone button, the trash button, the circle, a label chip's neighbours that are links (the parent link), and the drag handle; also select some title text by dragging. | Each does only its own thing (menu opens, task completes...); no navigation. Selecting text does not open the task. Closing the state menu by clicking elsewhere on the row does not open the task. |
 
-### TODO-62 Projects: create, rename, reorder and the sidebar
+### TODO-62 Pasting an image: into the task and into a comment
+
+**Purpose:** a pasted image is attached to the task, or, with the focus in a comment form, to the comment (issue #313).
+**Preconditions:** an open task T with the Attachments block, signed in as `qa.user@example.com`. Where the clipboard cannot be filled, use the console snippet of FT-70 (`file_transfer.md`); its `selector` can be `textarea[name="body"]` to paste "into" the comment box.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Open T and look under **Add files**, and under the comment form's **Attach files**. | Both show a small "You can also paste an image: Ctrl+V" / "Paste an image here to attach it: Ctrl+V" (**⌘V** on a Mac). Neither is shown on a touch-only device. |
+| 2 | Click the page background (not a text box) and paste text, then a PDF. | Nothing is added. |
+| 3 | Paste a screenshot. | A row `YYYY-MM-DD-HH-mm-SS.webp` uploads and the file is listed under Attachments (Download, Open, Remove). |
+| 4 | Click in the comment box, type "my note", paste text. | The text is inserted as usual. |
+| 5 | Paste a screenshot with the focus in the comment box (and, separately, an image copied together with text, e.g. spreadsheet cells). | The screenshot becomes a chip under the comment form (a file of the comment, not of the task); the text in the box is unchanged. The cells paste as text, and no file is added. **Comment** saves it with the file, listed under that comment, and Attachments still shows only the first pasted file. |
+| 6 | Paste a screenshot while editing an existing comment (Edit, focus in its box). | It is added to that comment when saved. |
+| 6b | Click in the description editor (or the title box, the subtask box) and paste a screenshot alone. | Nothing is added: no row, no attachment (it would be billed storage); the page background still takes a screenshot. |
+| 7 | Complete T (Complete). | The Attachments block and its drop zone are gone: a paste outside a comment box does nothing; a paste into the comment box still attaches a file to a comment. |
+| 8 | Move T to the Trash, open it. | No drop zone, no comment form: pasting does nothing. |
+| 9 | Pause storage (TODO-31, frozen account) and open an open task. | "Uploads are paused until you add credits" and no paste hint; pasting does nothing. |
+### TODO-63 Projects: create, rename, reorder and the sidebar
 
 | # | Step | Expected |
 |---|------|----------|
@@ -1231,9 +1248,9 @@ one`; a second user (Session B) with a task.
 | 6 | Drag `Moving house` above `Website relaunch` (or focus its handle and press Up). Reload any To-do page. | The list keeps the order, and the sidebar shows it after the reload. |
 | 7 | As `qa.admin@example.com`, open `/todo/projects/<id of qa.user's project>/`. | 404. |
 
-### TODO-63 Projects: tasks in a project, the project page and moving
+### TODO-64 Projects: tasks in a project, the project page and moving
 
-**Preconditions:** TODO-62 done (`Website relaunch`, `Moving house`).
+**Preconditions:** TODO-63 done (`Website relaunch`, `Moving house`).
 
 | # | Step | Expected |
 |---|------|----------|
@@ -1248,9 +1265,9 @@ one`; a second user (Session B) with a task.
 | 9 | Post `project=<uuid of nothing>` to `/todo/<n>/project/` (inspector), and try to move a subtask the same way. | `Project: Unknown project.` and `Project: A subtask is in its parent's project. Move the parent instead.` Nothing changes. |
 | 10 | Make a repeating task in `Website relaunch` and complete it. | The next occurrence is in `Website relaunch` too. |
 
-### TODO-64 Projects: archive, what it mutes, unarchive and delete
+### TODO-65 Projects: archive, what it mutes, unarchive and delete
 
-**Preconditions:** TODO-63 done. In `Moving house`: an open task `Book the van` due today at a time a few minutes ahead (so its default reminder is still ahead), and one due three days ago. An open task `Unpack` in no project that is **Blocked by** `Book the van`.
+**Preconditions:** TODO-64 done. In `Moving house`: an open task `Book the van` due today at a time a few minutes ahead (so its default reminder is still ahead), and one due three days ago. An open task `Unpack` in no project that is **Blocked by** `Book the van`.
 
 | # | Step | Expected |
 |---|------|----------|
@@ -1263,7 +1280,7 @@ one`; a second user (Session B) with a task.
 | 7 | Projects > **Archived** tab > **Unarchive** (confirm). | "Moving house is active again."; its tasks are back on Today and All, the old one is overdue again, and the bell has **one** reminder for `Book the van`. |
 | 8 | Archive it again, then on the Archived tab press **Delete** and confirm. | The question says its tasks are kept, in no project. A flash "Deleted the project Moving house. Its N tasks are kept, in no project." The tasks are back on the lists with no chip; each history has "The project Moving house was deleted: the task is in no project" (Automatic). |
 
-### TODO-65 Projects: search and saved filters
+### TODO-66 Projects: search and saved filters
 
 **Preconditions:** two active projects with an open task each, an archived project with an open task, and an open task in no project.
 
@@ -1277,7 +1294,7 @@ one`; a second user (Session B) with a task.
 | 6 | Delete that project (Projects page), then open the filter `Site`. | The summary reads `in a deleted project` and the filter lists no task (it does not fall back to every task). |
 | 7 | On the Projects page click **No project**. | The search page with `projects=none`: the open tasks in no project. |
 
-### TODO-66 Projects: sections and the manual order
+### TODO-67 Projects: sections and the manual order
 
 **Preconditions:** a project `Website relaunch` with three open tasks (`One`, `Two`, `Three`), one of them with a subtask.
 
@@ -1298,7 +1315,7 @@ one`; a second user (Session B) with a task.
 | 13 | Rename `Design` to `Visuals` (pencil), then delete it (confirm). | "Section renamed."; the question says its tasks stay in the project; "Deleted the section Visuals. Its N tasks stay in the project." The tasks are in the top list, at its end; each History has "The section Visuals was deleted: the task is in no section" (Automatic). |
 | 14 | Archive the project and open its page. | Sections and tasks are listed, with no handles, no rename / delete, no "Add a task to ..." and no Add section. Posting to `/todo/projects/<id>/sections/` is refused: `Unarchive the project to change its sections.` |
 
-### TODO-67 Projects and sections over the API and the CLI
+### TODO-68 Projects and sections over the API and the CLI
 
 **Preconditions:** TODO-55's JWT for `qa.user@example.com`; no project named `Api project`.
 

@@ -79,6 +79,9 @@ def test_an_open_request_shows_the_upload_page(client, make_request):
     assert 'Available until' in content
     assert 'Your name (optional)' in content
     assert 'Mark as done' in content and 'Report this link' in content
+    # An image can be pasted too (issue #313), the same as a dropped file.
+    assert 'upload.handleFileSelection(files, { retain: true })' in content
+    assert 'data-paste-hint' in content
 
 
 def test_the_page_says_who_is_asking_never_their_email(client, funded_user, make_request):

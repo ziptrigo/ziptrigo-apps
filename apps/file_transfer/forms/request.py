@@ -19,27 +19,19 @@ from ..services.expiry_choices import (
     NO_EXPIRATION_CHOICE,
     end_of_day,
 )
+from ..services.limits import TITLE_MAX_LENGTH
 from ._emails import parse_email_list
+from ._service_errors import add_service_errors
 from ._styling import StyledFormMixin
-
-#: The service's field names that the form calls something else.
-_FORM_FIELD = {'max_total_size_bytes': 'max_total_gb'}
-
-
-def add_service_errors(form: forms.Form, exc: ValidationError) -> None:
-    """Show a service `ValidationError` on the form: under its field when it names one, as a form
-    error otherwise."""
-    if hasattr(exc, 'error_dict'):
-        for field, errors in exc.error_dict.items():
-            target = _FORM_FIELD.get(field, field)
-            for error in errors:
-                form.add_error(target if target in form.fields else None, error.messages[0])
-    else:
-        form.add_error(None, exc.messages[0])
 
 
 class _RequestFieldsForm(StyledFormMixin, forms.Form):
-    title = forms.CharField(label='Title', widget=forms.TextInput(attrs={'maxlength': '100'}))
+    title = forms.CharField(
+        label='Title',
+        required=False,
+        widget=forms.TextInput(attrs={'maxlength': str(TITLE_MAX_LENGTH)}),
+        help_text='Optional. Shown to the people you ask, on the upload page.',
+    )
     message = forms.CharField(
         label='Message',
         required=False,
@@ -112,7 +104,7 @@ class FileRequestForm(_RequestFieldsForm):
     def to_options(self) -> request_service.RequestOptions:
         data = self.cleaned_data
         return request_service.RequestOptions(
-            title=data['title'],
+            title=data.get('title', ''),
             message=data.get('message', ''),
             upload_audience=data['upload_audience'],
             emails=data.get('emails', []),
@@ -134,7 +126,7 @@ class RequestSettingsForm(_RequestFieldsForm):
         """The `services.requests.update_request` keys this submit sets: all of them."""
         data = self.cleaned_data
         changes: dict = {
-            'title': data['title'],
+            'title': data.get('title', ''),
             'message': data.get('message', ''),
             'upload_audience': data['upload_audience'],
             'max_files': data.get('max_files'),

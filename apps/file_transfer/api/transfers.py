@@ -137,6 +137,7 @@ def finalize_transfer(request, transfer_id: UUID, payload: FinalizeTransferSchem
 
     options = services.SendOptions(
         recipients=payload.recipients,
+        title=payload.title,
         message=payload.message,
         expiry_choice=payload.expiry_choice,
         expiry_date=payload.expiry_date,

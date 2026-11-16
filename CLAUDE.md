@@ -104,8 +104,8 @@ inv pip sync                  # uv sync --frozen, all groups
 inv api generate [--bump patch|minor|major]   # docs/openapi.yml; bumps the version only if the spec changed
 inv api generate --check      # exit 1 if docs/openapi.yml is out of date; writes nothing
 inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/, /api/receipts/, /api/s/, /api/todo/, /api/notes/, /api/time/
-inv filetransfer send local report.pdf --to a@example.com
-inv filetransfer request-create local "Wedding photos" [--message ... --anyone | --signed-in | --to a@x --to b@y --max-files N --max-gb N --expires 30|none|2026-12-31 --password]   # file requests (issue #306); the password via FILETRANSFER_LINK_PASSWORD or a hidden prompt
+inv filetransfer send local report.pdf --to a@example.com [--title "Q3 report"]
+inv filetransfer request-create local ["Wedding photos"] [--message ... --anyone | --signed-in | --to a@x --to b@y --max-files N --max-gb N --expires 30|none|2026-12-31 --password]   # file requests (issue #306); the password via FILETRANSFER_LINK_PASSWORD or a hidden prompt
 inv filetransfer requests local [--filter active|ended|all] | request-get local <id> | request-edit local <id> [--title ... --to a@x --clear-max-files ...]
 inv filetransfer request-done local <id> | request-reopen local <id> | request-download local <id> --out ./photos [--force] | request-delete local <id> [--yes]
 inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
@@ -1085,6 +1085,11 @@ the Android app wants one). Code: `services/login_otp.py` (its docstring is the 
   (`tests_e2e/conftest.py`, `tests_e2e/ai/serve.py`) mark their accounts accepted.
   `apps/accounts/tests/test_terms_acceptance.py`, `apps/core/tests/test_legal_pages.py`, AI cases
   ACC-49, ACC-50, CORE-27, ADM-55.
+- *Pasting an image to upload it (#313) needed no change to either document, and `TERMS_VERSION` was not bumped.* A pasted
+  image is read from the clipboard only at the moment the user presses paste (no permission, nothing read in the background; see
+  "Templates and static files" > "Paste an image to upload it"), and from then on it is a file the user uploads, kept, billed
+  and deleted exactly like one they picked; the policy already lists "the files you upload" (and the receipts, attachments and
+  transfers) as collected data. No new kind of data, processor, cookie or retention period.
 - *Not done:* self-service account deletion (the policy says to email `info@ziptrigo.com`), mirroring
   the links on the `ziptrigo.com` homepage (another repo), and the Google Cloud brand verification
   steps listed on the issue.
@@ -2090,6 +2095,9 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
   a literal reload otherwise starts a fresh, empty draft and strands the in-progress one. The
   anonymous flow needs none of this bookkeeping: `current_anonymous_transfer` already resumes the
   session's current draft (files included) on every reload regardless of file count.
+  **Pasting an image** (issue #313) is the third way in besides the picker and the drop zone: all three pages (`send.html`,
+  `anon_send.html`, `request_upload.html`) call `initClipboardPaste(upload.handleFileSelection, ...)`; see "Templates and static files"
+  > "Paste an image to upload it" (a pasted file has a unique timestamp name, so it never matches a file to resume).
 - **CLI**: `admin/filetransfer.py send --draft-id <id>` re-fetches that draft
   (`GET /transfers/{id}`, which is why that endpoint returns drafts) and matches its local files
   against its `files` list by name, size *and* `client_last_modified` (tracking which draft rows
@@ -2448,6 +2456,167 @@ neither a whole source file nor the whole zip is ever held in memory; this only 
 own non-seekable-stream support instead of assuming it can seek. A "download all" click counts as
 one `DownloadEvent` (`file=None`) toward the same `max_downloads` limit as any other download.
 
+**File previews** (issue #311; mock `docs/ui-design/mocks/file-preview.html`; `services/preview.py`, `services/renditions.py`,
+`services/rendition_render.py`, `views.download` (`preview_file`, `preview_status`, `preview_page`, `preview_full`),
+`partials/preview_dialog.html`, `static/file_transfer/js/preview.js`, migrations `0010`, `0011`). Someone with the link can preview a file
+before downloading it, **only after a click** (even for a single file): the page shows a hint line above the list ("2 of 3 files can be
+previewed before you download them." and its one-file, all-files and password-locked wordings, `preview.hint_text`; none when nothing can be
+previewed), each previewable row has a file-type icon, its name as a button and a **Preview** button, the others read "no preview" (only
+when something else can be previewed), and a locked page shows the hint and **Locked** but renders no button and **no preview URL**
+(`page_context` returns `previews=[]` while locked). The dialog (Alpine `ftPreview`, a classic script loaded before Alpine) is the
+confirmation modal's look: focus to Close and back to the trigger, a Tab trap, Escape / backdrop / Close, Left / Right and Previous / Next
+among the **previewable files only** ("2 of 4"; not while focus is in a text area, where the arrows scroll), Page Up / Page Down and
+Previous page / Next page among a PDF's pages, Download in the footer. There is deliberately **no** sentence saying a preview is not a
+download (the owner's decision), but it isn't one: no `DownloadEvent`, nothing against `max_downloads`, no sender email.
+- ***A preview is a sample, never the file*** (the owner's redesign after the review, which found that previewing the whole file bypassed a
+  download limit). Images and PDFs show **downsized WebP renditions**, text and Markdown the **first 64 KB**; video and audio have **no
+  preview** (playing them is downloading them; the first version had them). **View full image / View full document counts as a
+  download** (below). The kinds: `image` (JPEG, PNG, WebP, GIF), `pdf`, `text`, `markdown` (`PreviewKind`).
+- *What a file is comes from its bytes, never its name or the claimed type.* When an upload completes, `uploads.finish_upload_in_storage`
+  makes one ranged `GetObject` of the first 4 KB (`S3Storage.get_object_range`) and `preview.detect_preview_type` stores the result in
+  `TransferFile.preview_type` (`db_default=''`, the #102 lesson; best effort: a failed read is "no preview", never a failed upload;
+  `request_upload.complete_file` writes it in its conditional `UPDATE`). Types: `sniff_inline_type` (PDF, JPEG, PNG, WebP, GIF) and
+  `looks_like_text` (valid UTF-8 allowing a cut character, no NUL or other control but tab, LF, FF, CR), both in
+  `apps.core.services.sniff`; `sniff_inline_type` is unchanged so To-do's attachments still serve only PDF and images inline. A text file
+  whose **name** ends in `.md` / `.markdown` is `text/markdown` (the name only picks formatted-vs-plain among files whose bytes already say
+  text, so it can't make a binary previewable). **Existing files** have `preview_type=''`, so no preview: the page never sniffs (an S3
+  request per file per view); see "Deploy notes" below for `./manage.py file_transfer_backfill_previews`. A file nobody can describe as one
+  of the above is simply not previewable.
+- *Text and Markdown* (`GET /t/<slug>/preview/<file id>/`, `t:preview`, `preview_file`; GET only, `xframe_options_sameorigin`,
+  `Cache-Control: no-store, private`, `nosniff`): the first `TEXT_PREVIEW_BYTES` (64 KB, a ranged read; the incremental UTF-8 decoder holds
+  back a cut character) as `text/plain; charset=utf-8` from Django (never from S3) with `Content-Security-Policy: default-src 'none';
+  sandbox`, fetched by the page and put in with `x-text` (textContent): **any text, HTML and SVG included, is inert text**. A Markdown file
+  answers JSON `{text, html, html_truncated}`, `html` being `apps.core.markdown.render(profile='extended')` with no resolver and no
+  `task_url_path` (raw HTML escaped, images never rendered, nh3 sanitised; the renderer's 50,000-character guard means a longer sample is
+  rendered up to the last line break under it and `html_truncated` says so). The dialog shows it **Formatted** by default with a Formatted
+  / Raw control. The formatted HTML goes in with `x-html`, which is safe **only** because `apps.core.markdown`'s nh3 allow-list never lets an
+  `x-*`, `@*`, `:*` or `on*` attribute or a `javascript:` link through: `test_preview.py::TestMarkdownIsSafeForXHtml` renders hostile Markdown
+  and fails if that stops being true, and the template says so next to the `x-html`. The decoded sample / rendered JSON is **cached per file
+  id** for 5 minutes (`preview.text_sample`, the Django cache; the gates run before it). A text file the sample cut (over 64 KB) and
+  at most `FULL_TEXT_MAX_BYTES` (5 MB) offers "View full document" (the whole file as plain text; the formatted view belongs to the
+  sample); a bigger one says "Download the file to read all of it".
+- *Images and PDFs: downsized renditions* (`services/renditions.py`, `rendition_render.py`; the module docstrings are the long version).
+  An image is **one WebP**, longest side at most **1600 px** (never enlarged), quality 75, EXIF orientation applied, EXIF/XMP/ICC dropped (the
+  first frame of a GIF); a PDF is **one WebP per page, the first 20** (`MAX_PREVIEW_PAGES`), each at a scale that keeps its longer side within
+  1600 px (at most 144 dpi). They live in the **file transfer bucket under the transfer's own prefix**,
+  `transfers/<transfer id>/previews/<file id>/<n>.webp` (`preview_key`), so they are deleted with it, and are **not billed and not part of
+  `size_bytes`** (like the "download all" zip). Built **lazily on the first Preview click**, then reused: `TransferFile.preview_status`
+  (`PreviewStatus`: `none`, `building`, `ready`, `failed`, `unavailable`; with `preview_pages`, `preview_total_pages`, `preview_started_at`,
+  `preview_last_used_at`, all with `db_default`s). `GET .../status/` (`t:preview-status`; `?start=1` on open and on "Try again" **claims the
+  build** with one conditional `UPDATE` (`none`; a `failed` one only after `RETRY_COOLDOWN`, 5 min, so a file that keeps making the child fail can't occupy the worker once per click -- an earlier "Try again" just reports `failed` again; or a `building` older than `BUILD_LEASE`, 10 min), as `services.zip` does, and queues the
+  `build_preview` task on commit; plain polls never start one, so a failure is reported, not retried by every poll) answers JSON `{status:
+  preparing|ready|failed|unavailable|none, pages, total_pages, page_urls}`; the dialog shows "Preparing preview..." and polls every 1.5 s
+  (at most 40 times). `GET .../page/<n>/` (`t:preview-page`) answers a 302 to a short-lived presigned **inline** URL of that WebP page, never of the
+  file. Both have `_preview_gate`: `FT_PREVIEW_IP` (240/min) first, then **exactly the download's gates** (`_password_gated_transfer`: available,
+  password, a file request's access rules and "owner only until done"), a refused password / access gate answering a plain **403** (an `<img>` or
+  `fetch()` would take the whole page), an unavailable transfer the neutral 404, a file with no `preview_type` or of the wrong kind a 404.
+  `touch` bumps `preview_last_used_at` at most once an hour per file. **A failed build** (`failed`: the child killed from outside, a timeout, an
+  S3 error) shows "Preview not available for this file." with **Try again**; **`unavailable`** is a verdict kept for the file (corrupt, a file over
+  `MAX_SOURCE_BYTES` = 50 MB which is never read, an image whose header claims over 100 megapixels, refused before decoding, or a child that
+  exceeded its budget) and shows the same text with no retry. Either way **View full** and Download stay offered. Every load failure of an
+  image, page or the full view (403/404/network) shows "This file can't be previewed here. You can still download it.", never a blank dialog.
+- *Untrusted input, bounded resources* (`renditions.render_in_child`; `rendition_render.py` run as `python -I` is the child, bytes on stdin,
+  JSON on stdout): the same pattern as Receipts' document preparation (`apps.receipts.services.documents`, see "Receipts" > Processing for the
+  budget, the two kinds of failure and the "a resource budget, not an isolation boundary" caveat), kept as a small copy because products may
+  not import each other and promoting the runner into `core` would have meant rewriting Receipts' internals and tests (a possible follow-up):
+  `RLIMIT_AS` (Linux only), `RLIMIT_CPU`, a wall-clock timeout, own session, minimal environment, an unprivileged user when the worker is root,
+  `oom_score_adj` 1000, the `#started` marker so exit 127 only counts as "over budget" from a child that started. Settings
+  `FILE_TRANSFER_PREVIEW_SANDBOX` (off under pytest: unit tests reduce in-process with the same error mapping),
+  `_MEMORY_MB` (1024), `_CPU_SECONDS` (25), `_TIMEOUT_SECONDS` (60), `_CHILD_USER` (`nobody`). The container needs headroom for the worker plus
+  that budget while a build runs. Over-budget deaths and the child's own `unreadable` / `too_complex` replies are `unavailable`; SIGKILL (the OOM
+  killer), other signals, an ordinary non-zero exit, no or malformed reply, a timeout and a failure to start are `failed`.
+- *Queue.* `build_preview` runs on the **`default` queue**: each build is bounded (the budget above) and happens once per file, so no new worker
+  was added. The accepted risk: a sender who uploads many worst-case PDFs and a visitor who clicks them all occupy the `default` worker, which also
+  sends file transfer's emails and builds zips. If that ever bites, give it its own queue like Receipts' (`'previews'` in
+  `TASKS['default']['QUEUES']`, `@task(queue_name='previews')`, and a `db_worker --queue-name previews` in `supervise.py` **and**
+  `docker-compose.yml`).
+- *Deletion* (every place a file or its object goes): the whole transfer prefix is deleted by `lifecycle.delete_transfer_files` (natural
+  expiry, delete now, the last allowed download's deferred deletion, takedown, the suspension grace period) and `uploads.abort_draft`, and
+  `delete_transfer_files` resets the files' `ready`/`building` states to `none`; a single file's removal (`uploads.remove_file` for a draft,
+  `request_upload._remove` for a file request, the owner's `remove_file_as_owner` included) deletes `previews/<file id>/` (no S3 call for a file that
+  never had any). A build racing any of these **re-checks at its end** (the zip's pattern: its conditional `UPDATE` matching nothing, the transfer
+  ended or its files deleted) and deletes what it wrote, but never the pages of a sibling build that finished first. The daily job
+  **`file_transfer.purge_previews`** (`jobs.purge_previews` -> `renditions.purge_unused`, registered in `FileTransferConfig.ready()` with a
+  `description`, 24 h, lease 1 h) deletes the pages of a `ready` file unused for `PREVIEW_CACHE_DAYS` (14; `preview_last_used_at`) and resets it
+  to `none` (state claimed first with the same stale condition, objects deleted after, so a click in between finds no preview rather than pages
+  that vanish; per-row try/except + `logger.exception`), so the next click builds them again.
+- ***View full image / View full document counts as a download*** (`GET .../full/`, `t:preview-full`, `preview_full`): `FT_DOWNLOAD_IP`, the
+  download's gates, then `services.record_download(..., inline=True)` -- the very service of the Download button (a `DownloadEvent`, `max_downloads`
+  counting and ending the transfer with the files kept for the deferral window, `notify_on_download`) -- answering JSON `{url, content_type, name}`
+  with a presigned GET (inline with the sniffed type where `INLINE_CONTENT_TYPES` allows, else an attachment; Markdown is never inline). It is
+  offered for every image and PDF and for a cut text file up to 5 MB (`preview.full_label`). **Only one download is counted**:
+  1. *The Blob path.* `preview.js` `fetch()`es the URL into a Blob (no cookies), shows it (`<img>`, `<iframe>`, or the text) and keeps up to 3 Blobs;
+     the dialog's Download and the row's Download then **save the Blob with a download link, with no request at all**. This needs the bucket to
+     allow the page's origin to GET (CORS), which the `infra` repo configures.
+  2. *The session guard* (always on, `services.downloads`: `mark_counted`, `consume_counted`, `is_replayable`, session key
+     `ft_counted_downloads`, a dict `"<transfer id>:<file id>" -> expiry` capped at 50 entries, window `COUNTED_WINDOW_SECONDS` = the presigned
+     URL's 15 minutes): "View full" remembers the file in the visitor's session, and the **next** `download_file` for it is served (a 302 to the
+     attachment URL) **without counting again**, once (`consume_counted` forgets it); asking "View full" again within the window is free too. It is
+     the fallback when the browser can't read the bucket (the dialog then shows the bucket's URL directly) and covers an evicted Blob or a link opened
+     in another tab. **If the count itself ended the transfer** (the last allowed download), `download_file` and `preview_full` still serve that
+     session within the window: `_password_gated_transfer(replay_file_id=...)` lets an unavailable transfer through only when `is_replayable`
+     (counted in this session, files not deleted, not held, status `ACTIVE` or `EXPIRED`, never disabled, suspended, deleted or taken down), and the
+     password / request access gates still apply. Previews of other files are refused then (the transfer is unavailable).
+  After it the dialog says "This counted as a download." and offers **Open in new tab** (below). The Download buttons hold no request in the Blob path, so a stolen link isn't needed;
+  the session record cannot be forged by a visitor (it is in the server-side session and only set by a request that passed the gates).
+- *The bucket's CORS* (the `infra` repo, `apps/ziptrigo-apps/main.tf`) already allows **`GET`** (with `PUT` and `HEAD`) from each
+  environment's origin (`app.ziptrigo.com`, `app-staging.ziptrigo.com`), checked on the live buckets on 2026-11-16, so the Blob path works in
+  both; nothing was changed there. The fallback (the bucket's URL shown directly, the Download after it still one download through the guard,
+  the file transferred twice) only applies if that rule is ever narrowed. The e2e fake bucket answers `GET, PUT` CORS and the browser test
+  covers both paths.
+- *Open in new tab.* Once the whole image or PDF shows, the footer has **Open in new tab** (`#preview-open-tab`, a `target="_blank"
+  rel="noopener"` link to the very address the dialog shows: the `blob:` URL of the fetched file, or in the fallback the bucket's URL), so the
+  new tab costs no request and no second download. Not offered for text. A `blob:` tab stops working on reload once the dialog revokes its URL
+  (moving to another file or closing the dialog); it shows the file until then.
+- *Deploy notes.* After deploying, run **`./manage.py file_transfer_backfill_previews` once** so files uploaded before this shipped get their
+  `preview_type` (it reads the first bytes of every active, disabled or suspended transfer's stored file; idempotent; one ranged S3 request per
+  file). Until then those files simply have no Preview button. The preview columns have database defaults, so the old container keeps working
+  while `0011` runs. The three `FILE_TRANSFER_PREVIEW_*` limits default sensibly; no new secret.
+- *Not billed, not metered, not in the API.* No change to the JWT API or `docs/openapi.yml` (previews are web only). A file request in the **Done**
+  state renders the same `download.html`, so previews and "View full" work there for the people with access, under the request's access rules.
+  **While a request is still open nobody previews**: its public page is the upload page, which has no Preview button, and the dashboard row has none
+  either (deliberately: not added). The endpoints themselves apply the download's gate, which lets the *owner* of an open request through, but
+  the UI offers no way to reach them.
+- Tests: `apps/file_transfer/tests/test_preview.py` (sniffing, the text sample and its cache, the gates, the page, the x-html safety),
+  `test_renditions.py` (what is built, caps, the claim and lease, races at the end of a build, the child process budget, the endpoints and their
+  gates, every deletion path, the purge job), `test_preview_full.py` (counts once, the guard, the last-download edge, text full), the sniffer tests in
+  `apps/core/tests/test_sniff.py`, `tests_e2e/test_file_preview.py` (hint, keys, Markdown, downsized sample, "Preparing preview...", PDF pages,
+  View full + one download in the database, the no-CORS fallback), AI cases FT-64, FT-65, FT-67 to FT-69 and ADM-64 (step 7).
+
+**Recipients are optional** (issue #310) for the logged-in send flow: the web form (`Recipients (optional)`, not `required`), `SendOptions.recipients`
+(default empty; `validate_send_options` no longer refuses an empty list), `POST /api/ft/transfers/{id}/send` (`recipients` defaults to `[]`,
+OpenAPI 2.9.0) and `inv filetransfer send` (no `--to`). With none, no recipient email is queued; the sender's own
+copy (`send_sender_copy`) still goes out, reading "Your transfer "x" is ready. Nobody was emailed: share the link below." under the subject
+`... is ready to share`; the sent page says **Your files are ready** with the link and Copy instead of "We emailed the recipients"; a dashboard
+row lists "No recipients: nobody was emailed..." and **Add recipients** later works as before. Nothing else assumed a recipient (metering,
+claim, admin, `notify_on_download`). **Anonymous sending keeps recipients required** (`services.anonymous`: "Add at least one recipient."),
+as decided: with an unconfirmed sender and no account, a recipient-less link has nobody to hold accountable and the confirmation email is
+the only trail; revisit if anonymous users ask. Tests: `test_send_service.py`, `test_send_views.py`, `test_api.py`, `admin/tests/test_filetransfer.py`;
+AI cases FT-06 and FT-66.
+
+**Titles** (issue #318). A send and a request can both have an optional title: `Transfer.title` (100, blank
+for none; the column came with requests, #306, and only its `help_text` changed, migration `0012`). One cleaner for both,
+`services.limits.clean_title` (control and format characters removed -- zero-width, bidi overrides --, white space collapsed,
+stripped, at most 100: `ValidationError({'title': ...})` over it; blank is fine). The forms have **no `max_length`** on the title (the HTML `maxlength` is
+only a hint): the service alone judges the length after cleaning, and the send views show its `title` error under the Title field
+(`forms.add_service_errors`, shared with the request views). **Sends**: `SendOptions.title` /
+`AnonymousSendOptions.title` (set by `finalize_send` / `start_confirmation`, validated first), a **Title (optional)** field on
+the send and anonymous send forms (`SendOptionsForm.title`, first on the logged-in form), `title` in the body of `POST /api/ft/transfers/{id}/send`
+(`FinalizeTransferSchema`, default `''`; a long one is a 400) and `inv filetransfer send --title/-t`; `TransferSchema` now returns `title` next to
+`display_name`. **Requests**: the title is optional everywhere (the form's field is not `required`, `RequestOptions.title` defaults to `''`,
+`FileRequestCreateSchema.title` too, `inv filetransfer request-create [TITLE]` takes it as an optional argument, an empty
+`title` in `request-edit` / `PATCH /requests/{id}` / the dashboard settings form clears it). **Naming**:
+`Transfer.display_name` is the title, else `Transfer.file_label`: a send's first file name ("Untitled transfer" with no file), a request's
+"Untitled request". The dashboard rows, the sent page (a title line above the heading, escaped), the download page and notices use
+`display_name`; a public request page without a title says **Upload files** (heading and browser title) and the
+password gate **File request**, never "Untitled request". **Emails**: bodies name the transfer by `display_name`
+(`services.naming.transfer_display_name`); **subjects of a send keep naming the first file** (`transfer_file_label`), never
+the title (free text; MAIL-12), and the recipient's email starts with `Title: <title>` when there is one. A request's owner-only emails
+(suspension, expiry, deleted) still name it by its title in the subject, as before (a request has no file to name it by; they are
+`file_label`). The two request emails (invite, done) show the title only when there is one (no "Untitled request" to an invitee).
+Not done: editing the title of a *sent* transfer from the dashboard or `PATCH /transfers/{id}` (a request's title is editable).
+Tests: `apps/file_transfer/tests/test_titles.py`, `admin/tests/test_filetransfer.py` and `test_filetransfer_requests.py`; AI cases FT-02, FT-54, FT-71 and MAIL-12, MAIL-27. OpenAPI 2.10.1.
+
 **Abuse reports, takedown and the block list** (issue #59, deferred from #55's phase 3 spec
 section 16): the download page has a "Report this transfer" link (an htmx-collapsed
 `AbuseReportForm`, `views.download.report_transfer`, `POST /t/<slug>/report/`) -- reason, optional
@@ -2625,7 +2794,7 @@ from the dashboard at any time. Only signed-in users create requests.
   column, not a status**), `done_by_user` / `done_by_name`, `upload_notice_due_at` / `upload_notice_since`
   (the debounce, below; a partial index on the first). A request is `ACTIVE` from creation (no draft),
   `completed_at` and `last_billed_at` set then, `max_downloads` null and `notify_on_download` false.
-  `Transfer.display_name` is the title for a request, so the emails and the metering line that name a transfer
+  `Transfer.display_name` is the title (see "Titles" below), so the emails and the metering line that name a transfer
   name it. `TransferFile` gained `uploaded_at` (set for **both** kinds by `complete_file_upload`),
   `uploader_user` (SET_NULL), `uploader_name`, `uploader_email` (copies at upload time),
   `uploader_token_hash` (an anonymous uploader's browser, the `anon_session` HMAC pattern) and
@@ -2636,7 +2805,7 @@ from the dashboard at any time. Only signed-in users create requests.
   and the transfers endpoints by id filter `kind='send'`, and `update_settings`, `add_recipients` and
   `resend_recipient` 404 a request.
 - **Creating** (`services.requests.create_request(owner, RequestOptions, ip=, charge=)`, shared by the form and
-  `POST /api/ft/requests`): the title (control characters removed, stripped, 1 to 100), the message
+  `POST /api/ft/requests`): the title (optional since issue #318: control characters removed, stripped, at most 100, blank for none; `limits.clean_title`), the message
   (`validate_message`), the audience, the invitees (the `limits.validate_recipients` rules, at most
   `logged_in_max_recipients`, normalised by `request_invites.normalize_invite_email`: domain lower-cased;
   required for "Only these people", ignored otherwise), `max_files` 1 to the site's, `max_total_size_bytes` 1
@@ -3671,6 +3840,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     arrived stays `uploaded=False`, so each `complete` on it is a free S3 HEAD); the script waits out
     a 429 on either. Once the PUT has succeeded the row's cancel button is hidden and a cancel can no
     longer stop the `complete` (which would verify, queue and bill the receipt).
+  A **pasted image** (issue #313, `initClipboardPaste(addFiles, {keep: ['image/jpeg', 'image/webp'], accept: [...], skipEditable: true})`) is added like a picked
+    file, named `<time>.webp` (a copied JPEG, PNG, WebP or HEIC file keeps its format), and goes through the same type/size checks; the drop zone's hint says so (not while frozen).
   - **Trash** (`/receipts/trash/`): plain POST forms ending in a redirect with a flash message (restore;
     delete forever through a confirmation modal, an S3 error is a message, not a 500); how long is
     left comes from `ReceiptsSettings.trash_days`.
@@ -4957,7 +5128,7 @@ line says so).
   `filters.label_names(user)` now maps project ids too (one dict for both). The search page has a
   Project checkbox group and "Include archived projects".
 - **The API and the CLI** (part 3; `api/projects.py`, `schemas/project.py`, `admin/todo.py`; no
-  migration; OpenAPI 2.11.0, additive). Every endpoint calls `services.projects` and adds no rule.
+  migration; OpenAPI 2.13.0, additive). Every endpoint calls `services.projects` and adds no rule.
   - *Projects.* `GET /projects?archived=false|true|all` (three queries whatever their number: the
     sections of all of them are read at once), `POST /projects` (201), `POST /projects/reorder`,
     `GET|PATCH|DELETE /projects/{id}` (`DELETE` keeps the tasks, 204), `POST
@@ -5060,7 +5231,7 @@ line says so).
 - **Not done:** filing emailed tasks (they are in no project), reading a project from the title, bulk moves, and
   the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
   To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
-- **Tests.** `apps/todo/tests/test_projects.py`; the AI plan has TODO-62 to TODO-67 and ADM-65.
+- **Tests.** `apps/todo/tests/test_projects.py`; the AI plan has TODO-63 to TODO-68 and ADM-65.
 
 #### Comments and references
 
@@ -5290,6 +5461,9 @@ long reasoning.
   honoured up to 3 times; the drop zone is core's shared `initDropZone`. A completed attachment can
   be removed from a trashed task and while frozen (it saves money); an open task takes uploads, a
   trashed or completed one doesn't (the block hides the drop zone and doesn't load the script).
+  A **pasted image** (issue #313) anywhere on the page outside a comment form is attached to the task (`attachments.js` registers
+  `initClipboardPaste(uploader.addFiles, {skipEditable: true})` with no `within`; the comment forms register their own, `comment_files.js`, see
+  "Files on comments"); the hint is `#attachment-paste-hint`, shown only when the block is wired.
   `layout.html` shows the "Storage is paused" banner (with Top up) while `frozen_at` is set, and the
   settings page's "Files" section shows "N MB stored, about 0.02 credits a day" -- the **actual**
   rate (`metering.daily_storage_rate`, `describe_daily_rate`: fractions kept, "less than 0.01
@@ -5320,7 +5494,8 @@ long reasoning.
   task `attachments` leave `for_comment` files out**; everything else is shared: billing and the
   daily metering, the frozen state, the per-task cap on files (a comment's files count toward it), the
   size limit, deleting with the task or user. Deleting a comment keeps its files, still billed, until it
-  is restored or the task is deleted. No API endpoint adds files to a comment yet. The upload engine is
+  is restored or the task is deleted. No API endpoint adds files to a comment yet. **Pasting an image while the focus is in a comment form** (the text box included) adds it as a draft file of that comment
+  (`initClipboardPaste(uploader.addFiles, {within: form})`, hint inside the box); a text paste in the box is untouched. The upload engine is
   `static/todo/js/uploader.js` (`TodoUploader.create`), which `attachments.js` (the task's block) and
   `comment_files.js` both use; the script is wired from `htmx:load` because htmx swaps the comments
   section after every action, and the form's submit button is disabled (and a submit stopped) while a
@@ -7299,7 +7474,7 @@ succeeded and failed alike, in batches; ready/running rows never) and `core.clea
 `SessionStore.clear_expired()`; nothing else purges `django_session`). A third daily one,
 `core.purge_old_notifications` (90 days, see "Notifications"), does the same for in-app notifications.
 
-`file_transfer`'s five jobs (`apps/file_transfer/jobs.py`; the fifth, `send_request_notices`, is under "File requests"): `meter_transfers` (daily -- charges at
+`file_transfer`'s six jobs (`apps/file_transfer/jobs.py`; `send_request_notices` is under "File requests" and `purge_previews`, daily, under "File previews"): `meter_transfers` (daily -- charges at
 the shared `BillingSettings` storage price, suspends, re-enables as a fallback -- only transfers
 already suspended when the run started, never one it suspended itself --, deletes files past the
 suspension grace period),
@@ -7340,6 +7515,61 @@ badge/copy pops in `components.js`. **Themed select** (`core/components/select.h
 tags are one tinted pill from `apps/core/templatetags/core_ui.py` (`{% pill %}`, `pill_html`), which the
 products' own tags (`status_pill`, `link_status_pill`, `due_badge`, ...) wrap; an empty list is
 `core/partials/empty_state.html`. The only un-namespaced templates are core's `admin/` overrides.
+
+**Paste an image to upload it** (issue #313; `core/js/clipboard_paste.js`, `core/partials/paste_hint.html`; tests
+`tests_e2e/test_clipboard_paste.py`, the page tests of each product, AI cases FT-70, RCPT-62, TODO-62). One more way to add a
+file next to the picker and `initDropZone`: `initClipboardPaste(onFiles, {within, enabled, hint, keep, accept, skipEditable})` (a classic script loaded
+before the page script, like `drop_zone.js`) hands `File[]` to **the very callback the drop zone uses**, so a pasted image is
+checked, hashed and uploaded exactly like a picked one (same limits, same progress row, same error line). It is used by file
+transfer's send, anonymous send and file request pages (`handleFileSelection`), Receipts' upload page (`addFiles`) and To-do's task
+attachments and comment forms (`TodoUploader.addFiles`).
+- *Only an image is taken.* A `file` item of `clipboardData` whose type is `image/*`. Without one the paste is ignored entirely
+  (`preventDefault` is not called, so text pasted into a field still works): text, HTML, a file's path as text and a non-image file
+  (a PDF copied in Finder) are all "no image". In an input, textarea or contenteditable **the text wins**: an image together with
+  text (copying spreadsheet cells does that) is left to the field; an image alone is taken even there.
+- *Name and format.* The local time of the paste, `YYYY-MM-DD-HH-mm-SS.<ext>`, `-2`, `-3` for more in the same second (a
+  per-page counter, assigned before the async re-encode so the order is stable). The issue says "if the original format is
+  available keep it, otherwise WebP at 85%", so there are two kinds of clipboard image (`isRealFile`: the browser's generic
+  placeholder names, `image.png`, `image.jpg`, ... or no name, mean a bitmap; any other name means a file):
+  1. **A real file** (copied in Finder or Explorer; Chrome and Firefox hand over its bytes and its own name) **is the original**:
+     bytes and type are kept untouched, only the name becomes the timestamp with the original extension (`.png`, `.jpg`; the
+     real name is not kept, as the issue asks for timestamp names). `options.accept` (a list of MIME types; default: anything) is
+     for a page that cannot take every type as it is: other types are converted like a bitmap. Receipts passes JPEG, PNG, WebP and
+     HEIC, so a copied GIF becomes WebP (its first frame) while a copied PNG stays a PNG.
+  2. **An anonymous bitmap** (a screenshot, "Copy image": always a re-encoded PNG, the original format is not known) is
+     re-encoded as **WebP at 85% quality** with a canvas (`createImageBitmap` + `toBlob('image/webp', 0.85)`; alpha is kept; the
+     result is always WebP, even when a tiny PNG would be smaller). A browser that cannot write WebP (`toBlob` answers a PNG, as Safari
+     did) or cannot decode the image keeps the original with its own extension. **JPEG, WebP and GIF bitmaps are kept as they are**
+     (a GIF keeps its animation); `options.keep` changes that list: Receipts passes JPEG and WebP only, since it cannot read a GIF.
+  No server change: Receipts accepts WebP (`DEFAULT_ALLOWED_TYPES`, sniffed by magic bytes), file transfer and To-do accept anything.
+  The re-encode runs on the main thread (a very large screenshot can stall the tab for a moment; `OffscreenCanvas.convertToBlob`
+  or a "Preparing..." row state is a possible follow-up, not done). **Safari is unverified**: whether WebKit dispatches `paste`
+  with the focus on a non-editable element, and what it hands over, was not tested.
+- *`skipEditable`.* The page-level registration of the file transfer send pages, the file request page, the Receipts upload page
+  and the To-do task page passes `skipEditable: true`: a paste whose target is a text field outside every `within` registration
+  (a message or recipients box, the To-do description or title editor, the subtask or reminder fields) is left to the browser, so
+  an image pasted there is never uploaded (or billed, for To-do) behind the user's back. A comment form's own `within`
+  registration still takes an image pasted into its text box.
+- *A paused pasted upload* (file transfer: `resumable_upload.js`): the pasted `File` is kept in memory (`handleFileSelection(files,
+  {retain: true})`, `entry.retained`), so the paused row offers **Retry** (resumes with the same `File`) instead of "Choose the
+  file", which a pasted image (it has no file on disk) could never satisfy. After a page reload the row is hydrated from the
+  server without the `File`, so it shows "Choose the file" as any paused row does (the way out is Remove).
+- *Housekeeping.* The polite `role="status"` line is created at the first registration (not on the first paste, which many
+  screen readers do not announce), registrations whose `within` left the page are pruned at each registration and each paste (htmx
+  swaps `#task-comments`), and a failure in the re-encode or the callback is logged and announced as "Could not paste the image."
+- *Permissions: none.* The `paste` event gives the page `clipboardData` because the user pressed Ctrl+V / ⌘V (or used the browser's
+  Paste menu), with no prompt. Only the async `navigator.clipboard.read()` asks for permission, and **nothing here uses it** (no
+  "Paste" button): a page cannot read the clipboard unprompted, so nothing is uploaded unless the user pastes.
+- *Where a paste goes.* One document-level listener serves every registration. `within` (an element: a To-do comment form) takes a
+  paste whose target is inside it (the innermost wins; a registration whose element left the page is dropped, since htmx swaps the
+  comments); without `within` it is the page-level target (with `skipEditable`, not for a text field); `enabled()` is asked at paste time. **To-do task page: a paste with the
+  focus anywhere in a comment form (the text box included) is a file of that comment (a draft, `for_comment`); a paste anywhere else
+  is an attachment of the task.** No registration where the drop zone isn't rendered or wired: not on a completed or trashed task
+  (comment forms of a completed task still take one), not while storage is paused (`frozen`), not on a file request that is Done.
+- *Hint.* `core/partials/paste_hint.html` ("You can also paste an image: Ctrl+V", `hidden`, `data-paste-hint`) sits in each drop zone
+  and in the comment form; the script reveals it when it registers, so it never shows where pasting does not work, nor on a
+  touch-only device (`(any-pointer: fine)` false), and it reads **⌘V** on Apple platforms. A polite `role="status"` line says
+  "Pasted <name> from the clipboard." (the rows themselves are in each page's own list).
 
 **Colour schemes** (`apps/core/color_schemes.py`, the source of truth: a frozen `ColorScheme` per
 scheme with a 10-step accent scale and an 11-step tinted neutral scale, `DEFAULT = 'sage'`,

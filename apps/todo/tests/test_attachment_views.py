@@ -613,6 +613,12 @@ class TestTaskPage:
         # `initDropZone` lives in core's shared script, which must load before the page's own.
         assert content.index('core/js/drop_zone.js') < content.index('todo/js/attachments.js')
         assert 'up to 50' in content.lower() or 'Up to 50' in content
+        # Pasting an image (issue #313): the task's block has its hint and the script is loaded first.
+        assert 'id="attachment-paste-hint"' in content and 'data-paste-hint' in content
+        assert content.index('core/js/clipboard_paste.js') < content.index('todo/js/attachments.js')
+        assert content.index('core/js/clipboard_paste.js') < content.index(
+            'todo/js/comment_files.js'
+        )
 
     def test_lists_the_files_with_download_open_and_remove(self, web, task, fake_storage):
         png = make_attachment(task, fake_storage, filename='photo.png')
@@ -653,6 +659,10 @@ class TestTaskPage:
         content = web.get(reverse('todo:task', args=[task.number])).content.decode()
 
         assert 'Drop files here' not in content
+        # No task-level paste target either; the comment forms still take a pasted image.
+        assert 'attachment-paste-hint' not in content
+        assert 'todo/js/attachments.js' not in content
+        assert 'core/js/clipboard_paste.js' in content
 
     def test_a_frozen_account_disables_adding_and_says_so(self, web, task, funded_user):
         get_account(funded_user)

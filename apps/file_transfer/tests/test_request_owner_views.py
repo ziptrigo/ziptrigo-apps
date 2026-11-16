@@ -127,7 +127,6 @@ def test_the_created_page_is_not_for_a_send(owner_client, draft_transfer):
 @pytest.mark.parametrize(
     ('fields', 'text'),
     [
-        ({'title': ''}, 'Title'),
         ({'title': 'x' * 101}, 'Keep the title to 100 characters or fewer.'),
         ({'upload_audience': 'selected', 'emails': ''}, 'Add at least one email address.'),
         ({'upload_audience': 'selected', 'emails': 'nonsense'}, 'is not a valid email address'),
@@ -147,7 +146,7 @@ def test_refusals_are_a_422_with_the_errors_partial(owner_client, fields, text):
 
 
 def test_a_field_error_is_also_marked_for_the_field(owner_client):
-    response = _create(owner_client, title='')
+    response = _create(owner_client, title='x' * 101)
     assert 'data-field-error="title"' in response.content.decode()
 
 
@@ -196,7 +195,7 @@ def test_a_refused_form_spends_no_create_budget(owner_client, settings, funded_u
     settings.RATELIMIT_ENABLE = True
     from apps.core.ratelimit import limiter
 
-    _create(owner_client, title='')
+    _create(owner_client, title='x' * 101)
     assert limiter.peek(str(funded_user.pk), 'FT_REQUEST_CREATE_USER').remaining == 30
 
 
@@ -463,7 +462,7 @@ def test_settings_validation_errors_are_a_422_row(owner_client, make_request):
     transfer = make_request()
     response = owner_client.post(
         _url('request-settings', transfer),
-        {'title': '', 'upload_audience': 'anyone', 'expiry_choice': 'none'},
+        {'title': 'x' * 101, 'upload_audience': 'anyone', 'expiry_choice': 'none'},
         HTTP_HX_REQUEST='true',
     )
     assert response.status_code == 422

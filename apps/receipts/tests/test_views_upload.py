@@ -55,6 +55,11 @@ class TestPage:
         assert 'receipts/js/upload.js' in content
         # `initDropZone` lives in core's shared script, which must load before the page's own.
         assert content.index('core/js/drop_zone.js') < content.index('receipts/js/upload.js')
+        # Pasting an image (issue #313): core's script loads first too, and the hint is in the markup
+        # (hidden until the script shows it).
+        assert content.index('core/js/clipboard_paste.js') < content.index('receipts/js/upload.js')
+        assert 'data-paste-hint' in content and 'You can also paste an image:' in content
+        assert 'id="paste-hint"' in content
         assert 'PDF, JPG, PNG, HEIC, WebP' in content
         assert 'up to 15 MB' in content and '1 credit each' in content
         assert f'data-start-url="{reverse("receipts:upload-start")}"' in content

@@ -25,6 +25,7 @@ from apps.core.htmx import hx_redirect
 from .. import services
 from ..forms import AbuseReportForm, DownloadPasswordForm
 from ..models import FileTransferSettings, Transfer, TransferKind
+from ..services import preview
 from ..services.request_access import Access, check_access, is_owner
 from ..services.request_uploader import identify, own_files, remember_name, remembered_name
 from ..services.storage import PART_SIZE_BYTES
@@ -103,7 +104,7 @@ def render_request_page(
     from .download import download_qr_data_uri
 
     owner_viewing = is_owner(transfer, request.user)
-    files = transfer.files.filter(uploaded=True).order_by('name')
+    files = list(transfer.files.filter(uploaded=True).order_by('name'))
     context = {
         'transfer': transfer,
         'files': files,
@@ -113,6 +114,7 @@ def render_request_page(
         'qr_data_uri': download_qr_data_uri(transfer),
         'show_uploaders': owner_viewing,
         'is_request': True,
+        **preview.page_context(transfer, files, unlocked=True),
     }
     return render(request, 'file_transfer/download.html', context, status=status)
 

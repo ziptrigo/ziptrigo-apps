@@ -19,7 +19,7 @@ from apps.core.htmx import hx_redirect
 from apps.core.services.client_ip import client_ip
 
 from .. import services
-from ..forms import SendOptionsForm
+from ..forms import SendOptionsForm, add_service_errors
 from ..models import FileTransferSettings, Transfer, TransferStatus
 from ..services.blocklist import is_blocked
 from ..services.storage import PART_SIZE_BYTES
@@ -108,7 +108,7 @@ def send_submit(request: AuthenticatedHttpRequest, draft_id: str) -> HttpRespons
     try:
         services.finalize_send(transfer, form.to_send_options(), ip=client_ip(request))
     except ValidationError as exc:
-        form.add_error(None, exc.messages[0])
+        add_service_errors(form, exc)
         return _errors(request, form)
     except InsufficientCreditsError as exc:
         form.add_error(None, str(exc))
@@ -125,5 +125,9 @@ def sent_page(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpRespon
     transfer = get_object_or_404(
         Transfer, id=transfer_id, owner=request.user, status=TransferStatus.ACTIVE
     )
-    context = {'transfer': transfer, 'download_url': transfer.absolute_download_url}
+    context = {
+        'transfer': transfer,
+        'download_url': transfer.absolute_download_url,
+        'has_recipients': transfer.recipients.exists(),
+    }
     return render(request, 'file_transfer/sent.html', context)

@@ -5,7 +5,8 @@
  * `attachment_ids` input, so submitting the form saves it with the comment. Removing a chip asks the
  * server to delete the draft (`discard`; one that is never saved is also swept after a day). The
  * form's submit button is disabled while a file is still uploading, and a submit that gets through
- * anyway (Ctrl+Enter) is stopped.
+ * anyway (Ctrl+Enter) is stopped. An image pasted from the clipboard while the focus is in the form is
+ * added like a picked file (`core/js/clipboard_paste.js`, loaded before this).
  *
  * The comments section is swapped by htmx after every action, so the forms are wired from
  * `htmx:load` (which also fires for the first render) as well as on DOMContentLoaded.
@@ -75,6 +76,14 @@
                 if (input.files && input.files.length) uploader.addFiles(input.files);
                 input.value = '';
             });
+            // Core's `clipboard_paste.js`: an image pasted while the focus is anywhere in this form
+            // (the text box included; a paste of text there is left alone) becomes a file of the comment.
+            if (window.initClipboardPaste) {
+                initClipboardPaste(uploader.addFiles, {
+                    within: form || box,
+                    hint: box.querySelector('[data-paste-hint]'),
+                });
+            }
         }
         if (form) {
             // Capture phase on the form itself runs before htmx's own submit listener.
