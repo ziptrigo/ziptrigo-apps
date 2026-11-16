@@ -502,8 +502,12 @@ def create_task(
             parent=cleaned_parent,
             project=cleaned.project,
             section=cleaned.section,
+            # A subtask sits at its parent's place in the project's manual order (the default
+            # order keeps it after the parent); a top-level task goes to the end of its list.
             project_position=(
-                projects.next_position(cleaned.project, cleaned.section)
+                cleaned_parent.project_position
+                if cleaned_parent is not None
+                else projects.next_position(cleaned.project, cleaned.section)
                 if cleaned.project is not None
                 else 0
             ),
@@ -685,6 +689,7 @@ def update_task(
                     values['project'] = locked[new_parent.pk].project
                 if locked[new_parent.pk].section_id != current.section_id:
                     values['section'] = locked[new_parent.pk].section
+                values['project_position'] = locked[new_parent.pk].project_position  # its place
         description_changed = (
             'description' in values and values['description'] != current.description
         )
@@ -702,15 +707,24 @@ def update_task(
             else None
         )
         left_project = current.project if 'project' in values else None
+        left_section = current.section if 'section' in values else None
         for name, value in values.items():
             setattr(task, name, value)
         task.save(update_fields=[*values, 'updated_at'])
         if labels is not None:
             task.labels.set(labels)
-        if 'project' in values and new_parent is not None:
-            # It followed its new parent into that parent's project: logged, and the reminders an
-            # archived project held are released (`services.projects`).
-            projects.followed_parent(task, left_project, values['project'], new_parent)
+        if ('project' in values or 'section' in values) and new_parent is not None:
+            # It followed its new parent into that parent's project and section: logged, and the
+            # reminders an archived project held are released (`services.projects`).
+            projects.followed_parent(
+                task,
+                left_project,
+                values.get('project'),
+                new_parent,
+                project_changed='project' in values,
+                old_section=left_section,
+                new_section=values.get('section'),
+            )
         _record_update(
             task,
             current,

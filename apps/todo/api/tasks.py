@@ -235,11 +235,12 @@ def list_tasks(
     - `priority`: comma-separated priorities, 0 (none) to 3; any of them.
     - `label`: comma-separated label ids, and `none` for tasks without a label; any of them.
     - `project`: comma-separated project ids, and `none` for tasks in no project; a task in any
-      of them (an id that is not one of your projects matches nothing). Naming a project lists
-      its tasks even when it is archived.
-    - `include_archived`: with `view=all`, the tasks of archived projects too. Without it (and
-      without `project`) `today`, `upcoming` and `all` leave them out, as the website does;
-      `closed`, `trash` and a parent's subtasks never do.
+      of them (an id that is not one of your projects matches nothing). With `view=all`, naming
+      a project lists its tasks even when it is archived.
+    - `include_archived`: with `view=all`, the tasks of archived projects too. `today` and
+      `upcoming` **always** leave them out (they are muted: never due, never overdue), whatever
+      `project` and `include_archived` say; `all` leaves them out unless `project` or
+      `include_archived` is given; `closed`, `trash` and a parent's subtasks never leave them out.
     - `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:
       a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or
       `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;
@@ -571,6 +572,55 @@ def get_task(request, number: int):
     return task_detail(request, owned_task(request, number))
 
 
+def _plan_place(
+    task: Task,
+    user,
+    changes: dict[str, Any],
+    move_project: bool,
+    wanted_project: UUID | None,
+    set_section: bool,
+    wanted_section: UUID | None,
+) -> tuple[Any, bool, bool]:
+    """What a `PATCH` does to the task's project and section: `(target project, move it, set the
+    section)`, with everything refused here that can be refused without writing (so it spends no
+    budget). It is judged against **the task as the same request leaves it**: the parent it will
+    have (`parent` in the body), since a subtask is in its parent's project and section.
+
+    The values the task will have anyway are a no-op, never a refusal: a client may send back the
+    `project` and `section` it read, for a subtask and for a task in an archived project too."""
+    if 'parent' in changes:
+        parent = changes['parent']  # resolved by the caller: a `Task`, or `None`
+        subtask = parent is not None
+        place = (parent.project_id, parent.section_id) if subtask else (task.project_id, None)
+        # Made top-level, it keeps its project; its section too (the service leaves it).
+        if not subtask:
+            place = (task.project_id, task.section_id)
+    else:
+        subtask = task.parent_id is not None
+        place = (task.project_id, task.section_id)
+    project_id, section_id = place
+    move_project = move_project and wanted_project != project_id
+    set_section = set_section and (move_project or wanted_section != section_id)
+    if not (move_project or set_section):
+        return task.project, False, False
+    if task.is_trashed:
+        raise ValidationError('Restore the task before changing it.')
+    if subtask:
+        if move_project:
+            raise ValidationError({'project': projects.SUBTASK_MESSAGE})
+        raise ValidationError({'section': projects.SUBTASK_SECTION_MESSAGE})
+    target = task.project
+    if move_project:
+        target = projects.clean_project(user, wanted_project)
+    if set_section:
+        cleaned = projects.clean_section(target, wanted_section)
+        if not move_project and target is not None:
+            # A section change inside an archived project is refused (its sections are frozen).
+            if (cleaned.pk if cleaned else None) != task.section_id:
+                projects.require_active(target)
+    return target, move_project, set_section
+
+
 def _plan_blockers(task: Task, user, wanted: list[int] | None) -> tuple[list[Task], list[Task]]:
     """`(to_add, to_remove)` to make `wanted` (task numbers; `None` is none) the set of tasks that
     block `task`, with every refusal that can be told without writing (an unknown or trashed task,
@@ -654,15 +704,9 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
         to_add, to_remove = _plan_blockers(task, request.auth, wanted) if set_blockers else ([], [])
         # The project and the section (a refusal here spends no budget): the section is one of the
         # project the task ends up in. The values the task already has change nothing.
-        target_project = task.project
-        if move_project:
-            target_project = projects.check_move(task, wanted_project)
-            move_project = (target_project.pk if target_project else None) != task.project_id
-        if set_section:
-            if task.parent_id is not None or task.is_trashed:
-                projects.check_section(task, wanted_section)  # raises the right refusal
-            projects.clean_section(target_project, wanted_section)
-            set_section = move_project or wanted_section != task.section_id
+        target_project, move_project, set_section = _plan_place(
+            task, request.auth, changes, move_project, wanted_project, set_section, wanted_section
+        )
         if not (changes or state_change or to_add or to_remove or move_project or set_section):
             return task_response(request, task)
         charge(request, 'TODO_EDIT_USER')

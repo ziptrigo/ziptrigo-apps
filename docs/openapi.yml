@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.13.0
+  version: 2.13.1
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -3369,7 +3369,9 @@ paths:
                 type: array
       description: 'The caller''s projects in their order: the active ones (`archived=false`, the default), the
 
-        archived ones (`true`) or both (`all`). Three queries whatever their number.'
+        archived ones (`true`) or both (`all`). Their counts and sections are read in two queries
+
+        whatever their number (a description that mentions tasks adds a lookup per task number).'
       tags:
       - To-do
       security:
@@ -3609,7 +3611,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProjectSchema'
-      description: Put the project's sections in the order given; ids that aren't its own are ignored.
+      description: 'Put the project''s sections in the order given; ids that aren''t its own are ignored. A 400
+
+        for an archived project.'
       tags:
       - To-do
       requestBody:
@@ -3702,7 +3706,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CountSchema'
-      description: 'Write the hand-made order of one list of the project (see `ProjectTaskOrderSchema`): what
+      description: 'Write the hand-made order of one list of the project (see `ProjectTaskOrderSchema`; the ids
+
+        sent swap the places they already hold, so a partial list never makes two tasks tie): what
 
         `GET /tasks?project=<id>&sort=manual` follows. `count` is how many tasks were positioned. An
 
@@ -4116,7 +4122,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListSchema'
-      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `project`: comma-separated project ids, and `none` for tasks in no project; a task in any\n  of them (an id that is not one of your projects matches nothing). Naming a project lists\n  its tasks even when it is archived.\n- `include_archived`: with `view=all`, the tasks of archived projects too. Without it (and\n  without `project`) `today`, `upcoming` and `all` leave them out, as the website does;\n  `closed`, `trash` and a parent's subtasks never do.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`; or `manual`, the hand-made\n  order of a project's page, which needs `project` to be exactly one project id (a 400\n  otherwise): its sections in order, the tasks with no section first. `manual` has no `dir`.\n- `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own\n  default when left out (`date`, `priority` and `title` ascending, `created` newest first), the\n  exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open\n  ones. Without `sort`, `dir` means `sort=date` for `view=all` and `upcoming` (date-sorted by\n  default); for `view=today`, `closed`, `trash` and `parent=`, whose own order is not a sort,\n  it is a 400 `dir: Choose a sort to reverse.`\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label`, `project` and `date_range`, spends\n`TODO_SEARCH_USER`.\n\n**Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`\nand `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found\nby the website's bounded pass (a 0.2 s budget for the page, only the field the database said\nmatched, at most 5,000 characters of it; rows past the budget are listed without a snippet).\nWithout `q` all four are `null`."
+      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `project`: comma-separated project ids, and `none` for tasks in no project; a task in any\n  of them (an id that is not one of your projects matches nothing). With `view=all`, naming\n  a project lists its tasks even when it is archived.\n- `include_archived`: with `view=all`, the tasks of archived projects too. `today` and\n  `upcoming` **always** leave them out (they are muted: never due, never overdue), whatever\n  `project` and `include_archived` say; `all` leaves them out unless `project` or\n  `include_archived` is given; `closed`, `trash` and a parent's subtasks never leave them out.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`; or `manual`, the hand-made\n  order of a project's page, which needs `project` to be exactly one project id (a 400\n  otherwise): its sections in order, the tasks with no section first. `manual` has no `dir`.\n- `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own\n  default when left out (`date`, `priority` and `title` ascending, `created` newest first), the\n  exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open\n  ones. Without `sort`, `dir` means `sort=date` for `view=all` and `upcoming` (date-sorted by\n  default); for `view=today`, `closed`, `trash` and `parent=`, whose own order is not a sort,\n  it is a 400 `dir: Choose a sort to reverse.`\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label`, `project` and `date_range`, spends\n`TODO_SEARCH_USER`.\n\n**Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`\nand `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found\nby the website's bounded pass (a 0.2 s budget for the page, only the field the database said\nmatched, at most 5,000 characters of it; rows past the budget are listed without a snippet).\nWithout `q` all four are `null`."
       tags:
       - To-do
       security:
@@ -10556,7 +10562,9 @@ components:
 
         `ids` are task ids (not numbers) in the order wanted; ids that are not the caller''s non-trashed
 
-        tasks of this project are ignored. A task listed that is in another section **joins this one**,
+        tasks of this project are ignored. **The list need not be complete**: the tasks sent swap the
+
+        places they already hold in the list, and the others keep theirs. A task listed that is in another section **joins this one**,
 
         with its subtasks; a subtask listed alone stays with its parent.'
       properties:
@@ -11698,14 +11706,14 @@ components:
           - format: uuid
             type: string
           - type: 'null'
-          description: Moves the task to one of your projects, with its subtasks; `null` takes it out of its project. A move to another project leaves its section (send `section` too to choose one there). A 400 for a subtask (move its parent), a task in the Trash, a project that is not yours or is archived.
+          description: Moves the task to one of your projects, with its subtasks; `null` takes it out of its project. A move to another project leaves its section (send `section` too to choose one there). A 400 for a subtask (move its parent), a task in the Trash, a project that is not yours or is archived. The project the task already has is a no-op (never a refusal), so the value read may be sent back.
           title: Project
         section:
           anyOf:
           - format: uuid
             type: string
           - type: 'null'
-          description: Puts the task in a section of its project (the one it has, or the `project` sent with it), at the end of it; `null` takes it out of its section. A 400 for a section of another project and for a subtask.
+          description: Puts the task in a section of its project (the one it has, or the `project` sent with it), at the end of it; `null` takes it out of its section. A 400 for a section of another project, for a subtask, and for a change inside an archived project. The section the task already has is a no-op.
           title: Section
       title: TaskUpdateSchema
       type: object

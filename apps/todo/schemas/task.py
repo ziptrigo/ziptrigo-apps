@@ -363,13 +363,15 @@ class TaskUpdateSchema(Schema):
         description='Moves the task to one of your projects, with its subtasks; `null` takes it '
         'out of its project. A move to another project leaves its section (send `section` too to '
         'choose one there). A 400 for a subtask (move its parent), a task in the Trash, a project '
-        'that is not yours or is archived.',
+        'that is not yours or is archived. The project the task already has is a no-op (never a '
+        'refusal), so the value read may be sent back.',
     )
     section: UUID | None = Field(
         default=None,
         description='Puts the task in a section of its project (the one it has, or the `project` '
         'sent with it), at the end of it; `null` takes it out of its section. A 400 for a section '
-        'of another project and for a subtask.',
+        'of another project, for a subtask, and for a change inside an archived project. The '
+        'section the task already has is a no-op.',
     )
 
 

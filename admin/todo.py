@@ -1509,7 +1509,7 @@ def todo_project_add(
         '/projects',
         json={'name': ' '.join(name), 'color': color, 'description': description},
     )
-    _say(Text.assemble('Added the project ', project['name'], f' ({project["color"]}).').plain)
+    _say(f'Added the project {project["name"]} ({project["color"]}).')
 
 
 @app.command(name='project-edit')
@@ -1536,7 +1536,7 @@ def todo_project_edit(
         raise _fail('Nothing to change: pass at least one option.')
     found = _resolve_project(project)
     updated = _call('patch', f'/projects/{found["id"]}', json=payload)
-    _say(Text.assemble('Updated the project ', updated['name'], '.').plain)
+    _say(f'Updated the project {updated["name"]}.')
 
 
 @app.command(name='project-archive')
@@ -1555,7 +1555,7 @@ def todo_project_archive(
     select_environment(environment)
     found = _resolve_project(project)
     if found['archived_at']:
-        _say(Text.assemble(found['name'], ' is already archived.').plain)
+        _say(f'{found["name"]} is already archived.')
         return
     count = found['open_count']
     _confirm(
@@ -1564,7 +1564,7 @@ def todo_project_archive(
         yes,
     )
     _call('post', f'/projects/{found["id"]}/archive', json={})
-    _say(Text.assemble('Archived ', found['name'], '.').plain)
+    _say(f'Archived {found["name"]}.')
 
 
 @app.command(name='project-unarchive')
@@ -1581,10 +1581,10 @@ def todo_project_unarchive(
     select_environment(environment)
     found = _resolve_project(project)
     if not found['archived_at']:
-        _say(Text.assemble(found['name'], ' is not archived.').plain)
+        _say(f'{found["name"]} is not archived.')
         return
     _call('post', f'/projects/{found["id"]}/unarchive', json={})
-    _say(Text.assemble(found['name'], ' is active again.').plain)
+    _say(f'{found["name"]} is active again.')
 
 
 @app.command(name='project-delete')
@@ -1608,7 +1608,7 @@ def todo_project_delete(
         yes,
     )
     _call('delete', f'/projects/{found["id"]}')
-    _say(Text.assemble('Deleted the project ', found['name'], '.').plain)
+    _say(f'Deleted the project {found["name"]}.')
 
 
 @app.command(name='section-add')
@@ -1626,7 +1626,7 @@ def todo_section_add(
     select_environment(environment)
     found = _resolve_project(project)
     _call('post', f'/projects/{found["id"]}/sections', json={'name': ' '.join(name)})
-    _say(Text.assemble('Added the section ', ' '.join(name), ' to ', found['name'], '.').plain)
+    _say(f'Added the section {" ".join(name)} to {found["name"]}.')
 
 
 @app.command(name='section-rename')
@@ -1650,7 +1650,7 @@ def todo_section_rename(
         f'/projects/{found["id"]}/sections/{target["id"]}',
         json={'name': ' '.join(name)},
     )
-    _say(Text.assemble('Renamed the section ', target['name'], ' to ', ' '.join(name), '.').plain)
+    _say(f'Renamed the section {target["name"]} to {" ".join(name)}.')
 
 
 @app.command(name='section-delete')
@@ -1674,7 +1674,7 @@ def todo_section_delete(
         yes,
     )
     _call('delete', f'/projects/{found["id"]}/sections/{target["id"]}')
-    _say(Text.assemble('Deleted the section ', target['name'], '.').plain)
+    _say(f'Deleted the section {target["name"]}.')
 
 
 # -- Commands: reminders -------------------------------------------------------------------------

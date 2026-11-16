@@ -112,7 +112,9 @@ def _task_url(task: Task) -> str:
 # -- Responses -----------------------------------------------------------------------------------
 
 
-def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
+def panel_context(
+    request: AuthenticatedHttpRequest, task: Task, active_projects: list | None = None
+) -> dict:
     """The context of the task page's panel (also what an action from the page re-renders). The
     comments are not part of it: they sit beside the panel (`comments_context`), so a panel action
     neither re-renders them nor loses a draft typed in them."""
@@ -144,7 +146,11 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
         'open_subtasks': open_subtasks,
         'labels': labels,
         'selected_label_ids': [str(label.pk) for label in task.labels.all()],
-        'todo_projects': list(Project.objects.filter(user=user, archived_at__isnull=True)),
+        # The Project select's choices: handed in by the page (which read them for the sidebar),
+        # read here when an action re-renders the panel alone.
+        'todo_projects': active_projects
+        if active_projects is not None
+        else list(Project.objects.filter(user=user, archived_at__isnull=True)),
         'project_sections': projects.list_sections(task.project)
         if task.project is not None
         else [],
@@ -369,8 +375,9 @@ def task_page(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """The task page. A trashed task opens too, read-only, with Restore."""
     task = owned_task(request, number, trashed=None)
     get_account(request.user)
-    panel = panel_context(request, task)
-    context = {**comments_context(request, task), **panel}
+    listed = projects_context(request.user)
+    panel = panel_context(request, task, listed['todo_projects'])
+    context = {**listed, **comments_context(request, task), **panel}
     context['title_task'] = task
     context.update(attachments_context(request, task))
     # The one loaded like a row: the attachments' context has its own.
