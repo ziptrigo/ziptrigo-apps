@@ -1160,6 +1160,20 @@ Receipt date column and filters, the receipt page, the trash and the vendors pag
 | 5 | Check the Receipts attention email (RCPT-55) with the account on `dd/mm/yyyy` + `24-hour`. | The email's "received ..." line is `Nov 5, 2026, 9:05 PM UTC` style (public wording and UTC). |
 | 6 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 
+### RCPT-62 Pasting an image from the clipboard
+
+**Purpose:** a pasted image is uploaded like a picked file (issue #313); only an image is taken.
+**Preconditions:** signed in as `qa.user@example.com` with credits, on `/receipts/upload/`. Where the clipboard cannot be filled, use the console snippet of FT-70 (`file_transfer.md`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Look under **Choose files** / **Take photo**. | "You can also paste an image: Ctrl+V" (**⌘V** on a Mac) is visible. |
+| 2 | Paste text (Ctrl+V with text copied). | Nothing happens. A PDF copied in the file manager: nothing either. |
+| 3 | Paste a screenshot. | A row `YYYY-MM-DD-HH-mm-SS.webp` (the time of the paste) goes through Waiting, Uploading, Finishing and ends "Uploaded. View receipt"; it is read like any receipt (the fake model answers Staples). |
+| 4 | Open the receipt. | The preview shows the pasted image; **Download** gives a `.webp`. |
+| 5 | Paste a screenshot with the account **frozen** (RCPT-44: storage paused). | The hint is not shown and the paste does nothing, like a drop. |
+| 6 | Paste an image with a balance too low to read it (RCPT-42). | Same as an uploaded file: stored, "waiting for credits". |
+
 ## Out of scope
 
 - **Watching a receipt being read.** Processing runs inline during the upload's `complete`, so the

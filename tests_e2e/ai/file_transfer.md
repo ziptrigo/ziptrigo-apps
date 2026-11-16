@@ -23,6 +23,7 @@ The `apps/file_transfer` web UI, against the real local S3 (Floci) and real emai
   pages, the first 64 KB of a text file; "View full image / document" counts as a download;
   FT-64, FT-65, FT-67 to FT-69);
 - sending **without recipients** (issue #310: FT-06 and FT-66);
+- **pasting an image** from the clipboard into the send, anonymous send and request upload pages (issue #313: FT-70);
 - the daily jobs' visible effects (metering, suspension and its in-app notification, re-enabling
   on a top-up, the suspension grace period, the expiry reminder, natural expiry, the deferred file
   deletion after the last allowed download), triggered with shell steps because the scheduler does
@@ -1313,6 +1314,39 @@ Some **bold** text, a [link](https://example.com) and <script>document.title='PW
 | 7 | Take down a transfer that has previews (admin, ADM-21). | The previews are deleted with the files; the public page is the neutral one. |
 | 8 | Upload a corrupt "PNG" (the PNG signature followed by garbage, 2 KB) and **Preview** it. | The dialog says "Preview not available for this file." (no retry button) and still offers **View full image** and **Download**. A second click gives the same without "Preparing preview...". |
 | 9 | Upload a PDF over 50 MB and an image over 100 megapixels (a 12000 x 9000 PNG), **Preview** each. | Both say "Preview not available for this file." (they are never read for a preview / refused before decoding) and offer View full and Download. |
+
+### FT-70 Pasting an image from the clipboard
+
+**Purpose:** an image in the clipboard is one more way to add a file (issue #313): named after the time, converted to WebP, text ignored.
+**Preconditions:** signed in as `qa.user@example.com` on `/transfer/send/` with a fresh draft. A real browser can paste a real screenshot with Ctrl+V / Cmd+V (copy one first, e.g. Cmd+Shift+Ctrl+4 on a Mac); when the clipboard cannot be filled, run this in the page's console where a step says "paste" (the `selector` and `what` arguments are the last line):
+
+```js
+// Paste an image (or `what` = 'text' | 'pdf' | 'image+text') into `selector` (empty = the page).
+(async (selector, what) => {
+  const dt = new DataTransfer();
+  if (what.startsWith('image')) {
+    const c = Object.assign(document.createElement('canvas'), { width: 60, height: 40 });
+    c.getContext('2d').fillRect(0, 0, 60, 40);
+    dt.items.add(new File([await new Promise(r => c.toBlob(r, 'image/png'))], 'image.png', { type: 'image/png' }));
+  }
+  if (what === 'pdf') dt.items.add(new File(['%PDF-1.4 x'], 'doc.pdf', { type: 'application/pdf' }));
+  if (what === 'text' || what === 'image+text') dt.setData('text/plain', 'just some text');
+  const e = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+  (selector ? document.querySelector(selector) : document.body).dispatchEvent(e);
+  return e.defaultPrevented;   // true = the page took it
+})('', 'image')
+```
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Look under the drop zone's buttons. | The small line "You can also paste an image: Ctrl+V" (**⌘V** on a Mac) is visible. It is not shown on a phone or tablet with no mouse. |
+| 2 | Copy some text, click on the page background and paste (Ctrl+V). | Nothing happens: no row is added, no error. |
+| 3 | Paste an image (a screenshot). | A row appears named like `2026-11-15-21-03-07.webp` (the local time of the paste; `.webp` in Chrome and Firefox), with a size and a progress bar, and ends with the green check. A screen reader hears "Pasted ... from the clipboard." |
+| 4 | Paste two images within the same second (the console snippet with `'image'` twice in one call, or paste, paste quickly). | The names differ: the second ends `-2` before the extension. |
+| 5 | Focus the Message field of the send form, copy some text and paste. | The text goes into the field as usual; no file is added. |
+| 6 | Paste a PDF file copied in the file manager. | Nothing is added (only images are taken); the Choose files button is the way. |
+| 7 | **Send** the transfer with the pasted images and open the link in the Visitor window. | The files are listed and download with their timestamp names; the downloaded `.webp` opens as the image that was pasted. |
+| 8 | Open the anonymous send page (`/transfer/send/anon/`, if enabled) and a file request link (FT-54) in the Visitor window and paste an image on each. | Both take it the same way (hint, row, check). On a request that is **Done** (the download page) there is no hint and a paste does nothing. |
 
 ## Out of scope
 
