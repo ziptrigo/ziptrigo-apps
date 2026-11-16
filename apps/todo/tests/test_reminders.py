@@ -1388,16 +1388,37 @@ class TestOneNoticePerTask:
         assert notice.key == reminders.notice_key(task)
         assert ReminderDelivery.objects.filter(notification_id=first.pk).exists()
 
-    def test_a_read_or_dismissed_earlier_notice_goes_too(self, funded_user, wednesday):
+    @pytest.mark.parametrize(
+        'state',
+        [
+            {'read_at': utc(2026, 10, 28, 13, 40)},
+            {'read_at': utc(2026, 10, 28, 13, 40), 'opened_at': utc(2026, 10, 28, 13, 40)},
+            {'read_at': utc(2026, 10, 28, 13, 40), 'dismissed_at': utc(2026, 10, 28, 13, 40)},
+        ],
+        ids=['read', 'opened', 'dismissed'],
+    )
+    def test_an_earlier_notice_goes_whatever_its_state(self, funded_user, wednesday, state):
         task = timed_task(funded_user)
-        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
-        Notification.objects.update(read_at=utc(2026, 10, 28, 14, 30))
-        postpone_task(task, preset='tomorrow')
+        reminders.add_reminder(task, minutes_before=60, channel='in_app')
+        reminders.deliver_due(utc(2026, 10, 28, 13, 31))
+        Notification.objects.update(**state)
 
-        reminders.deliver_due(utc(2026, 10, 29, 14, 26))
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
 
         [notice] = Notification.objects.filter(user=funded_user)
-        assert notice.read_at is None
+        assert (notice.read_at, notice.opened_at, notice.dismissed_at) == (None, None, None)
+
+    def test_an_email_only_reminder_leaves_the_in_app_notice(self, funded_user, wednesday):
+        """Like replaces like: the notice is still right (same due moment), and only an in-app
+        reminder writes a new one."""
+        task = timed_task(funded_user)  # the default: 5 minutes before, in-app
+        reminders.add_reminder(task, minutes_before=0, channel='email')
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+        notice = Notification.objects.get()
+
+        reminders.deliver_due(utc(2026, 10, 28, 14, 31))  # the email
+
+        assert list(Notification.objects.all()) == [notice]
 
     def test_a_notice_from_before_keys_is_replaced(self, funded_user, wednesday):
         task = timed_task(funded_user)
@@ -1434,6 +1455,66 @@ class TestOneNoticePerTask:
 
         keys = set(Notification.objects.filter(user=funded_user).values_list('key', flat=True))
         assert keys == {reminders.notice_key(first), reminders.notice_key(second)}
+
+
+class TestNoticeClearedWhenTheDueMomentChanges:
+    """A reminder notice already in the bell names the old due moment, so changing it deletes the
+    notice; the re-armed reminder writes a new one when it fires."""
+
+    def deliver(self, user):
+        task = timed_task(user)
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+        assert Notification.objects.filter(user=user).count() == 1
+        return task
+
+    def test_postponing_clears_it(self, funded_user, wednesday):
+        task = self.deliver(funded_user)
+
+        postpone_task(task, preset='tomorrow')
+
+        assert not Notification.objects.filter(user=funded_user).exists()
+
+    @pytest.mark.parametrize(
+        'changes',
+        [{'due_date': date(2026, 10, 30)}, {'due_time': time(18, 0)}, {'due_date': None}],
+        ids=['date', 'time', 'cleared'],
+    )
+    def test_editing_the_date_or_time_clears_it(self, funded_user, wednesday, changes):
+        task = self.deliver(funded_user)
+
+        update_task(task, changes=changes)
+
+        assert not Notification.objects.filter(user=funded_user).exists()
+
+    def test_rescheduling_all_overdue_clears_theirs(self, funded_user, wednesday):
+        overdue = create_task(
+            funded_user, title='x', due_date=date(2026, 10, 27), due_time=time(23, 0)
+        )
+        reminders.deliver_due(utc(2026, 10, 27, 22, 56))
+        other = timed_task(funded_user)  # due today: not moved
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+        assert Notification.objects.filter(key=reminders.notice_key(overdue)).exists()
+
+        assert reschedule_overdue(funded_user) == 1
+
+        [notice] = Notification.objects.filter(user=funded_user)
+        assert notice.key == reminders.notice_key(other)
+
+    def test_other_changes_keep_it(self, funded_user, wednesday):
+        task = self.deliver(funded_user)
+
+        update_task(task, changes={'title': 'Pay the rent', 'priority': 1})
+
+        assert Notification.objects.filter(user=funded_user).count() == 1
+
+    def test_postponing_from_the_page_clears_it(self, funded_user, wednesday):
+        task = self.deliver(funded_user)
+        client = Client()
+        client.force_login(funded_user)
+
+        client.post(reverse('todo:postpone', args=[task.number]), {'preset': 'tomorrow'})
+
+        assert not Notification.objects.filter(user=funded_user).exists()
 
 
 class TestRearming:

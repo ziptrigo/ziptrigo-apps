@@ -70,7 +70,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.accounts.services.timezones import local_datetime, user_today, user_tz
 from apps.core.datetime_format import PUBLIC, WEEKDAY_NAMES, format_date, format_time
-from apps.core.models import Notification, PushAction, PushSubscription
+from apps.core.models import PushAction, PushSubscription
 from apps.core.services import notifications, push
 from apps.core.services.email import send_email
 
@@ -439,8 +439,10 @@ def on_due_changed(task: Task, *, had_date: bool) -> None:
     """What a changed due date or time does to the reminders (call it after saving, for a change
     the user made): all are recomputed and a sent one whose new time is ahead is armed again, or
     they are deleted when the date was cleared; a task that just *gained* a date (it had none) gets
-    the default reminder when it has none yet."""
+    the default reminder when it has none yet. A reminder notice already in the bell for the task
+    is deleted: its "Due ..." line names the old moment (`clear_notices`)."""
     account = get_account(task.user)
+    clear_notices(task.user_id, [(task.pk, task.number)])
     reschedule(task, account, rearm=True)
     if not had_date:
         apply_defaults(task, account)
@@ -651,13 +653,29 @@ def notice_key(task: Task) -> str:
     return NOTICE_KEY.format(task_id=task.pk)
 
 
-def _delete_earlier_notices(task: Task, url: str, key: str) -> None:
-    """Delete the task's earlier reminder notice, so the bell shows one per task (the latest: a
-    task postponed after its reminder came, then reminded again, must not list both). Notices
-    written before they had a key are recognised as To-do's keyless ones linking to the task page:
-    every other To-do notice that links there has a key of its own (unblocked, recurrence)."""
-    notifications.delete_for_key(task.user_id, key, source='todo')
-    Notification.objects.filter(user_id=task.user_id, source='todo', key='', url=url).delete()
+def clear_notices(user: User | UUID, tasks: Iterable[tuple[UUID, int]]) -> int:
+    """Delete the reminder notices of these tasks (`(pk, number)` pairs, all of `user`), read,
+    opened or dismissed alike: before a new reminder of the task is written (the bell shows one
+    per task, the latest) and when the task's due moment changes (its "Due ..." line is then
+    wrong). Two statements whatever the number of tasks. Returns how many were deleted.
+
+    Notices written before they had a key are To-do's keyless ones linking to the task page
+    (`notifications.delete_keyless_for_urls`): every other To-do notice has a key of its own, which
+    `test_every_todo_notice_has_a_key` enforces. That second statement can go once
+    `NOTIFICATION_RETENTION` (90 days) has passed since the key was introduced (2026-11-16).
+
+    **Not a guarantee under concurrency**: two job runners delivering two reminders of one task in
+    the same minute (`skip_locked` hands each a different row) each miss the other's uncommitted
+    notice, so both can stay. Rare and only cosmetic; the next reminder of the task clears both."""
+    pairs = list(tasks)
+    if not pairs:
+        return 0
+    deleted = notifications.delete_for_keys(
+        user, [NOTICE_KEY.format(task_id=pk) for pk, _ in pairs], source='todo'
+    )
+    return deleted + notifications.delete_keyless_for_urls(
+        user, [reverse('todo:task', args=[number]) for _, number in pairs], source='todo'
+    )
 
 
 def _deliver(
@@ -669,16 +687,14 @@ def _deliver(
     task_row = reminder.task
     channel = channel or reminder.channel
     if channel in (ReminderChannel.IN_APP, ReminderChannel.BOTH):
-        url = reverse('todo:task', args=[task_row.number])
-        key = notice_key(task_row)
-        _delete_earlier_notices(task_row, url, key)
+        clear_notices(task_row.user_id, [(task_row.pk, task_row.number)])
         notification = notifications.notify(
             task_row.user,
             source='todo',
             title=_truncate(task_row.title, NOTICE_TITLE_MAX),
             body=due_label(task_row),
-            url=url,
-            key=key,
+            url=reverse('todo:task', args=[task_row.number]),
+            key=notice_key(task_row),
         )
         _record(
             reminder,
