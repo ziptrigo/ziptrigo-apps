@@ -281,6 +281,44 @@ class TestTaskProject:
 
         assert reload(loose).project == project
 
+    def test_following_a_parent_is_logged(self, funded_user, project):
+        parent = create_task(funded_user, title='Parent')
+        task = create_task(funded_user, title='A', project=project)
+
+        update_task(task, changes={'parent': parent})
+
+        assert reload(task).project is None
+        entry = TaskEvent.objects.filter(task=task, kind='project').get()
+        assert entry.automatic
+        assert describe(entry) == (
+            f'Removed from the project Website with its parent, #{parent.number} Parent'
+        )
+
+    def test_a_project_deleted_or_archived_before_the_write_is_refused(
+        self, funded_user, project, monkeypatch
+    ):
+        """`create_task` reads the project again under the account lock."""
+        from ..services import tasks as task_service
+
+        real = task_service.allocate_number
+
+        def archive_then_allocate(account):
+            projects.archive_project(project)  # as a concurrent request would
+            return real(account)
+
+        monkeypatch.setattr(task_service, 'allocate_number', archive_then_allocate)
+
+        assert errors(create_task, funded_user, title='A', project=project) == {
+            'project': ['This project is archived. Unarchive it to add tasks to it.']
+        }
+        assert not Task.objects.exists()
+
+    def test_a_subtask_may_join_a_parent_in_an_archived_project(self, funded_user, project):
+        parent = create_task(funded_user, title='Parent', project=project)
+        projects.archive_project(project)
+
+        assert create_task(funded_user, title='Sub', parent=parent).project == project
+
     def test_the_next_occurrence_stays_in_the_project(self, funded_user, project, wednesday):
         task = create_task(
             funded_user, title='Water', due_date=TODAY, rrule='FREQ=DAILY', project=project
@@ -419,6 +457,27 @@ class TestArchived:
 
         assert Notification.objects.filter(user=funded_user).count() == 1
         assert Reminder.objects.get(task=task).sent_at is not None
+
+    def test_following_a_parent_out_releases_what_it_held(
+        self, funded_user, project, wednesday, freeze_now, django_capture_on_commit_callbacks
+    ):
+        task = self.due(funded_user, project)
+        parent = create_task(funded_user, title='Parent')
+        projects.archive_project(project)
+        freeze_now(2026, 10, 28, 15, 0)
+
+        with django_capture_on_commit_callbacks(execute=True):
+            update_task(reload(task), changes={'parent': parent})
+
+        assert Notification.objects.filter(user=funded_user).count() == 1
+        assert Reminder.objects.get(task=task).sent_at is not None
+
+    def test_a_named_archived_project_has_no_overdue_tasks(self, funded_user, project, wednesday):
+        self.due(funded_user, project, due_date=TODAY - timedelta(days=3))
+        projects.archive_project(project)
+        params = FilterParams.from_dict({'projects': [str(project.pk)], 'date_range': 'overdue'})
+
+        assert not filter_tasks(funded_user, params).exists()
 
     def test_deleting_an_archived_project_brings_its_tasks_back(
         self, funded_user, project, wednesday, freeze_now, django_capture_on_commit_callbacks
@@ -877,6 +936,21 @@ class TestApi:
         body = get(client, '/tasks?view=all', auth).json()
 
         assert [task['title'] for task in body['results']] == ['Shown one']
+
+    def test_a_filter_on_closed_or_the_trash_keeps_archived_projects(
+        self, client, auth, user, config
+    ):
+        from apps.billing.services import add_credits
+
+        add_credits(user, 100, description='Test top-up', source='test')
+        project = projects.create_project(user, 'Website')
+        close_task(create_task(user, title='Closed one', project=project))
+        trash_task(create_task(user, title='Trashed one', project=project))
+        projects.archive_project(project)
+
+        assert get(client, '/tasks?view=closed', auth).json()['count'] == 1
+        assert get(client, '/tasks?view=closed&resolution=done', auth).json()['count'] == 1
+        assert get(client, '/tasks?view=trash&q=trashed', auth).json()['count'] == 1
 
     def test_a_saved_filter_carries_projects(self, client, auth, user):
         project = projects.create_project(user, 'Website')

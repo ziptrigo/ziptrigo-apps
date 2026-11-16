@@ -25,8 +25,10 @@ tasks of one section (or of the tasks without one): `reorder_tasks` writes it fo
 list, and puts a row dragged in from another section into that section. A new or moved task goes to
 the end of its group.
 
-Every write takes the user's `TodoAccount` row first (`accounts.lock_account`), like the other
-To-do writes that touch more than one task (`services.blockers`' note on locking).
+Every write that touches tasks, counts projects or changes the archive takes the user's
+`TodoAccount` row first (`accounts.lock_account`), like the other To-do writes that touch more than
+one task (`services.blockers`' note on locking); renaming and reordering projects are single-table
+writes and take none.
 """
 
 import logging
@@ -354,6 +356,25 @@ def delete_project(project: Project) -> int:
 
 
 # -- Moving a task -------------------------------------------------------------------------------
+
+
+def followed_parent(task: Task, old: Project | None, new: Project | None, parent: Task) -> None:
+    """`task` was just moved under `parent` and took its project (`update_task`, in its
+    transaction): record the automatic `project` entry, and release the reminders the task held
+    if the project it left was archived and the one it is in now is not."""
+    events.record(
+        task,
+        EventKind.PROJECT,
+        {
+            'from': old.name if old is not None else None,
+            'to': new.name if new is not None else None,
+            'via': events.task_ref(parent),
+        },
+        automatic=True,
+    )
+    if old is not None and old.is_archived and (new is None or not new.is_archived):
+        now = timezone.now()
+        _release(_held_tasks(Task.objects.filter(pk=task.pk), now), now)
 
 
 def check_move(task: Task, project: Project | str | UUID | None) -> Project | None:

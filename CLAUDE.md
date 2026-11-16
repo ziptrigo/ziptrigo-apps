@@ -4877,7 +4877,9 @@ line says so).
   goes through: someone else's, an unknown id and a malformed one are all `project: Unknown
   project.`; an archived one is `This project is archived. Unarchive it to add tasks to it.`
   `create_task(project=..., allow_archived_project=False)` and `check_new_task(project=...)` take
-  it; the next occurrence of a repeating task is created in the same project
+  it, and it is read again under the account lock (a project deleted or archived meanwhile is a
+  refusal, never a foreign-key error); a subtask may still join a parent in an archived project
+  (it is muted with it); the next occurrence of a repeating task is created in the same project
   (`recurrence._create_occurrence` passes `allow_archived_project=True`). `move_task(task, project | None)`
   (`check_move` is the same refusals with no writes, for the view to run before the rate limit): a
   task in the Trash (`Restore the task before changing it.`) and a subtask on its own (`A subtask is
@@ -4907,7 +4909,8 @@ line says so).
   project X to Y", "Removed from the project X", "... with its parent, #n Title" (automatic), "The
   project X was deleted: the task is in no project" (automatic). `created` carries `project` for a
   top-level task ("Created, in the project X"). A task that takes a project by being moved under a
-  parent records only the `moved` entry. Archiving records nothing on the tasks.
+  parent (`update_task`) gets an automatic `project` entry naming the parent, and the reminders an
+  archived project held are released (`projects.followed_parent`). Archiving records nothing on the tasks.
 - **Pages** (`views/projects.py`; another user's project is a 404). `todo:projects`
   `/todo/projects/` (`?tab=archived`): the htmx list in the Labels page's shape
   (`partials/project_list.html` into `#projects`, refusals 422 into `#project-msg`): add (name,
@@ -4940,7 +4943,8 @@ line says so).
 - **Search and saved filters.** `FilterParams.projects` (project ids sorted, and `none`; a task in
   any of them) and `include_archived`. **Without `include_archived` the tasks of archived projects
   are left out of every search, filter and filter count, unless `projects` names projects**
-  (choosing a project lists it, archived or not). Unlike labels, **an id that is no project of the
+  (choosing a project lists it, archived or not; the `overdue` range still leaves an archived
+  project's tasks out, as they are never overdue). Unlike labels, **an id that is no project of the
   user's is kept and matches nothing** (a filter on a deleted project lists no task instead of every
   task; its summary says `in a deleted project`); `projects` counts for `has_criteria`,
   `include_archived` alone does not. `to_dict()` writes both only when set, so stored filters are
@@ -4949,7 +4953,8 @@ line says so).
   Project checkbox group and "Include archived projects".
 - **The API** (part 3 will add the rest). Two things already apply: `GET /api/todo/tasks` with
   `view=all` (and `today` / `upcoming`) leaves the tasks of archived projects out, as the website
-  does, and `FilterParamsSchema` has `projects` and `include_archived` (so the app's `PATCH` of a
+  does (`_view_queryset`; the filters themselves run with `include_archived`, so a filter on
+  `view=closed`, the Trash or a parent's subtasks never drops them), and `FilterParamsSchema` has `projects` and `include_archived` (so the app's `PATCH` of a
   filter, which replaces `params` as a whole, does not drop them; a malformed id is a 422). The
   activity log's `kind` enum gained `project` and `section`. OpenAPI 2.10.0. A task's JSON has no `project` yet.
 - **Admin.** Read-only `ProjectAdmin` (archived mark and filter, task count); `TaskAdmin` lists
