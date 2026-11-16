@@ -116,6 +116,8 @@ SNOOZE_MESSAGE = 'Choose 15 minutes, 1 hour, 8 hours or 1 day.'
 
 #: The `kind` of a pushed reminder (`core.PushAction.kind`), and its two buttons.
 PUSH_KIND = 'todo.reminder'
+# The in-app notice of a task's reminder; one per task: a new reminder replaces the earlier notice.
+NOTICE_KEY = 'todo_reminder:{task_id}'
 ACTION_COMPLETE = 'complete'
 ACTION_SNOOZE = 'snooze'
 #: The Snooze button's label for each `TodoAccount.snooze_minutes`.
@@ -437,8 +439,10 @@ def on_due_changed(task: Task, *, had_date: bool) -> None:
     """What a changed due date or time does to the reminders (call it after saving, for a change
     the user made): all are recomputed and a sent one whose new time is ahead is armed again, or
     they are deleted when the date was cleared; a task that just *gained* a date (it had none) gets
-    the default reminder when it has none yet."""
+    the default reminder when it has none yet. A reminder notice already in the bell for the task
+    is deleted: its "Due ..." line names the old moment (`clear_notices`)."""
     account = get_account(task.user)
+    clear_notices(task.user_id, [(task.pk, task.number)])
     reschedule(task, account, rearm=True)
     if not had_date:
         apply_defaults(task, account)
@@ -644,6 +648,36 @@ def _queue_email(reminder: Reminder, fire_token: UUID, now: datetime) -> None:
     transaction.on_commit(_enqueue)
 
 
+def notice_key(task: Task) -> str:
+    """The key of a task's reminder notice (`notifications.notify`)."""
+    return NOTICE_KEY.format(task_id=task.pk)
+
+
+def clear_notices(user: User | UUID, tasks: Iterable[tuple[UUID, int]]) -> int:
+    """Delete the reminder notices of these tasks (`(pk, number)` pairs, all of `user`), read,
+    opened or dismissed alike: before a new reminder of the task is written (the bell shows one
+    per task, the latest) and when the task's due moment changes (its "Due ..." line is then
+    wrong). Two statements whatever the number of tasks. Returns how many were deleted.
+
+    Notices written before they had a key are To-do's keyless ones linking to the task page
+    (`notifications.delete_keyless_for_urls`): every other To-do notice has a key of its own, which
+    `test_every_todo_notice_has_a_key` enforces. That second statement can go once
+    `NOTIFICATION_RETENTION` (90 days) has passed since the key was introduced (2026-11-16).
+
+    **Not a guarantee under concurrency**: two job runners delivering two reminders of one task in
+    the same minute (`skip_locked` hands each a different row) each miss the other's uncommitted
+    notice, so both can stay. Rare and only cosmetic; the next reminder of the task clears both."""
+    pairs = list(tasks)
+    if not pairs:
+        return 0
+    deleted = notifications.delete_for_keys(
+        user, [NOTICE_KEY.format(task_id=pk) for pk, _ in pairs], source='todo'
+    )
+    return deleted + notifications.delete_keyless_for_urls(
+        user, [reverse('todo:task', args=[number]) for _, number in pairs], source='todo'
+    )
+
+
 def _deliver(
     reminder: Reminder, now: datetime, fire_token: UUID, channel: str | None = None
 ) -> None:
@@ -653,12 +687,14 @@ def _deliver(
     task_row = reminder.task
     channel = channel or reminder.channel
     if channel in (ReminderChannel.IN_APP, ReminderChannel.BOTH):
+        clear_notices(task_row.user_id, [(task_row.pk, task_row.number)])
         notification = notifications.notify(
             task_row.user,
             source='todo',
             title=_truncate(task_row.title, NOTICE_TITLE_MAX),
             body=due_label(task_row),
             url=reverse('todo:task', args=[task_row.number]),
+            key=notice_key(task_row),
         )
         _record(
             reminder,

@@ -237,3 +237,33 @@ class TestAdmin:
 
         assert response.status_code == 200
         assert 'Cannot delete' not in response.content.decode()
+
+
+def test_every_todo_notice_has_a_key():
+    """`reminders.clear_notices` deletes To-do's *keyless* notices that link to a task page (the
+    reminder notices written before they had a key), so any other To-do notice must carry a key
+    or it would be deleted with them. Every `notifications.notify(...)` call in the app must pass
+    `key=`."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    calls = []
+    missing = []
+    for path in root.rglob('*.py'):
+        if 'tests' in path.parts or 'migrations' in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'notify'
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == 'notifications'
+            ):
+                calls.append(f'{path.name}:{node.lineno}')
+                if not any(keyword.arg == 'key' for keyword in node.keywords):
+                    missing.append(f'{path.name}:{node.lineno}')
+
+    assert calls, 'found no notifications.notify call: the check is looking in the wrong place'
+    assert missing == []

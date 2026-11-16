@@ -1203,15 +1203,16 @@ def reschedule_overdue(user: User) -> int:
         # Their reminders follow the new date, re-armed when it is ahead (the user asked for this):
         # loaded in one query before the move and rewritten in one `bulk_update` after it.
         pending = reminders.reminders_of_tasks(overdue)
-        moved = list(overdue.values_list('pk', 'user_id', 'due_date', 'due_time'))
+        moved = list(overdue.values_list('pk', 'user_id', 'due_date', 'due_time', 'number'))
         count = overdue.update(due_date=today, today_position=0, updated_at=timezone.now())
         events.record_many(
             events.Entry(
                 pk, user_id, EventKind.DUE, events.due_data(old_date, old_time, today, old_time)
             )
-            for pk, user_id, old_date, old_time in moved
+            for pk, user_id, old_date, old_time, _ in moved
         )
         reminders.move_reminders(pending, user, today)
+        reminders.clear_notices(user, [(pk, number) for pk, _, _, _, number in moved])
     return count
 
 

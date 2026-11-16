@@ -223,11 +223,38 @@ def delete_for_key(user: Model | UUID | str, key: str, *, source: str | None = N
 
     An empty `key` is refused (`ValueError`): it is what every notice without one carries, so it
     would delete them all."""
-    key = key.strip()
-    if not key:
+    return delete_for_keys(user, [key], source=source)
+
+
+def delete_for_keys(
+    user: Model | UUID | str, keys: Iterable[str], *, source: str | None = None
+) -> int:
+    """`delete_for_key` for several keys in one statement (a product clearing the notices of many
+    objects at once). No keys deletes nothing; an empty key among them is a `ValueError`."""
+    keys = [key.strip() for key in keys]
+    if any(not key for key in keys):
         raise ValueError('key is required.')
+    if not keys:
+        return 0
     user_pk = user.pk if isinstance(user, Model) else user
-    queryset = Notification.objects.filter(user_id=user_pk, key=key)
+    queryset = Notification.objects.filter(user_id=user_pk, key__in=keys)
     if source is not None:
         queryset = queryset.filter(source=source)
     return queryset.delete()[0]
+
+
+def delete_keyless_for_urls(user: Model | UUID | str, urls: Iterable[str], *, source: str) -> int:
+    """Delete the user's notifications from `source` that have **no key** and point at one of
+    `urls`. For a product that started giving a kind of notice a key and must still clear the ones
+    written before it had one: unlike `delete_for_url`, a notice with a key of its own (another
+    kind about the same object) is left alone. `source` is required for the same reason. Returns
+    how many were deleted."""
+    if not source:
+        raise ValueError('source is required.')
+    urls = [url for url in urls if url]
+    if not urls:
+        return 0
+    user_pk = user.pk if isinstance(user, Model) else user
+    return Notification.objects.filter(
+        user_id=user_pk, source=source, key='', url__in=urls
+    ).delete()[0]

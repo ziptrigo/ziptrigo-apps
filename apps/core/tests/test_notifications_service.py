@@ -430,3 +430,72 @@ class TestDeleteForKey:
             raise RuntimeError
 
         assert Notification.objects.count() == 1
+
+
+class TestDeleteForKeys:
+    def test_deletes_every_key_given_in_one_go(self, user, other):
+        make(user, key='a')
+        make(user, key='b')
+        keep = make(user, key='c')
+        theirs = make(other, key='a')
+
+        assert notifications.delete_for_keys(user, ['a', 'b']) == 2
+
+        assert set(Notification.objects.all()) == {keep, theirs}
+
+    def test_can_be_limited_to_a_source(self, user):
+        notifications.notify(user, source='todo', title='x', key='k')
+        keep = notifications.notify(user, source='notes', title='x', key='k')
+
+        assert notifications.delete_for_keys(user, ['k'], source='todo') == 1
+
+        assert list(Notification.objects.all()) == [keep]
+
+    def test_no_keys_deletes_nothing(self, user):
+        make(user)
+        make(user, key='k')
+
+        assert notifications.delete_for_keys(user, []) == 0
+        assert Notification.objects.count() == 2
+
+    def test_an_empty_key_among_them_is_refused(self, user):
+        keyless = make(user)
+
+        with pytest.raises(ValueError):
+            notifications.delete_for_keys(user, ['k', ' '])
+
+        assert list(Notification.objects.all()) == [keyless]
+
+
+class TestDeleteKeylessForUrls:
+    def test_deletes_only_keyless_notices_of_the_source_with_those_urls(self, user, other):
+        gone = notifications.notify(user, source='todo', title='x', url='/todo/1000/')
+        also_gone = notifications.notify(user, source='todo', title='x', url='/todo/1001/')
+        keep = [
+            # A notice with a key of its own about the same object.
+            notifications.notify(user, source='todo', title='x', url='/todo/1000/', key='k'),
+            # Another source's keyless notice with the same link.
+            notifications.notify(user, source='notes', title='x', url='/todo/1000/'),
+            # Another link.
+            notifications.notify(user, source='todo', title='x', url='/todo/1002/'),
+            # Another user's.
+            notifications.notify(other, source='todo', title='x', url='/todo/1000/'),
+        ]
+
+        deleted = notifications.delete_keyless_for_urls(
+            user, ['/todo/1000/', '/todo/1001/'], source='todo'
+        )
+
+        assert deleted == 2
+        assert set(Notification.objects.all()) == set(keep)
+        assert not Notification.objects.filter(pk__in=[gone.pk, also_gone.pk]).exists()
+
+    def test_no_urls_deletes_nothing(self, user):
+        notifications.notify(user, source='todo', title='x')
+
+        assert notifications.delete_keyless_for_urls(user, ['', ''], source='todo') == 0
+        assert Notification.objects.count() == 1
+
+    def test_a_source_is_required(self, user):
+        with pytest.raises(ValueError):
+            notifications.delete_keyless_for_urls(user, ['/todo/1000/'], source='')

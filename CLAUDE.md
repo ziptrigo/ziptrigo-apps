@@ -1260,7 +1260,11 @@ notifications.notify(
   `delete_for_key(user, key, source=None)` (an empty key is a `ValueError`, since every keyless
   notice carries one). It exists because `url` can't do that job: every suspended transfer of a
   user links to the same dashboard, so `delete_for_url` would wipe the notices of the ones still
-  suspended. `delete_for_url` stays for a link that names one thing.
+  suspended. `delete_for_url` stays for a link that names one thing. `delete_for_keys(user, keys,
+  source=None)` is the same for several keys in one statement, and `delete_keyless_for_urls(user,
+  urls, source=)` deletes only a source's notices **without** a key that link to those URLs (for a
+  product that started giving a kind of notice a key and must still clear the ones written before;
+  `source` is required).
 - **Two products use it so far**, next to their existing emails and in the same transaction:
   Receipts "storage paused" (`receipts.services.metering.freeze_account`, url: the Receipts
   dashboard, key `receipts_account:frozen`) and file transfer "suspended"
@@ -5629,8 +5633,20 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
     2026, 2:30 PM', url=reverse('todo:task', ...))` (`Due today` for a date-only task due on the
     owner's today, `Due Oct 30, 2026` for a date-only one on another day, with a reminder set days
     ahead; always the public wording, whatever the owner's date and time format: a message is written
-    by a job, issue #245) and a `ReminderDelivery` with the notification's id. No `key`: nothing deletes the
-    notice later.
+    by a job, issue #245) and a `ReminderDelivery` with the notification's id. **One notice per task**: it carries the key
+    `todo_reminder:<task id>` (`reminders.notice_key`), and `reminders.clear_notices` deletes the task's
+    reminder notice (read, opened or dismissed alike) before a new in-app reminder of the task writes
+    one, **and when its due moment changes** (`on_due_changed`: a new date or time, postpone, a cleared
+    date; and every task `reschedule_overdue` moves), since its "Due ..." line then names the old
+    moment. So the bell shows at most one reminder notice per task, the latest. **Like replaces like**:
+    an email-only reminder neither writes nor deletes a notice (the one in the bell is still right).
+    A notice written before the key existed (2026-11-16) is recognised as To-do's keyless one linking to
+    the task page (`notifications.delete_keyless_for_urls`); `test_every_todo_notice_has_a_key`
+    (`tests/test_wiring_and_ui.py`, AST) fails on a `notifications.notify` call in the app without
+    `key=`, so no other To-do notice can be caught by it, and that statement can go once 90 days of
+    notification retention have passed. Not a guarantee under concurrency: two job runners delivering
+    two reminders of one task in the same minute can each miss the other's notice (rare, cosmetic).
+    The delivery history keeps every row.
   - *Email*: `send_reminder_email(reminder_id, fire_token)` (`default` queue, queued on commit by
     `_queue_email`; if queuing raises, it is logged and a `ReminderDelivery` with `note='failed'` is
     recorded, since the reminder is already marked sent) renders `todo/emails/reminder.{txt,html}` (autoescaped HTML; the text

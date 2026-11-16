@@ -514,8 +514,11 @@ class TestWarnUpcoming:
         return NOW + timedelta(days=days)
 
     def test_a_balance_short_of_the_coming_renewals_is_warned_once(
-        self, poor_user, sent_emails, django_capture_on_commit_callbacks
+        self, poor_user, sent_emails, django_capture_on_commit_callbacks, freeze_now
     ):
+        # The email decides "overdue" on the clock when it is sent: hold it at NOW, or the dates
+        # below (fixed in November 2026) read as overdue once they pass.
+        freeze_now(NOW.year, NOW.month, NOW.day, NOW.hour, NOW.minute)
         paid_note(poor_user, due=self.due_in(2), title='a')
         paid_note(poor_user, due=self.due_in(6), title='b')
         with django_capture_on_commit_callbacks(execute=True):
