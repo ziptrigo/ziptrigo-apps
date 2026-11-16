@@ -327,6 +327,12 @@ def filetransfer_send(
         help='Recipient email address (repeatable). Optional: without one nobody is emailed '
         'and you share the link yourself.',
     ),
+    title: str = typer.Option(
+        '',
+        '--title',
+        '-t',
+        help='Optional title (up to 100 characters), shown on the download page.',
+    ),
     message: str = typer.Option('', '--message', '-m', help='Message shown to recipients.'),
     expiry: str = typer.Option(
         'none', '--expiry', help='Expiry: 1, 5, 15 or 30 (days), or "none".'
@@ -352,6 +358,7 @@ def filetransfer_send(
     Example:
         filetransfer send report.pdf --to a@example.com --to b@example.com
         filetransfer send report.pdf  # no recipient: you get the link to share
+        filetransfer send report.pdf --title "Q3 report" --to a@example.com
         filetransfer send ./photos --to a@example.com --draft-id 1b6e...  # resume
     """
     import requests
@@ -394,6 +401,7 @@ def filetransfer_send(
             api_url(f'/ft/transfers/{transfer_id}/send'),
             json={
                 'recipients': to or [],
+                'title': title,
                 'message': message,
                 'expiry_choice': expiry,
                 'max_downloads': max_downloads,
@@ -457,7 +465,7 @@ def filetransfer_list(
     for transfer in transfers:
         table.add_row(
             transfer['id'][:8],
-            transfer['display_name'],
+            Text(transfer['display_name']),
             transfer['status'],
             str(transfer['download_count']),
             transfer['expires_at'] or 'never',
@@ -489,7 +497,9 @@ def filetransfer_show(environment: EnvironmentAnnotation, transfer_id: str):
 
     console = Console()
     console.print(f'[cyan]ID:[/cyan] {transfer["id"]}')
-    console.print(f'[cyan]Name:[/cyan] {transfer["display_name"]}')
+    console.print(f'[cyan]Name:[/cyan] {escape(transfer["display_name"])}')
+    if transfer.get('title'):
+        console.print(f'[cyan]Title:[/cyan] {escape(transfer["title"])}')
     console.print(f'[cyan]Status:[/cyan] {transfer["status"]}')
     console.print('[cyan]Recipients:[/cyan]')
     if transfer['recipients']:
@@ -741,7 +751,7 @@ def _print_request(request: dict) -> None:
     console = Console()
     state = 'open' if request['is_open'] else 'done'
     console.print(f'[cyan]ID:[/cyan] {request["id"]}')
-    console.print(f'[cyan]Title:[/cyan] {escape(request["title"])}')
+    console.print(f'[cyan]Title:[/cyan] {escape(request["title"]) or "(none)"}')
     console.print(f'[cyan]State:[/cyan] {state} ({request["status"]})')
     if request['done_at']:
         console.print(
@@ -793,7 +803,9 @@ def _request_url(request_id: str, suffix: str = '') -> str:
 @app.command(name='request-create')
 def filetransfer_request_create(
     environment: EnvironmentAnnotation,
-    title: str = typer.Argument(..., help="The request's title (1 to 100 characters)."),
+    title: str = typer.Argument(
+        '', help="The request's title (optional, up to 100 characters; blank for none)."
+    ),
     message: str = typer.Option('', '--message', '-m', help='Message shown on the upload page.'),
     anyone: bool = typer.Option(False, '--anyone', help='Anyone with the link (the default).'),
     signed_in: bool = typer.Option(False, '--signed-in', help='Only people signed in to ZipTrigo.'),
@@ -824,6 +836,7 @@ def filetransfer_request_create(
 
     Example:
         filetransfer request-create local "Wedding photos" --message "Send yours by Friday"
+        filetransfer request-create local --signed-in   # no title
         filetransfer request-create local "Contracts" --to a@example.com --to b@example.com
         filetransfer request-create local "Receipts" --signed-in --max-files 20 --expires 30
     """
@@ -889,7 +902,7 @@ def filetransfer_requests(
             state = f'{state}, {request["status"]}'
         table.add_row(
             request['id'],
-            Text(request['title']),
+            Text(request['title'] or '(untitled)'),
             state,
             str(request['file_count']),
             str(request['uploader_count']),

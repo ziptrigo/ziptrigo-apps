@@ -39,7 +39,12 @@ def add_service_errors(form: forms.Form, exc: ValidationError) -> None:
 
 
 class _RequestFieldsForm(StyledFormMixin, forms.Form):
-    title = forms.CharField(label='Title', widget=forms.TextInput(attrs={'maxlength': '100'}))
+    title = forms.CharField(
+        label='Title',
+        required=False,
+        widget=forms.TextInput(attrs={'maxlength': '100'}),
+        help_text='Optional. Shown to the people you ask, on the upload page.',
+    )
     message = forms.CharField(
         label='Message',
         required=False,
@@ -112,7 +117,7 @@ class FileRequestForm(_RequestFieldsForm):
     def to_options(self) -> request_service.RequestOptions:
         data = self.cleaned_data
         return request_service.RequestOptions(
-            title=data['title'],
+            title=data.get('title', ''),
             message=data.get('message', ''),
             upload_audience=data['upload_audience'],
             emails=data.get('emails', []),
@@ -134,7 +139,7 @@ class RequestSettingsForm(_RequestFieldsForm):
         """The `services.requests.update_request` keys this submit sets: all of them."""
         data = self.cleaned_data
         changes: dict = {
-            'title': data['title'],
+            'title': data.get('title', ''),
             'message': data.get('message', ''),
             'upload_audience': data['upload_audience'],
             'max_files': data.get('max_files'),

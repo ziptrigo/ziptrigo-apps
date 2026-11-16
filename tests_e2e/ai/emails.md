@@ -43,7 +43,7 @@ Subjects are quoted from the code; `<...>` is filled in at send time.
 | 9 | `New feedback submitted` | Same | Every active superuser | MAIL-10 |
 | 10 | `Test email from the admin panel` | Admin > Tools > "Send test email" | The address typed | MAIL-11 |
 | 11 | `<file> was sent to you via ZipTrigo` / `<file> and N more file(s) were sent to you via ZipTrigo` | Send a transfer; "Add recipients" | Each recipient | MAIL-12, MAIL-17 |
-| 12 | `Your transfer "<file>" is on its way` (or `... is ready to share` when sent with no recipients, issue #310: FT-66) | Send a transfer (logged in) | The sender | MAIL-12 |
+| 12 | `Your transfer "<file>" is on its way` (or `... is ready to share` when sent with no recipients, issue #310: FT-66) | Send a transfer (logged in) | The sender | MAIL-12, FT-70 (with a title: the subject still names the file, the body starts `Title: <title>`) |
 | 13 | `"<file>" was downloaded` / `"all files" was downloaded` | A download, with "Email me when a file is downloaded" on | The sender | MAIL-13 |
 | 14 | `Your transfer "<file>" expires tomorrow` | `expire_transfers` job (shell step) | The sender | MAIL-14 |
 | 15 | `Files for "<file>" have been deleted` | Expiry, or the end of a suspension's grace period (shell steps) | The sender | MAIL-14, MAIL-15 |
@@ -561,6 +561,7 @@ two paid notes; the admin spends the balance down to exactly 7; shell access.
 | 7 | Reopen; a signed-in uploader (`qa.broke`) marks it done. | An email whose second line ends "Marked done by <name of qa.broke>." (the account's name, or its email when it has none). |
 | 8 | Un-confirm the owner (shell: `User.objects.filter(email='qa.user@example.com').update(email_confirmed=False)`), reopen, a visitor marks it done. | The bell has the Done notice (NOTIF-32) but **no email** (confirmed addresses only). Re-confirm afterwards. |
 | 9 | The other request emails for a request: its suspension, expiry and files-deleted emails (FT-61). | They name the request by its **title** (`Your transfer "MAIL done <b>x</b>" ...`, the owner's own words) and are text only, like a transfer's. |
+| 10 | Create an untitled request for **Only these people** (FT-70 step 7 with an invitee) and read its invitation. | The text body is `<owner name> is asking you for files.`, a blank line, then the message (if any) and `Upload them here: ...` -- no empty title line and no "Untitled request"; the HTML has no empty title paragraph. |
 
 ### MAIL-23 Every email of the run follows the rules
 

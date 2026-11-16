@@ -693,6 +693,38 @@ def test_send_without_a_recipient_sends_an_empty_list_and_prints_the_link(
     assert 'https://app.test/t/abc/' in caplog.text + result.output
 
 
+def test_send_title_is_sent_and_blank_by_default(token_file, tmp_path, monkeypatch):
+    """Issue #318: `send --title` goes into the finalize body; without it the title is blank."""
+    token_file.write_text('tok')
+    path = tmp_path / 'a.bin'
+    path.write_bytes(b'x' * 10)
+    bodies = []
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        if url.endswith('/transfers/'):
+            return FakeResponse(201, {'id': 'draft-123'})
+        if url.endswith('/files/'):
+            return FakeResponse(201, {'file_id': 'f1', 'part_size_bytes': 1024, 'part_count': 1})
+        if url.endswith('/parts/'):
+            return FakeResponse(200, {'urls': {'1': 'https://s3.example.com/put'}})
+        if url.endswith('/complete/'):
+            return FakeResponse(200, {'ok': True})
+        if url.endswith('/send'):
+            bodies.append(json)
+            return FakeResponse(200, {'download_url': 'https://app.test/t/abc/'})
+        raise AssertionError(f'unexpected POST {url}')
+
+    monkeypatch.setattr('requests.post', fake_post)
+    monkeypatch.setattr('requests.put', lambda *a, **k: FakeResponse(200, headers={'ETag': 'e'}))
+
+    assert runner.invoke(filetransfer.app, ['send', 'local', str(path)]).exit_code == 0
+    result = runner.invoke(
+        filetransfer.app, ['send', 'local', str(path), '--title', 'Q3 report [bold]']
+    )
+    assert result.exit_code == 0
+    assert bodies[0]['title'] == '' and bodies[1]['title'] == 'Q3 report [bold]'
+
+
 def test_disable_command_patches_transfer(token_file, monkeypatch):
     token_file.write_text('tok')
     seen = {}

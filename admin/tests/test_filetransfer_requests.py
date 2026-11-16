@@ -124,6 +124,22 @@ def test_create_an_anyone_request(calls):
     assert kwargs['headers']['Authorization'] == 'Bearer tok'
 
 
+def test_create_without_a_title_sends_a_blank_one(calls):
+    """Issue #318: the title is optional."""
+    calls.answers[('post', '/api/ft/requests')] = FakeResponse(201, {**REQUEST, 'title': ''})
+    result = _invoke('request-create', 'local', '--signed-in')
+    assert result.exit_code == 0
+    assert calls.made[0][2]['json']['title'] == ''
+
+
+def test_a_request_with_no_title_is_listed_as_untitled(calls):
+    calls.answers[('get', '/api/ft/requests')] = FakeResponse(
+        200, {'count': 1, 'limit': 20, 'offset': 0, 'results': [{**REQUEST, 'title': ''}]}
+    )
+    result = _invoke('requests', 'local', env={'COLUMNS': '200'})
+    assert result.exit_code == 0 and '(untitled)' in result.output
+
+
 def test_create_prints_the_id_and_the_link(calls, caplog):
     calls.answers[('post', '/api/ft/requests')] = FakeResponse(201, REQUEST)
     with caplog.at_level('INFO'):
@@ -205,7 +221,7 @@ def test_create_without_password_sends_none(calls):
 @pytest.mark.parametrize(
     ('status', 'detail'),
     [
-        (400, 'title: Give the request a title.'),
+        (400, 'title: Keep the title to 100 characters or fewer.'),
         (402, 'You need at least 1 credit to request files.'),
         (403, "Sorry, you can't send transfers at this time."),
     ],

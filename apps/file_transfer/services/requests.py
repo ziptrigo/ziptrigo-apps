@@ -12,7 +12,7 @@ apply unchanged. What is different, and lives here:
 - **Open vs Done** is `Transfer.done_at`, not a status. `mark_done` closes it to uploads (and
   switches the link to the download view); `reopen` is the owner undoing that. Uploading itself is
   `services.request_upload`; who may use the link is `services.request_access`.
-- **Changing one** (`update_request`): title, message, audience and invitees, the limits, expiry
+- **Changing one** (`update_request`): title (optional since issue #318), message, audience and invitees, the limits, expiry
   and password, all or nothing.
 
 Every owner action here goes through the same refusals a transfer's dashboard action has: the
@@ -21,7 +21,6 @@ for disabling it (`TransferHeldError`).
 """
 
 import logging
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -61,8 +60,8 @@ from .storage import S3Storage, get_storage
 
 logger = logging.getLogger(__name__)
 
-#: A request's title: 1 to this many characters.
-TITLE_MAX_LENGTH = 100
+#: A request's title: optional, at most this many characters (issue #318; `limits.clean_title`).
+TITLE_MAX_LENGTH = limits.TITLE_MAX_LENGTH
 
 NOT_ACCEPTING_MESSAGE = 'This link is not accepting files right now.'
 
@@ -73,15 +72,9 @@ _GB = 1024**3
 
 
 def clean_title(raw: object) -> str:
-    """A request's title: control characters removed, stripped, 1 to 100 characters."""
-    text = ''.join(ch for ch in str(raw or '') if unicodedata.category(ch) != 'Cc').strip()
-    if not text:
-        raise ValidationError({'title': 'Give the request a title.'})
-    if len(text) > TITLE_MAX_LENGTH:
-        raise ValidationError(
-            {'title': f'Keep the title to {TITLE_MAX_LENGTH} characters or fewer.'}
-        )
-    return text
+    """A request's title: optional (issue #318), control characters removed, stripped, at most
+    100 characters. Blank is "no title"."""
+    return limits.clean_title(raw)
 
 
 def clean_message(message: str) -> str:
@@ -143,7 +136,7 @@ def _clean_invitees(emails: list[str], settings_row: FileTransferSettings) -> li
 class RequestOptions:
     """What the owner chooses when creating a request (the web form and the API's body)."""
 
-    title: str
+    title: str = ''
     message: str = ''
     upload_audience: str = UploadAudience.ANYONE
     emails: list[str] = field(default_factory=list)
@@ -511,7 +504,7 @@ def _notify_done(transfer: Transfer) -> None:
             notifications.notify(
                 transfer.owner_id,
                 source='file_transfer',
-                title=_cut(f'"{transfer.title}" is done', 140),
+                title=_cut(f'"{transfer.display_name}" is done', 140),
                 body=f'{count} {noun}, {_notice_text_size(size)}. '
                 f'Marked done by {_who_marked_done(transfer)}.',
                 url=requests_dashboard_url(),

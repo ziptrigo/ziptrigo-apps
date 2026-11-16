@@ -1,4 +1,4 @@
-{% autoescape off %}Your file request "{{ title }}" is done.
+{% autoescape off %}Your file request{% if title %} "{{ title }}"{% endif %} is done.
 
 {{ file_count }} {{ files_noun }}, {{ size_text }}. Marked done by {{ who }}.
 

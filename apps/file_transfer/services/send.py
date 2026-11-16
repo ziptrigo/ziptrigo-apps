@@ -25,6 +25,7 @@ MIN_BALANCE_TO_SEND = 1
 @dataclass(slots=True)
 class SendOptions:
     recipients: list[str] = field(default_factory=list)
+    title: str = ''
     message: str = ''
     expiry_choice: str = 'none'
     expiry_date: datetime | None = None
@@ -37,6 +38,7 @@ def validate_send_options(options: SendOptions, settings_row: FileTransferSettin
     """Validate everything about `options` except the sender's balance and the files themselves
     (those are checked separately, since the view surfaces them differently). Returns the
     deduplicated recipient list, which may be empty."""
+    limits.clean_title(options.title)
     limits.validate_message(options.message)
     # Recipients are optional (issue #310): with none, nobody is emailed and the sender shares
     # the link themselves. (An anonymous send still needs one: `services.anonymous`.)
@@ -89,6 +91,7 @@ def finalize_send(transfer: Transfer, options: SendOptions, *, ip: str | None = 
                 f'You need at least {MIN_BALANCE_TO_SEND} credit to send a transfer.'
             )
 
+        locked.title = limits.clean_title(options.title)
         locked.message = options.message
         locked.expires_at = resolve_expiry(options.expiry_choice, options.expiry_date)
         locked.max_downloads = options.max_downloads
