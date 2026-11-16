@@ -7,9 +7,8 @@ Anything else (an executable named `photo.png`, an HTML or SVG file, plain text)
 caller then serves the file as a download. (Receipts has its own, wider sniffer for the documents it
 reads; this one is for products that merely store files.)
 
-`sniff_media_type` (video and audio) and `looks_like_text` came with file transfer's previews
-(issue #311); they are separate functions so To-do's attachments, which use `sniff_inline_type`,
-keep serving only PDF and images inline.
+`looks_like_text` came with file transfer's previews (issue #311); it is a separate function so
+To-do's attachments, which use `sniff_inline_type`, keep serving only PDF and images inline.
 """
 
 import codecs
@@ -32,64 +31,6 @@ def sniff_inline_type(head: bytes) -> str | None:
         return 'image/gif'
     if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
         return 'image/webp'
-    return None
-
-
-#: `ftyp` brands of an MP4 container a browser plays as video, and of an audio-only one (M4A).
-#: Deliberately lists, not "any `ftyp`": HEIC, AVIF and QuickTime files share the box.
-_MP4_VIDEO_BRANDS = frozenset(
-    {
-        b'isom',
-        b'iso2',
-        b'iso3',
-        b'iso4',
-        b'iso5',
-        b'iso6',
-        b'mp41',
-        b'mp42',
-        b'avc1',
-        b'dash',
-        b'mmp4',
-        b'M4V ',
-        b'f4v ',
-        b'MSNV',
-        b'NDAS',
-    }
-)
-_MP4_AUDIO_BRANDS = frozenset({b'M4A ', b'M4B ', b'M4P ', b'F4A '})
-
-#: The second byte of an MPEG audio frame header (after `0xFF`) that is Layer III (MP3), as
-#: MPEG-1, MPEG-2 or MPEG-2.5, with or without the CRC bit.
-_MP3_FRAME_BYTES = frozenset({0xFB, 0xFA, 0xF3, 0xF2, 0xE3, 0xE2})
-
-_EBML_SIGNATURE = b'\x1a\x45\xdf\xa3'
-
-
-def sniff_media_type(head: bytes) -> str | None:
-    """The video or audio content type `head` starts as, or `None`: MP4 and WebM video, MP3, WAV,
-    Ogg and M4A audio -- the formats `<video>` and `<audio>` play in every current browser.
-
-    By magic bytes alone, like `sniff_inline_type`; a Matroska file (same EBML header as WebM) or a
-    QuickTime one is `None`. Needs about 64 bytes (`SNIFF_BYTES` is not enough: the WebM
-    document type sits after the EBML header).
-    """
-    if head[4:8] == b'ftyp':
-        brand = head[8:12]
-        if brand in _MP4_AUDIO_BRANDS:
-            return 'audio/mp4'
-        if brand in _MP4_VIDEO_BRANDS:
-            return 'video/mp4'
-        return None
-    if head.startswith(_EBML_SIGNATURE):
-        return 'video/webm' if b'webm' in head[:64] else None
-    if head[:4] == b'RIFF' and head[8:12] == b'WAVE':
-        return 'audio/wav'
-    if head.startswith(b'OggS'):
-        return 'audio/ogg'
-    if head.startswith(b'ID3') or (
-        len(head) > 1 and head[0] == 0xFF and head[1] in _MP3_FRAME_BYTES
-    ):
-        return 'audio/mpeg'
     return None
 
 

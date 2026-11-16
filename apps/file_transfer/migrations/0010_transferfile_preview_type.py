@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
                 db_default='',
                 default='',
                 help_text='The content type the public download page may preview this file as '
-                '(`image/png`, `application/pdf`, `text/plain`, `video/mp4`, ...), read from its '
+                '(`image/png`, `application/pdf`, `text/plain`, ...), read from its '
                 "first bytes when the upload completed -- never from its name or the uploader's "
                 'claimed type. Empty: no preview (including files uploaded before this column '
                 'existed, until `file_transfer_backfill_previews` runs). See '

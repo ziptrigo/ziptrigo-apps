@@ -62,7 +62,9 @@
                         <i class="fas fa-eye mr-1" aria-hidden="true"></i>Preview
                     </button>
                     {% endif %}
-                    <a href="{% url 't:download-file' transfer.slug file.id %}"
+                    {% comment %}After "View full" fetched the file, this saves what the browser already has (no
+                       second request, so no second download); otherwise it is the ordinary link.{% endcomment %}
+                    <a href="{% url 't:download-file' transfer.slug file.id %}"{% if previews %} @click="saveFile($event, '{{ file.id }}')"{% endif %}
                        class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 whitespace-nowrap hover:bg-sage-400">
                         <i class="fas fa-download mr-1"></i>Download
                     </a>

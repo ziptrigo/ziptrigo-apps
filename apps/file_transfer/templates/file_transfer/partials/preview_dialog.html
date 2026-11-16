@@ -2,8 +2,14 @@
    docs/ui-design/mocks/file-preview.html). Design system 10.9: the confirmation modal's overlay and
    panel, wider. Driven by the `ftPreview` Alpine component (static/file_transfer/js/preview.js),
    which reads the previewable files from `#ft-previews`. Focus moves to Close when it opens, stays
-   inside it and goes back to the button that opened it; Escape, the backdrop and Close close it;
-   Left and Right (or Previous and Next) move among the previewable files only.
+   inside it and goes back to the button that opened it; Escape, the backdrop and Close close it.
+   Keys: Left and Right (or Previous and Next file) move among the previewable files only; Page Up
+   and Page Down (or Previous and Next page) move among a document's pages; none of them inside the
+   text areas, where the arrows scroll.
+
+   A preview is a SAMPLE, never the file: a smaller version of an image, smaller pages of a PDF
+   (built lazily, hence "Preparing preview..."), the first 64 KB of a text file. "View full
+   image / document" counts as a download.
 
    What is shown is chosen by the kind the server gave the file, never by its name. Text is put in
    the page with `x-text` (textContent): it is never HTML.{% endcomment %}
@@ -33,6 +39,7 @@
      x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/75 backdrop-blur-[2px] p-2 sm:p-6">
     <div x-show="isOpen" x-ref="dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title"
+         aria-describedby="preview-keys"
          @keydown="trap($event)"
          x-transition:enter="transform transition duration-[220ms] ease-out"
          x-transition:enter-start="opacity-0 translate-y-2 scale-[.97]" x-transition:enter-end="opacity-100 translate-y-0 scale-100"
@@ -52,48 +59,56 @@
         </div>
 
         <p class="sr-only" role="status" aria-live="polite" x-text="isOpen ? (current.name + (many ? ', ' + position : '')) : ''"></p>
+        <p id="preview-keys" class="sr-only">Left and right arrow keys switch files. Page up and page down switch the pages of a document. Escape closes the preview.</p>
 
         <div class="relative flex-1 min-h-[16rem] bg-gray-50 dark:bg-gray-900 flex items-center justify-center overflow-auto">
-            <template x-if="isOpen && current.kind === 'image'">
-                <img :src="current.url" :alt="'Preview of ' + current.name" id="preview-image"
+            {# The downsized sample: an image's one page, a PDF's pages (one at a time). #}
+            <template x-if="isOpen && !isText && !fullShowing && pages.length && status !== 'error'">
+                <img :src="pageUrl" :alt="'Preview of ' + current.name + (isPdf ? ', ' + pageLabel : '')"
+                     :id="isPdf ? 'preview-page' : 'preview-image'"
                      @load="ready()" @error="failed()"
                      class="max-h-[70vh] max-w-full object-contain">
             </template>
-            <template x-if="isOpen && current.kind === 'pdf'">
-                <iframe :src="current.url" :title="'Preview of ' + current.name" id="preview-pdf"
+            {# The whole file (after View full): from a Blob, or, if the bucket can't be read from here, its own URL. #}
+            <template x-if="isOpen && fullShowing && current.kind === 'image' && status !== 'error'">
+                <img :src="fullSrc" :alt="current.name" id="preview-full-image"
+                     @load="ready()" @error="failed()"
+                     class="max-h-[70vh] max-w-full object-contain">
+            </template>
+            <template x-if="isOpen && fullShowing && current.kind === 'pdf'">
+                <iframe :src="fullSrc" :title="current.name" id="preview-full-pdf"
                         @load="ready()" class="w-full h-[70vh] bg-white border-0"></iframe>
             </template>
-            <template x-if="isOpen && current.kind === 'video'">
-                <video :src="current.url" controls playsinline preload="metadata" id="preview-video"
-                       @loadedmetadata="ready()" @error="failed()"
-                       class="max-h-[70vh] max-w-full bg-black"></video>
-            </template>
-            <template x-if="isOpen && current.kind === 'audio'">
-                <div class="w-full p-8 flex flex-col items-center gap-4">
-                    <i class="fas fa-file-audio text-5xl text-gray-400 dark:text-gray-500" aria-hidden="true"></i>
-                    <audio :src="current.url" controls preload="metadata" id="preview-audio"
-                           @loadedmetadata="ready()" @error="failed()" class="w-full max-w-md"></audio>
-                </div>
-            </template>
-            <template x-if="isOpen && (current.kind === 'text' || current.kind === 'markdown')">
+            <template x-if="isOpen && isText">
                 <div class="w-full h-[70vh] overflow-auto">
                     {# Raw: the file's text, put in with textContent, never as HTML. #}
-                    <pre id="preview-text" x-show="status === 'ready' && showRaw" x-text="text" tabindex="0"
+                    <pre id="preview-text" x-show="status === 'ready' && showRaw" x-text="text" tabindex="0" data-keys-own
                          class="p-4 font-mono text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words"></pre>
-                    {# Formatted Markdown: HTML the server rendered and sanitised (raw HTML in the file is escaped, images are never rendered). #}
-                    <div id="preview-markdown" x-show="status === 'ready' && showFormatted" x-html="html" tabindex="0"
+                    {% comment %}Formatted Markdown: HTML the server rendered and sanitised (raw HTML in the file is
+                       escaped, images are never rendered). `x-html` is safe here ONLY because
+                       `apps.core.markdown`'s nh3 allow-list never lets an attribute through that Alpine would
+                       act on (`x-*`, `@*`, `:*`) or an event handler (`on*`), nor a `javascript:` link;
+                       `test_preview.py::TestMarkdownIsSafeForXHtml` fails if that ever stops being true.
+                       Keep it that way: never feed `x-html` anything else.{% endcomment %}
+                    <div id="preview-markdown" x-show="status === 'ready' && showFormatted" x-html="html" tabindex="0" data-keys-own
                          class="ft-markdown p-6 max-w-3xl mx-auto text-sm text-gray-800 dark:text-gray-200"></div>
                 </div>
             </template>
 
-            <p x-show="status === 'loading'" x-cloak style="display: none"
+            <p x-show="status === 'loading' || fullState === 'loading'" x-cloak style="display: none" id="preview-loading"
                class="absolute inset-0 flex items-center justify-center pointer-events-none text-sm text-gray-500 dark:text-gray-400">
-                <i class="fas fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Loading preview...
+                <i class="fas fa-circle-notch fa-spin mr-2" aria-hidden="true"></i><span x-text="fullState === 'loading' ? 'Loading the full file...' : 'Loading preview...'"></span>
             </p>
-            <p x-show="status === 'error'" x-cloak style="display: none" role="alert" id="preview-error"
-               class="p-6 text-sm text-center text-gray-600 dark:text-gray-300">
-                This file can't be previewed here. You can still download it.
+            <p x-show="status === 'preparing'" x-cloak style="display: none" id="preview-preparing" role="status"
+               class="absolute inset-0 flex items-center justify-center pointer-events-none text-sm text-gray-500 dark:text-gray-400">
+                <i class="fas fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Preparing preview...
             </p>
+            <div x-show="status === 'error' || status === 'unavailable'" x-cloak style="display: none" role="alert" id="preview-error"
+                 class="p-6 text-sm text-center text-gray-600 dark:text-gray-300">
+                <p x-text="errorText"></p>
+                <button type="button" x-show="canRetry" @click="retry()" id="preview-retry"
+                        class="btn mt-3 px-3 py-1.5 rounded-lg text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700">Try again</button>
+            </div>
 
             <template x-if="many">
                 <div>
@@ -103,6 +118,16 @@
                             class="btn absolute top-1/2 -translate-y-1/2 right-2 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 shadow text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-700"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
                 </div>
             </template>
+        </div>
+
+        {# A PDF's pages: distinct from the previous / next FILE buttons over the viewer. #}
+        <div x-show="hasPageNav" x-cloak style="display: none" role="group" aria-label="Pages of this document"
+             class="flex items-center justify-center gap-3 px-4 py-2 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300">
+            <button type="button" @click="prevPage()" :disabled="pageIndex === 0" id="preview-page-prev" aria-label="Previous page"
+                    class="btn px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"><i class="fas fa-chevron-left mr-1" aria-hidden="true"></i>Previous page</button>
+            <span id="preview-page-label" role="status" aria-live="polite" x-text="pageLabel"></span>
+            <button type="button" @click="nextPage()" :disabled="pageIndex >= pages.length - 1" id="preview-page-next" aria-label="Next page"
+                    class="btn px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40">Next page<i class="fas fa-chevron-right ml-1" aria-hidden="true"></i></button>
         </div>
 
         <div class="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
@@ -116,10 +141,22 @@
                             :class="view === 'raw' ? 'bg-primary text-primary-on' : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'"
                             class="btn px-3 py-1.5 border-l border-gray-300 dark:border-gray-600">Raw</button>
                 </div>
-                <p class="text-xs text-gray-500 dark:text-gray-400" x-show="showRaw">Showing the first 1 MB as plain text.</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400" id="preview-sample-note" x-show="status === 'ready' && !fullShowing && !isText && pages.length"
+                   x-text="isPdf ? (cutPages ? 'Smaller versions of the first ' + pages.length + ' of ' + totalPages + ' pages.' : 'Smaller versions of the pages.') : 'A smaller version of the image.'"></p>
+                <p class="text-xs text-gray-500 dark:text-gray-400" id="preview-text-note" x-show="status === 'ready' && showRaw && sampleOnly"
+                   x-text="current.full_url ? 'Showing the first 64 KB.' : 'Showing the first 64 KB. Download the file to read all of it.'"></p>
+                <p class="text-xs text-gray-500 dark:text-gray-400" x-show="status === 'ready' && showRaw && isText && fullShowing">Showing the whole file as plain text.</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400" x-show="showFormatted && htmlTruncated">The formatted view shows the start of the file. Switch to Raw for the rest.</p>
+                <template x-if="wasCounted">
+                    <p class="text-xs font-medium text-gray-700 dark:text-gray-200" id="preview-counted" role="status">This counted as a download.</p>
+                </template>
+                <p class="text-xs text-red-700 dark:text-red-300" id="preview-full-error" role="alert" x-show="fullFailedMessage" x-text="fullFailedMessage"></p>
             </div>
-            <a :href="current.download"
+            <button type="button" id="preview-view-full" x-show="canViewFull" x-cloak style="display: none" @click="viewFull()" :disabled="fullState === 'loading'"
+                    class="btn px-4 py-2 rounded-lg text-sm border border-sage-300 text-sage-800 bg-white hover:bg-sage-50 dark:bg-gray-800 dark:text-sage-100 dark:border-sage-600 dark:hover:bg-gray-700 disabled:opacity-60">
+                <i class="fas fa-expand mr-1" aria-hidden="true"></i><span x-text="current.full_label"></span>
+            </button>
+            <a :href="current.download" id="preview-download" @click="saveFile($event, current.id)"
                class="btn px-4 py-2 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400"><i class="fas fa-download mr-1" aria-hidden="true"></i>Download</a>
             <button type="button" x-ref="close" @click="close()"
                     class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Close</button>

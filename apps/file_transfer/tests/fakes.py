@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 
 from botocore.exceptions import ClientError
 
+from apps.core.services.storage import ObjectTooLargeError
+
 from ..services.storage import S3_MIN_PART_SIZE_BYTES, ObjectInfo
 
 
@@ -31,6 +33,8 @@ class FakeS3Storage:
     aborted_uploads: set[str] = field(default_factory=set)
     checksum: str = 'ZmFrZWNoZWNrc3Vt'
     presign_calls: list[tuple[str, int]] = field(default_factory=list)
+    #: Content type of every object written with `put_object` (the downsized previews).
+    content_types: dict[str, str | None] = field(default_factory=dict)
     #: Every `presigned_get_url` call as `(key, disposition, content_type)`.
     get_url_calls: list[tuple[str, str, str | None]] = field(default_factory=list)
     #: Parts recorded through `upload_part` (the zip builder's server-side path, and tests that
@@ -178,6 +182,18 @@ class FakeS3Storage:
             raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': ''}}, 'GetObject')
         return self.objects[key][start : end + 1]
 
+    def put_object(self, key: str, body: bytes, *, content_type: str | None = None) -> None:
+        self.objects[key] = bytes(body)
+        self.content_types[key] = content_type
+
+    def get_object_bytes(self, key: str, *, max_bytes: int | None = None) -> bytes:
+        if key not in self.objects:
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': ''}}, 'GetObject')
+        data = self.objects[key]
+        if max_bytes is not None and len(data) > max_bytes:
+            raise ObjectTooLargeError(f'{key} is over the {max_bytes} byte limit')
+        return data
+
     def presigned_get_url(
         self,
         key: str,
@@ -197,6 +213,12 @@ class FakeS3Storage:
 
     def delete_object(self, key: str) -> None:
         self.objects.pop(key, None)
+
+    def delete_objects(self, keys) -> int:
+        keys = list(keys)
+        for key in keys:
+            self.objects.pop(key, None)
+        return len(keys)
 
     def delete_prefix(self, prefix: str) -> int:
         keys = [k for k in self.objects if k.startswith(prefix)]

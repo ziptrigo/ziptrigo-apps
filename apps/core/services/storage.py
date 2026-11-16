@@ -55,14 +55,6 @@ INLINE_CONTENT_TYPES = frozenset(
         'image/webp',
         'image/gif',
         'text/plain',
-        # Media a browser plays in `<video>` / `<audio>` (file transfer previews, issue #311):
-        # none of them runs script.
-        'video/mp4',
-        'video/webm',
-        'audio/mpeg',
-        'audio/wav',
-        'audio/ogg',
-        'audio/mp4',
     }
 )
 
@@ -464,8 +456,8 @@ class S3Storage:
         or fixed on the server when the object was stored) -- never from user input or the
         uploader's claimed type -- and must never be `text/html` or `image/svg+xml`, which would
         run script. To make that hard to get wrong, an `inline` request with an explicit
-        `content_type` outside `INLINE_CONTENT_TYPES` (PDF, JPEG, PNG, WebP, GIF, plain text, MP4/WebM video,
-        MP3/WAV/Ogg/M4A audio) raises `ValueError`. With no `content_type`, S3 serves whatever type the object was
+        `content_type` outside `INLINE_CONTENT_TYPES` (PDF, JPEG, PNG, WebP, GIF, plain text)
+        raises `ValueError`. With no `content_type`, S3 serves whatever type the object was
         stored with, which the caller must have already vetted.
         """
         if (

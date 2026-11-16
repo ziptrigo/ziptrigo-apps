@@ -14,7 +14,7 @@ from .transfer import (
     generate_manage_token,
     generate_slug,
 )
-from .transfer_file import TransferFile
+from .transfer_file import PreviewStatus, TransferFile
 from .transfer_recipient import TransferRecipient
 
 __all__ = [
@@ -28,6 +28,7 @@ __all__ = [
     'BlockedSenderKind',
     'DownloadEvent',
     'FileTransferSettings',
+    'PreviewStatus',
     'RequestInvite',
     'Transfer',
     'TransferFile',

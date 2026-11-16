@@ -19,7 +19,9 @@ The `apps/file_transfer` web UI, against the real local S3 (Floci) and real emai
   bytes, password gate, "Download all (.zip)" built by streaming from S3, the **QR code** popup of
   the page's own link, no expiry text for a transfer that never expires, the neutral "no longer
   available" page, "Report this transfer", and **file previews** (issue #311: the hint line, the
-  Preview buttons and the dialog, FT-64 and FT-65);
+  Preview buttons and the dialog; a preview is a **sample**: a downsized image, a PDF's downsized
+  pages, the first 64 KB of a text file; "View full image / document" counts as a download;
+  FT-64, FT-65, FT-67 to FT-69);
 - sending **without recipients** (issue #310: FT-06 and FT-66);
 - the daily jobs' visible effects (metering, suspension and its in-app notification, re-enabling
   on a top-up, the suspension grace period, the expiry reminder, natural expiry, the deferred file
@@ -1191,10 +1193,10 @@ pay). Use the **Visitor window** for the anonymous uploader and a second private
 
 ### FT-64 Previewing files before downloading them
 
-**Purpose:** the download page says previews exist, opens nothing by itself, and shows each kind of file safely.
-**Preconditions:** the draft of FT-05 is not needed: sign in as `qa.user@example.com` and send one transfer `PREV`
+**Purpose:** the download page says previews exist, opens nothing by itself, and shows each kind of file safely and as a sample.
+**Preconditions:** sign in as `qa.user@example.com` and send one transfer `PREV`
 with these files (create them with the browser tool's file input; names matter, contents are given):
-`pic.png` (a real small PNG), `doc.pdf` (a real small PDF), `clip.mp4` or `clip.webm` (a real tiny video, if you can
+`pic.png` (a real PNG at least 2400 px wide), `doc.pdf` (a real PDF of 3 or more pages), `clip.mp4` or `clip.webm` (a real tiny video, if you can
 make one; skip the video steps otherwise), `tone.wav` (a real tiny WAV), `a.txt` (`line 1` + newline + `<b>x</b>`),
 `photo.png` (the **text** `<html><body><script>document.title='PWNED'</script></body></html>`, not an image: a
 renamed HTML file), `blob.bin` (a few KB of random bytes) and `fake.png` (2 KB of zero bytes). No recipients. Open the link
@@ -1202,21 +1204,23 @@ renamed HTML file), `blob.bin` (a few KB of random bytes) and `fake.png` (2 KB o
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Read the top of the file list. | A line with an eye icon: "N of 8 files can be previewed before you download them." where N counts every file except `blob.bin` and `fake.png` (and the video / audio you skipped). Nothing is open. |
-| 2 | Look at the rows. | Each row has a file-type icon. Previewable rows: the name is a button, a **Preview** button (eye icon, accessible name "Preview <name>") sits left of **Download**. `blob.bin` and `fake.png` read "<size> - no preview" and have only **Download**. |
+| 1 | Read the top of the file list. | A line with an eye icon: "N of 8 files can be previewed before you download them." where N counts `pic.png`, `doc.pdf`, `a.txt` and `photo.png` only (**not** `blob.bin`, `fake.png`, the video or the audio: video and audio have **no preview**, playing them would be downloading them). Nothing is open. |
+| 2 | Look at the rows. | Each row has a file-type icon. Previewable rows: the name is a button, a **Preview** button (eye icon, accessible name "Preview <name>") sits left of **Download**. `blob.bin`, `fake.png`, the video and the audio read "<size> - no preview" and have only **Download**. |
 | 3 | Reload and wait. | No dialog opens by itself. |
-| 4 | Click **Preview** on `pic.png`. | A dialog opens (focus on **Close**): header with the icon, "pic.png", the size and "k of N" with Previous and Next buttons; the image is shown; footer **Download** and **Close**. The page behind does not scroll. There is no text claiming the preview is not a download. |
-| 5 | Click **Next** until `doc.pdf`, then `a.txt`. | The PDF shows in the browser's PDF viewer in the frame; `a.txt` shows the text `line 1` and `<b>x</b>` **literally** (the tags are visible, nothing bold) with "Showing the first 1 MB as plain text." in the footer. |
+| 4 | Click **Preview** on `pic.png`. | A dialog opens (focus on **Close**): header with the icon, "pic.png", the size and "k of N" with Previous and Next file buttons. The first time, "Preparing preview..." may flash; then a **smaller version** of the image shows (its width at most 1600 px: right-click > open image in a new tab to read it, or the footer note "A smaller version of the image."). Footer: **View full image**, **Download**, **Close**. The page behind does not scroll. There is no text claiming the preview is not a download, and no "This counted as a download." yet. |
+| 5 | Click **Next file** until `doc.pdf`, then `a.txt`. | The PDF shows its first page as a downsized image with a bar "Previous page / Page 1 of N / Next page" (distinct from the round file buttons) and the note "Smaller versions of the pages."; **View full document** is offered. `a.txt` shows the text `line 1` and `<b>x</b>` **literally** (the tags are visible, nothing bold); it is not cut, so no "Showing the first 64 KB." and no **View full document**. |
 | 6 | Click the name `photo.png` in the list (close the dialog first). | The dialog opens on `photo.png` and shows the **source text** `<html><body><script>...` -- as text. The tab title does not become `PWNED`, no alert. No Formatted / Raw switch. |
-| 7 | Press ArrowRight and ArrowLeft with the dialog open. | The dialog moves among the previewable files only (never `blob.bin` / `fake.png`) and wraps around; the position text updates. |
-| 8 | Press Tab repeatedly; press Shift+Tab. | Focus stays inside the dialog (Close, Previous, Next, Download...). |
+| 7 | Press ArrowRight and ArrowLeft with the dialog open. | The dialog moves among the previewable **files** only (never `blob.bin` / `fake.png`) and wraps around; the position text updates. With a PDF shown, Page Down / Page Up move among its **pages**, not files. |
+| 8 | Press Tab repeatedly; press Shift+Tab. | Focus stays inside the dialog (Close, Previous, Next, View full, Download...). |
 | 9 | Press Escape. | The dialog closes and focus returns to the button that opened it. Open it again and click the backdrop: it closes. |
-| 10 | `/__e2e__/mail/` and the sender's dashboard row of `PREV`: look at the download log. | No download was recorded by all this previewing. Then click a **Download** link in the dialog: the log now has exactly that download. |
+| 10 | The sender's dashboard row of `PREV`: look at the download log. | No download was recorded by all this previewing. Then click a **Download** link in the dialog: the log now has exactly that download. |
 | 11 | Visit `/t/<slug>/preview/<id of fake.png>/` and of `blob.bin` (read the ids from the Download links). | Both 404 -- the type comes from the bytes, not the name. |
 | 12 | Visit `/t/<slug>/preview/<id of photo.png>/`. | The browser shows the HTML **as plain text** (response `text/plain; charset=utf-8`), not a page. |
-| 13 | Send a second transfer `PREV2` with `pic.png`, password `pw1`, no recipients, and open its link in a clean window. | The hint reads "You can preview this file once you enter the password.", the row shows **Locked** with no Preview button, and `/t/<slug2>/preview/<id>/` answers 403. After entering `pw1` the hint reads "You can preview this file before you download it." and the Preview button works. |
-| 14 | Send a third transfer with only `blob.bin`. | No hint line and no "no preview" text; only **Download**. |
-| 15 | Phone width (375 px) and dark mode with the dialog open. | The dialog fits the screen with the footer wrapping; readable in dark mode; Previous / Next stay reachable. |
+| 13 | Visit `/t/<slug>/preview/<id of pic.png>/` and of `doc.pdf`. | Both 404: a preview of an image or a PDF is never the file itself (its downsized pages are under `.../status/` and `.../page/<n>/`). |
+| 14 | Send a second transfer `PREV2` with `pic.png`, password `pw1`, no recipients, and open its link in a clean window. | The hint reads "You can preview this file once you enter the password.", the row shows **Locked** with no Preview button, and `/t/<slug2>/preview/<id>/status/` answers 403. After entering `pw1` the hint reads "You can preview this file before you download it." and the Preview button works. |
+| 15 | Send a third transfer with only `blob.bin`. | No hint line and no "no preview" text; only **Download**. |
+| 16 | Phone width (375 px) and dark mode with the dialog open. | The dialog fits the screen with the footer wrapping; readable in dark mode; Previous / Next and the page bar stay reachable. |
+| 17 | Open the dialog on `pic.png` in the browser's network panel while the page's `fetch` calls are visible, and block its page image (devtools > block request URL for `*/previews/*`). | The dialog shows "This file can't be previewed here. You can still download it." with Download working: never a blank dialog. Same when the status answers an error (switch the network to offline and click another file). |
 
 ### FT-65 Markdown files: Formatted and Raw
 
@@ -1238,7 +1242,7 @@ Some **bold** text, a [link](https://example.com) and <script>document.title='PW
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open the link and **Preview** `notes.md`. | Shown **Formatted**: a heading "Title", "bold" in bold, a link, a table. The `<script>` text appears as visible literal text (escaped), the tab title does not become `PWNED`, and there is no image (the Markdown image shows only as its link text). In the footer a segmented control **Formatted | Raw** with Formatted pressed (`aria-pressed="true"`). |
-| 2 | Click **Raw** (or Tab to it and press Enter/Space). | The exact Markdown source is shown as text; Raw is pressed, Formatted not; the footer says "Showing the first 1 MB as plain text." Click **Formatted**: back to the rendering. |
+| 2 | Click **Raw** (or Tab to it and press Enter/Space). | The exact Markdown source is shown as text; Raw is pressed, Formatted not; the footer says nothing about a cut (the file is small). Click **Formatted**: back to the rendering. |
 | 3 | Close, open `notes.md` again. | Formatted is the default again. |
 | 4 | Preview `page.html`. | The raw source `<h1>Hi</h1><script>...` as text; **no** Formatted / Raw switch; no `PWNED`. |
 | 5 | `blob.md` in the list. | "no preview" (random bytes are not text, whatever the name). |
@@ -1257,6 +1261,58 @@ Some **bold** text, a [link](https://example.com) and <script>document.title='PW
 | 4 | Open `/transfer/`, **Manage** on the new row. | The Recipients list reads "No recipients: nobody was emailed. Share the link yourself, or add recipients below to email it." |
 | 5 | Add `qa.late@example.com` with **Add**. | The recipient is listed with **Resend**, and an email "solo.txt was sent to you via ZipTrigo" arrives for it. |
 | 6 | Anonymous sending (`/transfer/send/anon/`, if enabled in FT-31). | Its Recipients field is still required ("Add at least one recipient."): unchanged. |
+
+### FT-67 Downsized previews, "View full" and the download count
+
+**Purpose:** a preview is a sample, never the file; "View full image / document" counts as exactly one download, and the Download after it does not count again.
+**Preconditions:** sign in as `qa.user@example.com` and send a transfer `SAMP` with **Max downloads = 3**, no recipients, and the files `big.png` (a real PNG about 3000 x 2000), `doc.pdf` (a real PDF of 25 pages) and `tiny.png` (a real 40 x 30 PNG). Open its link in the Visitor window. On the sender's dashboard row **Manage** shows the download log and "x of 3 downloads" (reload it between steps).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | **Preview** `big.png`. | After "Preparing preview..." (only the first time), a smaller image: open it in a new tab and read its size: the longer side is **1600 px** at most (3000 x 2000 shows as 1600 x 1067) and the file type is WebP. The footer says "A smaller version of the image." and offers **View full image**. The dashboard log still shows **0 downloads**, and "3 downloads left" (or the equivalent). |
+| 2 | Close and **Preview** `big.png` again. | The sample shows at once (no "Preparing preview..."): it was built once and reused. |
+| 3 | **Preview** `tiny.png`. | Shown at its own size (40 x 30): a small image is **never enlarged**. |
+| 4 | **Preview** `doc.pdf`. | After "Preparing preview...", page 1 as an image, "Page 1 of 20" in a bar with **Previous page** (disabled) and **Next page**, and the note "Smaller versions of the first 20 of 25 pages." Click **Next page** to page 20: **Next page** is then disabled. **Previous page**, Page Up and Page Down work; the round Previous / Next buttons over the viewer and the arrow keys move between *files* (so the page bar is a different control). |
+| 5 | The dashboard row. | Still **0 downloads**. The sender's "was downloaded" email has not arrived (`/__e2e__/mail/`). |
+| 6 | With `big.png` in the dialog click **View full image**. | The full image shows (open it: 3000 px wide), **View full image** is gone and the footer says "This counted as a download." The dashboard now logs **1 download** of `big.png` ("2 downloads left") and the sender's "was downloaded" email arrives. |
+| 7 | Click **Download** in the dialog, and then **Download** on the row of `big.png`. | The file saves with the name `big.png`. In the browser's network panel the dialog's Download makes **no request** (the browser saves what it already has). The log still shows **1** download after the dialog's Download. The row's Download link, on the other hand, goes to the server: because this session's View full counted that file, it is the one free repeat and the log still says 1 (a link opened in a **new tab** of this session behaves the same, once). Click the row's Download **again**: now it is a real download and the log shows 2. |
+| 8 | Click **View full document** on `doc.pdf`. | The whole PDF shows in the browser's PDF viewer inside the dialog, "This counted as a download.", the log has the download of `doc.pdf` (one more). The footer's Download saves `doc.pdf` and adds nothing. |
+| 9 | **Max downloads edge.** On the dashboard set Max downloads of `SAMP` to the number of downloads used plus 1, then in the Visitor window **View full image** on `tiny.png`. | It works and shows the file; the transfer has now reached its limit. Reload the page in a clean window: the neutral "no longer available" page. In the first window the dialog is still open: click **Download** in it: it saves `tiny.png` (the blob). Now close and try the row's **Download** link: it saves `tiny.png` once (the guard), and the log still counts that one download only. A second click on it is the neutral "no longer available" page. |
+| 10 | In a clean window (another visitor) with the link of a fresh transfer `SAMP2` (Max downloads 1, `big.png`): **View full image**. | Counts as the last download: the page is "no longer available" for everyone else straight away; this visitor's dialog keeps showing the image and its Download works (once). |
+| 11 | The **fallback** when the browser may not read the bucket: in devtools block every request to the bucket's host for `fetch`/XHR (or run the visitor window with the bucket's CORS rule removed) and **View full image** on another file of a fresh transfer. | The full image is still shown (from the bucket's URL directly); "This counted as a download."; the **Download** that follows is served from the server and the log shows **one** download for that file. |
+| 12 | Sender's dashboard, **Manage** on `SAMP`, look at "Size" / the storage line, and the Costs page. | The stored size is the files' own: the preview pages are **not** part of it and not billed. |
+
+### FT-68 Text and Markdown are a 64 KB sample
+
+**Purpose:** a text preview shows only the start of a long file, and the whole file is one click (and one download) away.
+**Preconditions:** sign in as `qa.user@example.com` and send a transfer `TXT` (Max downloads 5, no recipients) with `short.txt` (`hello`), `long.txt` (a file of the line `line N` repeated up to about 200 KB), `huge.txt` (the line `x` repeated to about 6 MB) and `long.md` (a Markdown file with a `# Title` and then about 100 KB of paragraphs). Open the link in the Visitor window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | **Preview** `short.txt`. | The text; no cut note, no **View full document**. |
+| 2 | **Preview** `long.txt`. | The first lines; the footer says "Showing the first 64 KB." and offers **View full document**. Scroll to the end of the text: it ends near 64 KB (about 5,500 lines), not at 200 KB. Press ArrowLeft / ArrowRight with the focus **inside** the text (click in it): the text scrolls, the dialog does **not** switch file; with the focus on the dialog's buttons the arrows switch files. |
+| 3 | **Preview** `huge.txt`. | The first 64 KB and the note "Showing the first 64 KB. Download the file to read all of it." There is **no** View full document (the file is over 5 MB). |
+| 4 | **Preview** `long.md`. | Formatted by default with the switch; the formatted note about the start of the file may show; **View full document** is offered. |
+| 5 | Click **View full document** on `long.txt`. | The whole file shows (scroll to the end: line 40,000-ish), the footer says "Showing the whole file as plain text." and "This counted as a download."; the dashboard log shows 1 download of `long.txt` (and the downloads-left count went down by one). Click it again after closing and reopening: no extra download is logged. |
+| 6 | **View full document** on `long.md`. | The whole Markdown source as text (the formatted view belongs to the sample), counted once. |
+| 7 | Visit `/t/<slug>/preview/<long.txt id>/` twice. | Both answer `text/plain; charset=utf-8`, at most 65,536 bytes, and no download is logged. Visit `/t/<slug>/preview/<short.txt id>/full/`: 404 (nothing more to show). |
+
+### FT-69 Preview pages are kept, reused and cleaned up
+
+**Purpose:** the downsized pages live with the transfer and are deleted with it, with the file, and by the daily job when nobody uses them.
+**Preconditions:** FT-67's sender and transfer `SAMP` with `big.png` and `doc.pdf` previewed at least once. Shell steps use `python tests_e2e/ai/manage.py` (see the README).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Shell: list the bucket's objects under `transfers/<transfer id>/` (e.g. with the Floci CLI or `S3Storage.list_keys`). | Besides one object per file there are `previews/<file id>/1.webp` for `big.png` and `previews/<file id>/1.webp` ... `20.webp` for `doc.pdf`. |
+| 2 | Shell: `from apps.file_transfer.models import TransferFile; print(list(TransferFile.objects.values_list('name', 'preview_status', 'preview_pages', 'preview_total_pages')))`. | `big.png` ready 1 1; `doc.pdf` ready 20 25. |
+| 3 | Shell: set `preview_last_used_at` of `big.png` to 15 days ago, then run `python tests_e2e/ai/manage.py shell -c "from apps.file_transfer import jobs; jobs.purge_previews()"`. | `big.png`'s `previews/` object is gone and its status is `none`; `doc.pdf`'s pages are still there. The `/admin/core/scheduledjob/` page lists `file_transfer.purge_previews` with a description. |
+| 4 | **Preview** `big.png` again in the Visitor window. | "Preparing preview..." again, then the image: it was built again. |
+| 5 | Sender's dashboard row of a transfer: **Delete now** (a transfer with previews built). | The files **and** the `previews/` objects under the transfer's prefix are gone. |
+| 6 | In a request (FT-54 onwards) that has an image uploaded by a visitor and previewed after it was marked done (**Preview** shows after Done), the owner **Remove** the file in the dashboard. | The file's `previews/<file id>/` objects are deleted with it. |
+| 7 | Take down a transfer that has previews (admin, ADM-21). | The previews are deleted with the files; the public page is the neutral one. |
+| 8 | Upload a corrupt "PNG" (the PNG signature followed by garbage, 2 KB) and **Preview** it. | The dialog says "Preview not available for this file." (no retry button) and still offers **View full image** and **Download**. A second click gives the same without "Preparing preview...". |
+| 9 | Upload a PDF over 50 MB and an image over 100 megapixels (a 12000 x 9000 PNG), **Preview** each. | Both say "Preview not available for this file." (they are never read for a preview / refused before decoding) and offer View full and Download. |
 
 ## Out of scope
 

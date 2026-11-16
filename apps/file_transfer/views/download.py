@@ -22,8 +22,8 @@ from apps.core.services.qr_image import render_png
 
 from .. import services
 from ..forms import AbuseReportForm, DownloadPasswordForm
-from ..models import Transfer, TransferFile, ZipStatus
-from ..services import preview
+from ..models import PreviewStatus, Transfer, TransferFile, ZipStatus
+from ..services import preview, renditions
 from ..services.request_access import Access, check_access, is_owner
 from ..services.storage import get_storage
 from ..services.zip import ensure_zip_build_started
@@ -56,12 +56,25 @@ def _became_unavailable(request: HttpRequest) -> HttpResponse:
     return response
 
 
-def _password_gated_transfer(request: PublicHttpRequest, slug: str) -> Transfer | HttpResponse:
+def _password_gated_transfer(
+    request: PublicHttpRequest, slug: str, *, replay_file_id: object = None
+) -> Transfer | HttpResponse:
     """Shared prelude for every public per-file/zip download endpoint: look the transfer up,
     check availability, and check the password gate (spec section 3: gates the download buttons,
-    not the file list). Returns either the `Transfer` or the response to return instead."""
+    not the file list). Returns either the `Transfer` or the response to return instead.
+
+    `replay_file_id` (the per-file download and "View full") also lets through a transfer that is
+    no longer available **when this session already counted that file** and the count may itself
+    have ended the transfer (`services.is_replayable`); the password and access gates below still
+    apply."""
     transfer = Transfer.objects.filter(slug=slug).first()
-    if transfer is None or not services.is_available(transfer):
+    if transfer is None or not (
+        services.is_available(transfer)
+        or (
+            replay_file_id is not None
+            and services.is_replayable(request.session, transfer, replay_file_id)
+        )
+    ):
         return _unavailable(request)
     if transfer.is_request:
         # A file request (issue #306): the whole access check (password, then audience) gates
@@ -203,11 +216,15 @@ def download_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpRe
     if not limited.allowed:
         return ratelimit.page_response(request, limited)
 
-    transfer = _password_gated_transfer(request, slug)
+    transfer = _password_gated_transfer(request, slug, replay_file_id=file_id)
     if isinstance(transfer, HttpResponse):
         return transfer
 
     file = get_object_or_404(TransferFile, id=file_id, transfer=transfer, uploaded=True)
+    if services.consume_counted(request.session, transfer.id, file.id):
+        # "View full" already counted this file in this session (the browser had no copy to save,
+        # or the visitor took the link): serve it again without a second count -- once.
+        return redirect(services.download_url(file))
     try:
         url = services.record_download(transfer, file, _client_ip(request))
     except ValidationError:
@@ -221,28 +238,16 @@ def _preview_headers(response: HttpResponse) -> HttpResponse:
     return response
 
 
-@require_GET
-@xframe_options_sameorigin
-def preview_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpResponse:
-    """A file's preview (issue #311), for the dialog on the download page: an image, PDF, video or
-    audio file answers a redirect to a short-lived presigned **inline** URL of the file's content
-    type, a text file answers its first `TEXT_PREVIEW_BYTES` as `text/plain`, a Markdown file the same
-    text and its sanitised rendering as JSON.
-
-    **Exactly the gates of the download** (`_password_gated_transfer`: the transfer is available,
-    the password was entered, a file request's access rules, and for a request the owner before
-    it is done), and the same per-file lookup. What differs: a preview is **not a download** --
-    no `DownloadEvent`, nothing counted against `max_downloads`, no notification to the sender --
-    and a refused gate answers a plain 403 instead of a redirect to the page (the response is
-    fetched by an `<img>`, `<iframe>` or `fetch()`, which would show or read the whole page).
-
-    **What the file is comes only from `TransferFile.preview_type`**, the type read from its
-    bytes when it was uploaded (`services.preview`); a file with none, whatever it is called, is a
-    404. The type is also what S3 is told to answer with, and `presigned_get_url` refuses one that
-    may not be inline. Text is read and re-encoded here, never served from the bucket: it is
-    answered as `text/plain; charset=utf-8` with `nosniff` and a `sandbox` CSP, so a hostile text
-    file (HTML, an SVG) cannot run as a page.
-    """
+def _preview_gate(
+    request: PublicHttpRequest, slug: str, file_id: object
+) -> tuple[Transfer, TransferFile] | HttpResponse:
+    """The prelude of every preview endpoint: the preview rate limit, then **exactly the gates of
+    the download** (`_password_gated_transfer`: the transfer is available, the password was
+    entered, a file request's access rules and "owner only until it is done"), then the same
+    per-file lookup (`uploaded=True`, this transfer). What differs from a download: a refused
+    password / access gate answers a plain 403 instead of a redirect to the page (these responses
+    are fetched by an `<img>` or `fetch()`, which would take the whole page), an unavailable
+    transfer the neutral 404, and a file with no `preview_type` a 404."""
     limited = ratelimit.hit_ip(request, 'FT_PREVIEW_IP')
     if not limited.allowed:
         return ratelimit.page_response(request, limited)
@@ -254,31 +259,151 @@ def preview_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpRes
         return _preview_headers(transfer)
 
     file = get_object_or_404(TransferFile, id=file_id, transfer=transfer, uploaded=True)
+    if preview.kind_of(file.preview_type) is None:
+        return _preview_headers(HttpResponse(status=404))
+    return transfer, file
+
+
+@require_GET
+@xframe_options_sameorigin
+def preview_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpResponse:
+    """The sample of a text or Markdown file (issue #311), for the dialog on the download page:
+    its first `TEXT_PREVIEW_BYTES` (64 KB) as `text/plain`, or for Markdown that text and its
+    sanitised rendering as JSON. **A preview is a sample, never the file**: an image or a PDF has
+    no answer here (404) -- its downsized pages are `preview_status` / `preview_page`.
+
+    Gates, and what a preview is not (it is not a download: no `DownloadEvent`, nothing counted
+    against `max_downloads`, no notification to the sender), are `_preview_gate`'s. **What the file
+    is comes only from `TransferFile.preview_type`**, the type read from its bytes when it was
+    uploaded (`services.preview`). Text is read and re-encoded here, never served from the bucket:
+    it is answered as `text/plain; charset=utf-8` with `nosniff` and a `sandbox` CSP, so a hostile
+    text file (HTML, an SVG) cannot run as a page. The decoded sample is cached per file id.
+    """
+    gate = _preview_gate(request, slug, file_id)
+    if isinstance(gate, HttpResponse):
+        return gate
+    _, file = gate
     kind = preview.kind_of(file.preview_type)
-    if kind is None:
+    if kind not in (preview.PreviewKind.TEXT, preview.PreviewKind.MARKDOWN):
         return _preview_headers(HttpResponse(status=404))
 
-    storage = get_storage()
-    if kind in (preview.PreviewKind.TEXT, preview.PreviewKind.MARKDOWN):
-        try:
-            data = storage.get_object_range(file.storage_key, 0, preview.TEXT_PREVIEW_BYTES - 1)
-        except Exception:
-            logger.warning('Could not read the text preview of file %s', file.pk, exc_info=True)
-            return _preview_headers(HttpResponse(status=404))
-        if kind == preview.PreviewKind.MARKDOWN:
-            # Raw text plus the sanitised rendering, as JSON (never an HTML response).
-            response = JsonResponse(preview.render_markdown_preview(data))
-        else:
-            response = HttpResponse(
-                preview.decode_text(data), content_type='text/plain; charset=utf-8'
-            )
-        response['Content-Security-Policy'] = "default-src 'none'; sandbox"
-        return _preview_headers(response)
+    try:
+        sample = preview.text_sample(file, kind, get_storage())
+    except Exception:
+        logger.warning('Could not read the text preview of file %s', file.pk, exc_info=True)
+        return _preview_headers(HttpResponse(status=404))
+    if isinstance(sample, dict):
+        # Raw text plus the sanitised rendering, as JSON (never an HTML response).
+        response = JsonResponse(sample)
+    else:
+        response = HttpResponse(sample, content_type='text/plain; charset=utf-8')
+    response['Content-Security-Policy'] = "default-src 'none'; sandbox"
+    return _preview_headers(response)
 
-    url = storage.presigned_get_url(
-        file.storage_key, file.name, disposition='inline', content_type=file.preview_type
+
+def _rendition_gate(
+    request: PublicHttpRequest, slug: str, file_id: object
+) -> tuple[Transfer, TransferFile] | HttpResponse:
+    """`_preview_gate` for the endpoints of downsized previews: the file must be an image or a PDF."""
+    gate = _preview_gate(request, slug, file_id)
+    if isinstance(gate, HttpResponse):
+        return gate
+    if not renditions.has_renditions(gate[1]):
+        return _preview_headers(HttpResponse(status=404))
+    return gate
+
+
+@require_GET
+def preview_status(request: PublicHttpRequest, slug: str, file_id: str) -> HttpResponse:
+    """The dialog's first call for an image or a PDF, and its polls (issue #311). With `?start=1`
+    (the dialog opening, and its "Try again") it first claims the lazy build and queues it
+    (`renditions.ensure_build_started`: a no-op when the pages exist or a build is running); the
+    polls leave it out, so a failed build is reported, not silently restarted by every poll.
+    Answers JSON `{status, pages, total_pages, page_urls}`: `status` is `preparing`, `ready`,
+    `failed`, `unavailable` or `none`; `page_urls` are the downsized pages (empty until `ready`).
+    The same gates as the download; not a download."""
+    gate = _rendition_gate(request, slug, file_id)
+    if isinstance(gate, HttpResponse):
+        return gate
+    transfer, file = gate
+    if request.GET.get('start') == '1':
+        renditions.ensure_build_started(file)
+    state = renditions.state_of(file)
+    if state['status'] == 'ready':
+        renditions.touch(file)
+    state['page_urls'] = [
+        reverse('t:preview-page', args=[transfer.slug, file.id, number])
+        for number in range(1, state['pages'] + 1)
+    ]
+    return _preview_headers(JsonResponse(state))
+
+
+@require_GET
+def preview_page(request: PublicHttpRequest, slug: str, file_id: str, page: int) -> HttpResponse:
+    """One downsized page (a WebP) of an image's or a PDF's preview: a 302 to a short-lived
+    presigned **inline** URL of the page, never of the file. The same gates as the download; not a
+    download. A page outside what was built, or a preview that is not `ready`, is a 404."""
+    gate = _rendition_gate(request, slug, file_id)
+    if isinstance(gate, HttpResponse):
+        return gate
+    transfer, file = gate
+    if file.preview_status != PreviewStatus.READY or not 1 <= page <= file.preview_pages:
+        return _preview_headers(HttpResponse(status=404))
+    renditions.touch(file)
+    url = get_storage().presigned_get_url(
+        renditions.preview_key(transfer.pk, file.pk, page),
+        'preview.webp',
+        disposition='inline',
+        content_type=renditions.CONTENT_TYPE,
     )
     return _preview_headers(redirect(url))
+
+
+@require_GET
+def preview_full(request: PublicHttpRequest, slug: str, file_id: str) -> HttpResponse:
+    """ "View full image" / "View full document" (issue #311): **this counts as a download**, with
+    every rule of one (the transfer must be available, the password entered, `max_downloads`
+    counted and the transfer ended when it is reached, a `DownloadEvent`, the sender's
+    notification: all `services.record_download`), and answers JSON `{url, content_type, name}`
+    with a short-lived presigned URL of the file itself, shown inline when its type allows.
+
+    The dialog fetches that URL into a Blob and shows it from there; its Download buttons then
+    save the Blob, with no second request, so the whole thing is one download. Where the browser
+    can't read the bucket's response (its CORS rules), the dialog shows the URL directly and the
+    Download that follows reaches `download_file`, which does not count the file again: this
+    session's "View full" is remembered (`services.mark_counted`, one free repeat within
+    `COUNTED_WINDOW_SECONDS`). Asking again for a file already counted this way is also free.
+
+    A text file is offered whole only when the sample cut it and it is at most
+    `FULL_TEXT_MAX_BYTES`; any other file is a 404 here.
+    """
+    limited = ratelimit.hit_ip(request, 'FT_DOWNLOAD_IP')
+    if not limited.allowed:
+        return ratelimit.page_response(request, limited)
+
+    transfer = _password_gated_transfer(request, slug, replay_file_id=file_id)
+    if isinstance(transfer, HttpResponseRedirect):
+        return _preview_headers(HttpResponse(status=403))
+    if isinstance(transfer, HttpResponse):
+        return _preview_headers(transfer)
+
+    file = get_object_or_404(TransferFile, id=file_id, transfer=transfer, uploaded=True)
+    kind = preview.kind_of(file.preview_type)
+    if kind is None or not preview.full_label(file, kind):
+        return _preview_headers(HttpResponse(status=404))
+
+    if services.is_counted(request.session, transfer.id, file.id):
+        # Already counted in this session: the same file again is free.
+        url = services.download_url(file, inline=True)
+    else:
+        try:
+            url = services.record_download(transfer, file, _client_ip(request), inline=True)
+        except ValidationError:
+            return _preview_headers(_unavailable(request))
+        services.mark_counted(request.session, transfer.id, file.id)
+    return _preview_headers(
+        JsonResponse({'url': url, 'content_type': file.preview_type, 'name': file.name})
+    )
 
 
 #: How many times the "preparing the zip" partial polls itself automatically before giving up and

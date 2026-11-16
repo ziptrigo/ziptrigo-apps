@@ -1,6 +1,6 @@
 import pytest
 
-from apps.core.services.sniff import looks_like_text, sniff_inline_type, sniff_media_type
+from apps.core.services.sniff import looks_like_text, sniff_inline_type
 from apps.core.services.storage import INLINE_CONTENT_TYPES
 
 pytestmark = [pytest.mark.unit]
@@ -38,43 +38,6 @@ def test_recognises_the_inline_types(head, expected):
 )
 def test_anything_else_is_none(head):
     assert sniff_inline_type(head) is None
-
-
-@pytest.mark.parametrize(
-    ('head', 'expected'),
-    [
-        (b'\x00\x00\x00\x18ftypisom\x00\x00\x02\x00', 'video/mp4'),
-        (b'\x00\x00\x00\x20ftypmp42\x00\x00\x00\x00', 'video/mp4'),
-        (b'\x00\x00\x00\x20ftypM4A \x00\x00\x00\x00', 'audio/mp4'),
-        (b'\x1a\x45\xdf\xa3\x01\x00\x00\x00B\x82\x84webm', 'video/webm'),
-        (b'RIFF\x24\x00\x00\x00WAVEfmt ', 'audio/wav'),
-        (b'OggS\x00\x02\x00\x00', 'audio/ogg'),
-        (b'ID3\x04\x00\x00\x00\x00', 'audio/mpeg'),
-        (b'\xff\xfb\x90\x00', 'audio/mpeg'),
-    ],
-)
-def test_recognises_video_and_audio(head, expected):
-    assert sniff_media_type(head) == expected
-    assert expected in INLINE_CONTENT_TYPES
-    # To-do's attachments only ever serve PDF and images inline.
-    assert sniff_inline_type(head) is None
-
-
-@pytest.mark.parametrize(
-    'head',
-    [
-        b'',
-        b'\x00\x00\x00\x18ftypheic\x00\x00\x00\x00',  # an image in an MP4 box
-        b'\x00\x00\x00\x14ftypqt  \x00\x00\x00\x00',  # QuickTime
-        b'\x1a\x45\xdf\xa3\x01\x00\x00\x00B\x82\x84matroska',  # Matroska, not WebM
-        b'RIFF\x24\x00\x00\x00WEBPVP8 ',
-        b'\xff\xd8\xff\xe0',
-        b'<html></html>',
-        b'\xff\x00\x00',
-    ],
-)
-def test_other_things_are_not_media(head):
-    assert sniff_media_type(head) is None
 
 
 @pytest.mark.parametrize(

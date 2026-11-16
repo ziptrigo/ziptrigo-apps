@@ -1,8 +1,11 @@
 """File previews on the public download page (issue #311): what is previewable (decided from the
-file's bytes at upload), the preview endpoint and its gates, and the page's hint and buttons."""
+file's bytes at upload), the text sample endpoint and its gates, and the page's hint and buttons.
+The downsized pages of images and PDFs are `test_renditions.py`; "View full" is `test_preview_full.py`."""
 
 import io
 import json
+import re
+from html.parser import HTMLParser
 
 import pytest
 from django.core.management import call_command
@@ -20,7 +23,8 @@ pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 PNG = b'\x89PNG\r\n\x1a\n' + b'\0' * 32
 PDF = b'%PDF-1.7\n' + b'\0' * 32
-MP4 = b'\0\0\0\x18ftypisom\0\0\2\0isomiso2'
+MP4 = b'\0\0\0\x18ftypisom\0\0\2\0isomiso2'  # no preview any more: it has NULs, so it is no text
+TEXT = b'hello, a text file\n'
 HTML = b'<!DOCTYPE html><html><body><script>alert(1)</script></body></html>'
 
 
@@ -56,7 +60,7 @@ class TestDetectPreviewType:
             (PNG, 'a.png', 'image/png'),
             (PNG, 'renamed.txt', 'image/png'),
             (PDF, 'a.pdf', 'application/pdf'),
-            (MP4, 'a.mp4', 'video/mp4'),
+            (MP4, 'a.mp4', ''),
             (b'hello\n', 'a.txt', 'text/plain'),
             (b'hello\n', 'photo.png', 'text/plain'),
             (HTML, 'photo.png', 'text/plain'),
@@ -113,41 +117,30 @@ class TestDetectPreviewType:
         assert TransferFile.objects.get(pk=file.pk).preview_type == 'image/png'
 
 
-# -- The endpoint --
+# -- The text sample endpoint --
 
 
 class TestPreviewEndpoint:
-    def test_an_image_redirects_to_a_presigned_inline_url_of_its_sniffed_type(
+    def test_an_image_or_pdf_has_no_answer_here_the_file_itself_is_never_served(
         self, client, draft_transfer, fake_storage
     ):
-        file = _add(draft_transfer, fake_storage, 'misnamed.txt', PNG)
+        """A preview is a sample: the whole-file inline redirect of the first version is gone."""
+        png = _add(draft_transfer, fake_storage, 'misnamed.txt', PNG)
+        pdf = _add(draft_transfer, fake_storage, 'a.pdf', PDF)
         _active(draft_transfer)
 
-        response = client.get(_url(draft_transfer, file))
-
-        assert response.status_code == 302
-        assert fake_storage.get_url_calls[-1] == (file.storage_key, 'inline', 'image/png')
-        assert response['Cache-Control'] == 'no-store, private'
-        assert response['X-Content-Type-Options'] == 'nosniff'
-
-    @pytest.mark.parametrize(
-        ('name', 'content', 'content_type'),
-        [('a.pdf', PDF, 'application/pdf'), ('a.mp4', MP4, 'video/mp4')],
-    )
-    def test_pdf_and_video_redirect_inline(
-        self, client, draft_transfer, fake_storage, name, content, content_type
-    ):
-        file = _add(draft_transfer, fake_storage, name, content)
-        _active(draft_transfer)
-        assert client.get(_url(draft_transfer, file)).status_code == 302
-        assert fake_storage.get_url_calls[-1][1:] == ('inline', content_type)
+        for file in (png, pdf):
+            response = client.get(_url(draft_transfer, file))
+            assert response.status_code == 404
+            assert 'Location' not in response
+        assert fake_storage.get_url_calls == []
 
     def test_a_preview_is_not_a_download(self, client, draft_transfer, fake_storage):
-        file = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        file = _add(draft_transfer, fake_storage, 'a.txt', b'hello')
         _active(draft_transfer, max_downloads=1)
 
         for _ in range(3):
-            assert client.get(_url(draft_transfer, file)).status_code == 302
+            assert client.get(_url(draft_transfer, file)).status_code == 200
 
         assert not DownloadEvent.objects.exists()
         draft_transfer.refresh_from_db()
@@ -193,9 +186,8 @@ class TestPreviewEndpoint:
         _active(draft_transfer)
         assert client.get(_url(draft_transfer, file)).status_code == 404
 
-    def test_text_is_read_from_the_head_and_capped_at_one_megabyte(
-        self, client, draft_transfer, fake_storage
-    ):
+    def test_text_is_a_sample_of_the_first_64_kb(self, client, draft_transfer, fake_storage):
+        assert preview.TEXT_PREVIEW_BYTES == 64 * 1024
         content = b'a' * (preview.TEXT_PREVIEW_BYTES + 500)
         file = _add(draft_transfer, fake_storage, 'big.txt', content)
         _active(draft_transfer)
@@ -212,6 +204,41 @@ class TestPreviewEndpoint:
         _active(draft_transfer)
         text = client.get(_url(draft_transfer, file)).content.decode()
         assert '�' not in text
+
+    def test_the_sample_is_cached_per_file(self, client, draft_transfer, fake_storage, monkeypatch):
+        text = _add(draft_transfer, fake_storage, 'a.txt', b'hello')
+        markdown = _add(draft_transfer, fake_storage, 'a.md', b'# hi')
+        _active(draft_transfer)
+        reads = []
+        real = fake_storage.get_object_range
+
+        def counting(key, start, end):
+            reads.append(key)
+            return real(key, start, end)
+
+        monkeypatch.setattr(fake_storage, 'get_object_range', counting)
+
+        for file in (text, markdown):
+            first = client.get(_url(draft_transfer, file))
+            second = client.get(_url(draft_transfer, file))
+            assert first.status_code == second.status_code == 200
+            assert first.content == second.content
+        assert reads == [text.storage_key, markdown.storage_key]
+
+    def test_the_cache_is_not_a_gate(self, client, draft_transfer, fake_storage):
+        file = _add(draft_transfer, fake_storage, 'a.txt', b'hello')
+        _active(draft_transfer, password_hash=password_service.hash_password('sekret'))
+        client.post(reverse('t:unlock', args=[draft_transfer.slug]), {'password': 'sekret'})
+        assert client.get(_url(draft_transfer, file)).status_code == 200  # cached now
+
+        from django.test import Client
+
+        stranger = Client()  # no unlock in this session
+        assert stranger.get(_url(draft_transfer, file)).status_code == 403
+        TransferFile.objects.filter(pk=file.pk).update(preview_type='text/plain')
+        draft_transfer.status = TransferStatus.DISABLED
+        draft_transfer.save()
+        assert client.get(_url(draft_transfer, file)).status_code == 404
 
     def test_markdown_answers_json_with_the_raw_text_and_sanitised_html(
         self, client, draft_transfer, fake_storage
@@ -237,13 +264,14 @@ class TestPreviewEndpoint:
         assert '<img' not in data['html']
         assert data['html_truncated'] is False
 
-    def test_a_long_markdown_file_is_rendered_up_to_the_renderers_limit(
+    def test_a_long_markdown_sample_is_rendered_up_to_the_renderers_limit(
         self, client, draft_transfer, fake_storage
     ):
         from apps.core.markdown import MAX_MARKDOWN_CHARS
 
+        # 64 KB of text is more than the renderer's 50,000-character guard.
         source = ('line of text\n' * 10_000).encode()
-        assert len(source) > MAX_MARKDOWN_CHARS
+        assert preview.TEXT_PREVIEW_BYTES > MAX_MARKDOWN_CHARS
         file = _add(draft_transfer, fake_storage, 'long.md', source)
         _active(draft_transfer)
 
@@ -251,7 +279,7 @@ class TestPreviewEndpoint:
 
         assert data['html_truncated'] is True
         assert data['html']
-        assert data['text'] == source.decode()
+        assert data['text'] == source[: preview.TEXT_PREVIEW_BYTES].decode()
 
     def test_a_markdown_file_named_md_but_binary_is_not_previewed(
         self, client, draft_transfer, fake_storage
@@ -265,7 +293,7 @@ class TestPreviewEndpoint:
     ):
         from ..models import Transfer
 
-        file = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        file = _add(draft_transfer, fake_storage, 'a.txt', b'hello')
         _active(draft_transfer)
         other = Transfer.objects.create(owner=funded_user, status=TransferStatus.ACTIVE)
 
@@ -276,22 +304,125 @@ class TestPreviewEndpoint:
         assert client.get(missing).status_code == 404
 
     def test_a_file_still_uploading_is_not_previewable(self, client, draft_transfer, fake_storage):
-        file = services.add_file(draft_transfer, 'a.png', 10, storage=fake_storage)
-        TransferFile.objects.filter(pk=file.pk).update(preview_type='image/png')
+        file = services.add_file(draft_transfer, 'a.txt', 10, storage=fake_storage)
+        TransferFile.objects.filter(pk=file.pk).update(preview_type='text/plain')
         _active(draft_transfer)
         assert client.get(_url(draft_transfer, file)).status_code == 404
 
     def test_post_is_not_allowed(self, client, draft_transfer, fake_storage):
-        file = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        file = _add(draft_transfer, fake_storage, 'a.txt', b'hello')
         _active(draft_transfer)
         assert client.post(_url(draft_transfer, file)).status_code == 405
+
+
+class _Attributes(HTMLParser):
+    """Every attribute of every tag in some HTML."""
+
+    def __init__(self):
+        super().__init__()
+        self.attributes: list[tuple[str, str, str | None]] = []
+        self.tags: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append(tag)
+        self.attributes.extend((tag, name, value) for name, value in attrs)
+
+
+HOSTILE_MARKDOWN = """
+<div x-init="alert(1)">a</div>
+
+<span @click="alert(1)">b</span>
+
+<p :class="alert(1)" x-on:click="alert(2)" onclick="alert(3)">c</p>
+
+[x](javascript:alert(1))
+
+[y](JaVaScRiPt:alert(1))
+
+[z](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)
+
+<img src=x onerror=alert(1)>
+
+<svg onload=alert(1)><a xlink:href="javascript:alert(1)">s</a></svg>
+
+<a href="javascript:alert(1)" x-data="{}">raw anchor</a>
+
+```a"b' onmouseover=alert(1) x-data=1 @click=alert(2)
+code
+```
+
+```js" onclick="alert(1)
+more code
+```
+
+| a | b |
+|---|---|
+| <span x-init="alert(1)">t</span> | [q](javascript:alert(1)) |
+
+- [ ] <b @click="alert(1)">item</b>
+"""
+
+
+class TestMarkdownIsSafeForXHtml:
+    """The dialog puts the rendered Markdown in with Alpine's `x-html`, so nothing Alpine acts on
+    (`x-*`, `@*`, `:*`) or the browser runs (`on*`, a `javascript:` link) may survive the render:
+    that rests on `apps.core.markdown`'s nh3 allow-list, which this pins."""
+
+    def _attributes(self, html: str):
+        parser = _Attributes()
+        parser.feed(html)
+        return parser.attributes
+
+    def _tags(self, html: str) -> set[str]:
+        parser = _Attributes()
+        parser.feed(html)
+        return set(parser.tags)
+
+    def _assert_safe(self, html: str):
+        attributes = self._attributes(html)
+        for tag, name, value in attributes:
+            assert not name.startswith(('x-', '@', ':', 'on')), (tag, name, value)
+            assert name not in ('style', 'srcdoc', 'formaction')
+            if value is not None and name in ('href', 'src', 'xlink:href', 'action'):
+                assert not value.strip().lower().startswith(('javascript:', 'data:', 'vbscript:'))
+
+    def test_the_renderer_strips_everything_alpine_or_the_browser_would_run(self):
+        rendered = preview.render_markdown_preview(HOSTILE_MARKDOWN.encode())
+        html = rendered['html']
+        assert html
+        self._assert_safe(html)
+        # The hostile markup is shown as *text* (escaped), not parsed as elements.
+        tags = {tag for tag, _, _ in self._attributes(html)} | self._tags(html)
+        assert not tags & {'script', 'img', 'svg', 'iframe', 'style', 'object', 'embed'}
+        assert '&lt;div x-init=' in html
+
+    def test_through_the_endpoint(self, client, draft_transfer, fake_storage):
+        file = _add(draft_transfer, fake_storage, 'evil.md', HOSTILE_MARKDOWN.encode())
+        _active(draft_transfer)
+
+        data = json.loads(client.get(_url(draft_transfer, file)).content)
+
+        self._assert_safe(data['html'])
+        # The raw view is textContent; the JSON still carries the file verbatim.
+        assert data['text'] == HOSTILE_MARKDOWN
+
+    def test_the_only_x_html_in_the_dialog_is_the_markdown_one(self):
+        from pathlib import Path
+
+        dialog = (
+            Path(preview.__file__).parents[1]
+            / 'templates/file_transfer/partials/preview_dialog.html'
+        )
+        source = dialog.read_text()
+        assert len(re.findall(r'x-html=', source)) == 1
+        assert 'x-html="html"' in source
 
 
 class TestPreviewGates:
     """The same gates as the download."""
 
     def test_a_password_blocks_it_until_unlocked(self, client, draft_transfer, fake_storage):
-        file = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        file = _add(draft_transfer, fake_storage, 'a.txt', TEXT)
         _active(draft_transfer, password_hash=password_service.hash_password('sekret'))
 
         locked = client.get(_url(draft_transfer, file))
@@ -300,7 +431,7 @@ class TestPreviewGates:
         assert fake_storage.get_url_calls == []
 
         client.post(reverse('t:unlock', args=[draft_transfer.slug]), {'password': 'sekret'})
-        assert client.get(_url(draft_transfer, file)).status_code == 302
+        assert client.get(_url(draft_transfer, file)).status_code == 200
 
     @pytest.mark.parametrize(
         'overrides',
@@ -311,7 +442,7 @@ class TestPreviewGates:
         ],
     )
     def test_an_unavailable_transfer_is_404(self, client, draft_transfer, fake_storage, overrides):
-        file = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        file = _add(draft_transfer, fake_storage, 'a.txt', TEXT)
         _active(draft_transfer)
         for key, value in overrides.items():
             setattr(draft_transfer, key, value)
@@ -321,23 +452,23 @@ class TestPreviewGates:
     def test_an_expired_transfer_is_404(self, client, draft_transfer, fake_storage):
         from datetime import timedelta
 
-        file = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        file = _add(draft_transfer, fake_storage, 'a.txt', TEXT)
         _active(draft_transfer, expires_at=timezone.now() - timedelta(minutes=1))
         assert client.get(_url(draft_transfer, file)).status_code == 404
 
     def test_a_taken_down_transfer_is_404(self, client, draft_transfer, fake_storage, admin_user):
-        file = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        file = _add(draft_transfer, fake_storage, 'a.txt', TEXT)
         _active(draft_transfer)
         take_down_transfer(draft_transfer, by=admin_user, reason='abuse')
         assert client.get(_url(draft_transfer, file)).status_code == 404
 
     def test_rate_limited_per_ip(self, client, draft_transfer, fake_storage, settings):
-        file = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        file = _add(draft_transfer, fake_storage, 'a.txt', TEXT)
         _active(draft_transfer)
         settings.RATELIMIT_ENABLE = True
         settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'FT_PREVIEW_IP': (1, 60)}
 
-        assert client.get(_url(draft_transfer, file)).status_code == 302
+        assert client.get(_url(draft_transfer, file)).status_code == 200
         limited = client.get(_url(draft_transfer, file))
         assert limited.status_code == 429
         assert 'Retry-After' in limited
@@ -355,9 +486,9 @@ class TestPreviewOfARequest:
 
         transfer = make_request()
         file = request_upload.add_file(
-            transfer, anon_uploader, 'p.png', len(PNG), ip='9.9.9.9', storage=fake_storage
+            transfer, anon_uploader, 'p.txt', len(TEXT), ip='9.9.9.9', storage=fake_storage
         )
-        fake_storage.seed_object(file.storage_key, len(PNG), PNG)
+        fake_storage.seed_object(file.storage_key, len(TEXT), TEXT)
         request_upload.complete_file(
             transfer,
             file,
@@ -371,14 +502,14 @@ class TestPreviewOfARequest:
         assert client.get(url).status_code == 403  # open: not the owner
         owner = Client()
         owner.force_login(funded_user)
-        assert owner.get(url).status_code == 302  # open: the owner may
+        assert owner.get(url).status_code == 200  # open: the owner may
 
         requests_service.mark_done(transfer, by_name='Jane', storage=fake_storage)
 
-        assert client.get(url).status_code == 302
+        assert client.get(url).status_code == 200
         page = client.get(reverse('t:download', args=[transfer.slug]))
         assert page.status_code == 200
-        assert 'Preview p.png' in page.content.decode()
+        assert 'Preview p.txt' in page.content.decode()
         assert not DownloadEvent.objects.exists()
 
 
@@ -455,7 +586,7 @@ class TestDownloadPage:
         assert '1 of 2 files can be previewed once you enter the password.' in content
         assert 'Preview a.png' not in content
         assert 'ft-previews' not in content
-        assert _url(draft_transfer, file) not in content
+        assert f'/preview/{file.id}' not in content
         assert 'Locked' in content
 
     def test_the_footer_does_not_claim_anything_about_downloads(
@@ -477,6 +608,58 @@ class TestDownloadPage:
                 'previews'
             ]
         ] == ['markdown']
+
+    def test_the_entries_of_the_dialog(self, client, draft_transfer, fake_storage):
+        image = _add(draft_transfer, fake_storage, 'a.png', PNG)
+        pdf = _add(draft_transfer, fake_storage, 'b.pdf', PDF)
+        small = _add(draft_transfer, fake_storage, 'c.txt', b'hi')
+        cut = _add(draft_transfer, fake_storage, 'd.txt', b'x' * (preview.TEXT_PREVIEW_BYTES + 1))
+        huge = _add(
+            draft_transfer,
+            fake_storage,
+            'e.md',
+            b'#' + b'x' * 5000,
+            size=preview.FULL_TEXT_MAX_BYTES + 1,
+        )
+        _active(draft_transfer)
+
+        entries = {
+            e['id']: e
+            for e in client.get(reverse('t:download', args=[draft_transfer.slug])).context[
+                'previews'
+            ]
+        }
+
+        def args(file):
+            return [draft_transfer.slug, file.id]
+
+        # Image and PDF: the build's status endpoint, and View full (a download).
+        assert entries[str(image.id)]['url'] == reverse('t:preview-status', args=args(image))
+        assert entries[str(image.id)]['full_label'] == 'View full image'
+        assert entries[str(pdf.id)]['url'] == reverse('t:preview-status', args=args(pdf))
+        assert entries[str(pdf.id)]['full_label'] == 'View full document'
+        assert entries[str(image.id)]['full_url'] == reverse('t:preview-full', args=args(image))
+        # Text: the sample itself; View full only for one the sample cut and that is not huge.
+        assert entries[str(small.id)]['url'] == reverse('t:preview', args=args(small))
+        assert (entries[str(small.id)]['full_url'], entries[str(small.id)]['sample_cut']) == (
+            '',
+            False,
+        )
+        assert entries[str(cut.id)]['full_label'] == 'View full document'
+        assert entries[str(cut.id)]['sample_cut'] is True
+        assert (entries[str(huge.id)]['full_url'], entries[str(huge.id)]['sample_cut']) == (
+            '',
+            True,
+        )
+
+    def test_video_and_audio_have_no_preview(self, client, draft_transfer, fake_storage):
+        mp3 = b'ID3\x04\x00\x00\x00\x00\x00\x00' + b'\0' * 30
+        _add(draft_transfer, fake_storage, 'a.mp4', MP4)
+        _add(draft_transfer, fake_storage, 'b.mp3', mp3)
+        _active(draft_transfer)
+        response = client.get(reverse('t:download', args=[draft_transfer.slug]))
+        assert response.context['previews'] == []
+        assert 'previewed' not in response.content.decode()
 
     def test_a_hostile_file_name_is_escaped(self, client, draft_transfer, fake_storage):
         _add(draft_transfer, fake_storage, '"><script>x</script>.png', PNG)

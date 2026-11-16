@@ -2443,48 +2443,129 @@ neither a whole source file nor the whole zip is ever held in memory; this only 
 own non-seekable-stream support instead of assuming it can seek. A "download all" click counts as
 one `DownloadEvent` (`file=None`) toward the same `max_downloads` limit as any other download.
 
-**File previews** (issue #311; mock `docs/ui-design/mocks/file-preview.html`; `services/preview.py`, `views.download.preview_file`,
-`partials/preview_dialog.html`, `static/file_transfer/js/preview.js`, migration `0010`). Someone with the link can preview a file before
-downloading it, **only after a click** (even for a single file): the page shows a hint line above the list ("2 of 3 files can be
+**File previews** (issue #311; mock `docs/ui-design/mocks/file-preview.html`; `services/preview.py`, `services/renditions.py`,
+`services/rendition_render.py`, `views.download` (`preview_file`, `preview_status`, `preview_page`, `preview_full`),
+`partials/preview_dialog.html`, `static/file_transfer/js/preview.js`, migrations `0010`, `0011`). Someone with the link can preview a file
+before downloading it, **only after a click** (even for a single file): the page shows a hint line above the list ("2 of 3 files can be
 previewed before you download them." and its one-file, all-files and password-locked wordings, `preview.hint_text`; none when nothing can be
 previewed), each previewable row has a file-type icon, its name as a button and a **Preview** button, the others read "no preview" (only
 when something else can be previewed), and a locked page shows the hint and **Locked** but renders no button and **no preview URL**
 (`page_context` returns `previews=[]` while locked). The dialog (Alpine `ftPreview`, a classic script loaded before Alpine) is the
 confirmation modal's look: focus to Close and back to the trigger, a Tab trap, Escape / backdrop / Close, Left / Right and Previous / Next
-among the **previewable files only** ("2 of 4"), Download in the footer. There is deliberately **no** sentence saying a preview is not a
+among the **previewable files only** ("2 of 4"; not while focus is in a text area, where the arrows scroll), Page Up / Page Down and
+Previous page / Next page among a PDF's pages, Download in the footer. There is deliberately **no** sentence saying a preview is not a
 download (the owner's decision), but it isn't one: no `DownloadEvent`, nothing against `max_downloads`, no sender email.
+- ***A preview is a sample, never the file*** (the owner's redesign after the review, which found that previewing the whole file bypassed a
+  download limit). Images and PDFs show **downsized WebP renditions**, text and Markdown the **first 64 KB**; video and audio have **no
+  preview** (playing them is downloading them; the first version had them). **View full image / View full document counts as a
+  download** (below). The kinds: `image` (JPEG, PNG, WebP, GIF), `pdf`, `text`, `markdown` (`PreviewKind`).
 - *What a file is comes from its bytes, never its name or the claimed type.* When an upload completes, `uploads.finish_upload_in_storage`
   makes one ranged `GetObject` of the first 4 KB (`S3Storage.get_object_range`) and `preview.detect_preview_type` stores the result in
   `TransferFile.preview_type` (`db_default=''`, the #102 lesson; best effort: a failed read is "no preview", never a failed upload;
-  `request_upload.complete_file` writes it in its conditional `UPDATE`). Types: `sniff_inline_type` (PDF, JPEG, PNG, WebP, GIF), the new
-  `sniff_media_type` (MP4 by `ftyp` brand list, WebM by EBML + `webm`, MP3, WAV, Ogg, M4A; Matroska, QuickTime and HEIC are none) and
-  `looks_like_text` (valid UTF-8 allowing a cut character, no NUL or other control but tab, LF, FF, CR); both in `apps.core.services.sniff`,
-  and `sniff_inline_type` is unchanged so To-do's attachments still serve only PDF and images inline. `INLINE_CONTENT_TYPES` gained the
-  video and audio types (`text/markdown` is not in it: Markdown never goes to S3 inline). **Existing files** have `preview_type=''`, so no
-  preview: the page never sniffs (an S3 request per file per view); `./manage.py file_transfer_backfill_previews` reads their heads once
-  (active, disabled or suspended transfers; idempotent). A file nobody can describe as one of the above is simply not previewable.
-- *Kinds*: `image` (`<img>`), `pdf` (`<iframe>` of the browser's viewer), `video` (`<video controls>`), `audio` (`<audio controls>`), `text` and
-  `markdown`. Any text, **HTML and SVG included**, is shown as inert text: `text/plain; charset=utf-8` from Django (never from S3),
-  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, fetched by the page and put in with `x-text`
-  (textContent); the first `TEXT_PREVIEW_BYTES` (1 MB, a ranged read; the incremental UTF-8 decoder holds back a cut character). A text file
-  whose **name** ends in `.md` / `.markdown` is `text/markdown` (the name only picks formatted-vs-plain among files whose bytes already
-  say text, so it can't make a binary previewable): the endpoint answers JSON `{text, html, html_truncated}` where `html` is
-  `apps.core.markdown.render(profile='extended')` with no resolver and no `task_url_path` (raw HTML escaped, images never rendered, nh3
-  sanitised; the renderer's 50,000-character guard means a longer file is rendered up to the last line break under it and
-  `html_truncated` says so). The dialog shows it **Formatted** by default with a Formatted / Raw segmented control (`aria-pressed`;
-  Raw is the same text via `x-text`); an HTML file is only ever raw, with no switch. The formatted HTML goes in with `x-html` (it is the
-  server's sanitised output; the `.ft-markdown` rules are a small `<style>` in the dialog partial).
-- *The endpoint* `GET /t/<slug>/preview/<file id>/` (`t:preview`, GET only, `xframe_options_sameorigin`, `Cache-Control: no-store, private`,
-  `nosniff`) applies **exactly the download's gates**: `FT_PREVIEW_IP` first (240/min per IP, charged before any lookup), then
-  `_password_gated_transfer` (available, password unlocked, a file request's access rules and "owner only until done"), then the same
-  per-file lookup (`uploaded=True`, this transfer). A refused password / access gate answers a plain **403** (not the redirect: an
-  `<img>`, `<iframe>` or `fetch()` would take the whole page), an unavailable transfer the neutral 404, and a file with no `preview_type`
-  a 404. Image, PDF, video and audio answer a 302 to `presigned_get_url(..., disposition='inline', content_type=<the sniffed type>)`
-  (15 minutes like a download; `presigned_get_url` still refuses an inline type outside `INLINE_CONTENT_TYPES`, so HTML and SVG can never be
-  served inline). A file request in the **Done** state renders the same `download.html`, so previews work there too, and the owner can
-  preview while it is still open (the same rule as downloading).
-- Tests: `apps/file_transfer/tests/test_preview.py`, the sniffer tests in `apps/core/tests/test_sniff.py`, `tests_e2e/test_file_preview.py`,
-  AI cases FT-64 and FT-65.
+  `request_upload.complete_file` writes it in its conditional `UPDATE`). Types: `sniff_inline_type` (PDF, JPEG, PNG, WebP, GIF) and
+  `looks_like_text` (valid UTF-8 allowing a cut character, no NUL or other control but tab, LF, FF, CR), both in
+  `apps.core.services.sniff`; `sniff_inline_type` is unchanged so To-do's attachments still serve only PDF and images inline. A text file
+  whose **name** ends in `.md` / `.markdown` is `text/markdown` (the name only picks formatted-vs-plain among files whose bytes already say
+  text, so it can't make a binary previewable). **Existing files** have `preview_type=''`, so no preview: the page never sniffs (an S3
+  request per file per view); see "Deploy notes" below for `./manage.py file_transfer_backfill_previews`. A file nobody can describe as one
+  of the above is simply not previewable.
+- *Text and Markdown* (`GET /t/<slug>/preview/<file id>/`, `t:preview`, `preview_file`; GET only, `xframe_options_sameorigin`,
+  `Cache-Control: no-store, private`, `nosniff`): the first `TEXT_PREVIEW_BYTES` (64 KB, a ranged read; the incremental UTF-8 decoder holds
+  back a cut character) as `text/plain; charset=utf-8` from Django (never from S3) with `Content-Security-Policy: default-src 'none';
+  sandbox`, fetched by the page and put in with `x-text` (textContent): **any text, HTML and SVG included, is inert text**. A Markdown file
+  answers JSON `{text, html, html_truncated}`, `html` being `apps.core.markdown.render(profile='extended')` with no resolver and no
+  `task_url_path` (raw HTML escaped, images never rendered, nh3 sanitised; the renderer's 50,000-character guard means a longer sample is
+  rendered up to the last line break under it and `html_truncated` says so). The dialog shows it **Formatted** by default with a Formatted
+  / Raw control. The formatted HTML goes in with `x-html`, which is safe **only** because `apps.core.markdown`'s nh3 allow-list never lets an
+  `x-*`, `@*`, `:*` or `on*` attribute or a `javascript:` link through: `test_preview.py::TestMarkdownIsSafeForXHtml` renders hostile Markdown
+  and fails if that stops being true, and the template says so next to the `x-html`. The decoded sample / rendered JSON is **cached per file
+  id** for 5 minutes (`preview.text_sample`, the Django cache; the gates run before it). A text file the sample cut (over 64 KB) and
+  at most `FULL_TEXT_MAX_BYTES` (5 MB) offers "View full document" (the whole file as plain text; the formatted view belongs to the
+  sample); a bigger one says "Download the file to read all of it".
+- *Images and PDFs: downsized renditions* (`services/renditions.py`, `rendition_render.py`; the module docstrings are the long version).
+  An image is **one WebP**, longest side at most **1600 px** (never enlarged), quality 75, EXIF orientation applied, EXIF/XMP/ICC dropped (the
+  first frame of a GIF); a PDF is **one WebP per page, the first 20** (`MAX_PREVIEW_PAGES`), each at a scale that keeps its longer side within
+  1600 px (at most 144 dpi). They live in the **file transfer bucket under the transfer's own prefix**,
+  `transfers/<transfer id>/previews/<file id>/<n>.webp` (`preview_key`), so they are deleted with it, and are **not billed and not part of
+  `size_bytes`** (like the "download all" zip). Built **lazily on the first Preview click**, then reused: `TransferFile.preview_status`
+  (`PreviewStatus`: `none`, `building`, `ready`, `failed`, `unavailable`; with `preview_pages`, `preview_total_pages`, `preview_started_at`,
+  `preview_last_used_at`, all with `db_default`s). `GET .../status/` (`t:preview-status`; `?start=1` on open and on "Try again" **claims the
+  build** with one conditional `UPDATE` (`none`; a `failed` one only after `RETRY_COOLDOWN`, 5 min, so a file that keeps making the child fail can't occupy the worker once per click -- an earlier "Try again" just reports `failed` again; or a `building` older than `BUILD_LEASE`, 10 min), as `services.zip` does, and queues the
+  `build_preview` task on commit; plain polls never start one, so a failure is reported, not retried by every poll) answers JSON `{status:
+  preparing|ready|failed|unavailable|none, pages, total_pages, page_urls}`; the dialog shows "Preparing preview..." and polls every 1.5 s
+  (at most 40 times). `GET .../page/<n>/` (`t:preview-page`) answers a 302 to a short-lived presigned **inline** URL of that WebP page, never of the
+  file. Both have `_preview_gate`: `FT_PREVIEW_IP` (240/min) first, then **exactly the download's gates** (`_password_gated_transfer`: available,
+  password, a file request's access rules and "owner only until done"), a refused password / access gate answering a plain **403** (an `<img>` or
+  `fetch()` would take the whole page), an unavailable transfer the neutral 404, a file with no `preview_type` or of the wrong kind a 404.
+  `touch` bumps `preview_last_used_at` at most once an hour per file. **A failed build** (`failed`: the child killed from outside, a timeout, an
+  S3 error) shows "Preview not available for this file." with **Try again**; **`unavailable`** is a verdict kept for the file (corrupt, a file over
+  `MAX_SOURCE_BYTES` = 50 MB which is never read, an image whose header claims over 100 megapixels, refused before decoding, or a child that
+  exceeded its budget) and shows the same text with no retry. Either way **View full** and Download stay offered. Every load failure of an
+  image, page or the full view (403/404/network) shows "This file can't be previewed here. You can still download it.", never a blank dialog.
+- *Untrusted input, bounded resources* (`renditions.render_in_child`; `rendition_render.py` run as `python -I` is the child, bytes on stdin,
+  JSON on stdout): the same pattern as Receipts' document preparation (`apps.receipts.services.documents`, see "Receipts" > Processing for the
+  budget, the two kinds of failure and the "a resource budget, not an isolation boundary" caveat), kept as a small copy because products may
+  not import each other and promoting the runner into `core` would have meant rewriting Receipts' internals and tests (a possible follow-up):
+  `RLIMIT_AS` (Linux only), `RLIMIT_CPU`, a wall-clock timeout, own session, minimal environment, an unprivileged user when the worker is root,
+  `oom_score_adj` 1000, the `#started` marker so exit 127 only counts as "over budget" from a child that started. Settings
+  `FILE_TRANSFER_PREVIEW_SANDBOX` (off under pytest: unit tests reduce in-process with the same error mapping),
+  `_MEMORY_MB` (1024), `_CPU_SECONDS` (25), `_TIMEOUT_SECONDS` (60), `_CHILD_USER` (`nobody`). The container needs headroom for the worker plus
+  that budget while a build runs. Over-budget deaths and the child's own `unreadable` / `too_complex` replies are `unavailable`; SIGKILL (the OOM
+  killer), other signals, an ordinary non-zero exit, no or malformed reply, a timeout and a failure to start are `failed`.
+- *Queue.* `build_preview` runs on the **`default` queue**: each build is bounded (the budget above) and happens once per file, so no new worker
+  was added. The accepted risk: a sender who uploads many worst-case PDFs and a visitor who clicks them all occupy the `default` worker, which also
+  sends file transfer's emails and builds zips. If that ever bites, give it its own queue like Receipts' (`'previews'` in
+  `TASKS['default']['QUEUES']`, `@task(queue_name='previews')`, and a `db_worker --queue-name previews` in `supervise.py` **and**
+  `docker-compose.yml`).
+- *Deletion* (every place a file or its object goes): the whole transfer prefix is deleted by `lifecycle.delete_transfer_files` (natural
+  expiry, delete now, the last allowed download's deferred deletion, takedown, the suspension grace period) and `uploads.abort_draft`, and
+  `delete_transfer_files` resets the files' `ready`/`building` states to `none`; a single file's removal (`uploads.remove_file` for a draft,
+  `request_upload._remove` for a file request, the owner's `remove_file_as_owner` included) deletes `previews/<file id>/` (no S3 call for a file that
+  never had any). A build racing any of these **re-checks at its end** (the zip's pattern: its conditional `UPDATE` matching nothing, the transfer
+  ended or its files deleted) and deletes what it wrote, but never the pages of a sibling build that finished first. The daily job
+  **`file_transfer.purge_previews`** (`jobs.purge_previews` -> `renditions.purge_unused`, registered in `FileTransferConfig.ready()` with a
+  `description`, 24 h, lease 1 h) deletes the pages of a `ready` file unused for `PREVIEW_CACHE_DAYS` (14; `preview_last_used_at`) and resets it
+  to `none` (state claimed first with the same stale condition, objects deleted after, so a click in between finds no preview rather than pages
+  that vanish; per-row try/except + `logger.exception`), so the next click builds them again.
+- ***View full image / View full document counts as a download*** (`GET .../full/`, `t:preview-full`, `preview_full`): `FT_DOWNLOAD_IP`, the
+  download's gates, then `services.record_download(..., inline=True)` -- the very service of the Download button (a `DownloadEvent`, `max_downloads`
+  counting and ending the transfer with the files kept for the deferral window, `notify_on_download`) -- answering JSON `{url, content_type, name}`
+  with a presigned GET (inline with the sniffed type where `INLINE_CONTENT_TYPES` allows, else an attachment; Markdown is never inline). It is
+  offered for every image and PDF and for a cut text file up to 5 MB (`preview.full_label`). **Only one download is counted**:
+  1. *The Blob path.* `preview.js` `fetch()`es the URL into a Blob (no cookies), shows it (`<img>`, `<iframe>`, or the text) and keeps up to 3 Blobs;
+     the dialog's Download and the row's Download then **save the Blob with a download link, with no request at all**. This needs the bucket to
+     allow the page's origin to GET (CORS), which the `infra` repo configures.
+  2. *The session guard* (always on, `services.downloads`: `mark_counted`, `consume_counted`, `is_replayable`, session key
+     `ft_counted_downloads`, a dict `"<transfer id>:<file id>" -> expiry` capped at 50 entries, window `COUNTED_WINDOW_SECONDS` = the presigned
+     URL's 15 minutes): "View full" remembers the file in the visitor's session, and the **next** `download_file` for it is served (a 302 to the
+     attachment URL) **without counting again**, once (`consume_counted` forgets it); asking "View full" again within the window is free too. It is
+     the fallback when the browser can't read the bucket (the dialog then shows the bucket's URL directly) and covers an evicted Blob or a link opened
+     in another tab. **If the count itself ended the transfer** (the last allowed download), `download_file` and `preview_full` still serve that
+     session within the window: `_password_gated_transfer(replay_file_id=...)` lets an unavailable transfer through only when `is_replayable`
+     (counted in this session, files not deleted, not held, status `ACTIVE` or `EXPIRED`, never disabled, suspended, deleted or taken down), and the
+     password / request access gates still apply. Previews of other files are refused then (the transfer is unavailable).
+  After it the dialog says "This counted as a download." The Download buttons hold no request in the Blob path, so a stolen link isn't needed;
+  the session record cannot be forged by a visitor (it is in the server-side session and only set by a request that passed the gates).
+- ***Infra follow-up, not done here*** (the bucket's CORS lives in the `infra` repo): for the Blob path in production the file transfer bucket's CORS
+  needs a rule allowing **`AllowedMethods: GET`** from **`AllowedOrigins: <BASE_URL>`** (the site's origin; `app.ziptrigo.com` and
+  `app-staging.ziptrigo.com`), with no special headers needed (the dialog sends none; `ExposeHeaders` is not needed). The existing rule is
+  documented for uploads only (PUT, `x-amz-checksum-sha256`, `ETag`, issue #60). **Until then the fallback is in force**: the full file is shown from
+  the bucket's URL and the Download that follows is still one download (the guard), at the price of the file being transferred twice. The e2e fake
+  bucket answers `GET, PUT` CORS and the browser test covers both paths.
+- *Deploy notes.* After deploying, run **`./manage.py file_transfer_backfill_previews` once** so files uploaded before this shipped get their
+  `preview_type` (it reads the first bytes of every active, disabled or suspended transfer's stored file; idempotent; one ranged S3 request per
+  file). Until then those files simply have no Preview button. The preview columns have database defaults, so the old container keeps working
+  while `0011` runs. The three `FILE_TRANSFER_PREVIEW_*` limits default sensibly; no new secret.
+- *Not billed, not metered, not in the API.* No change to the JWT API or `docs/openapi.yml` (previews are web only). A file request in the **Done**
+  state renders the same `download.html`, so previews and "View full" work there for the people with access, under the request's access rules.
+  **While a request is still open nobody previews**: its public page is the upload page, which has no Preview button, and the dashboard row has none
+  either (deliberately: not added). The endpoints themselves apply the download's gate, which lets the *owner* of an open request through, but
+  the UI offers no way to reach them.
+- Tests: `apps/file_transfer/tests/test_preview.py` (sniffing, the text sample and its cache, the gates, the page, the x-html safety),
+  `test_renditions.py` (what is built, caps, the claim and lease, races at the end of a build, the child process budget, the endpoints and their
+  gates, every deletion path, the purge job), `test_preview_full.py` (counts once, the guard, the last-download edge, text full), the sniffer tests in
+  `apps/core/tests/test_sniff.py`, `tests_e2e/test_file_preview.py` (hint, keys, Markdown, downsized sample, "Preparing preview...", PDF pages,
+  View full + one download in the database, the no-CORS fallback), AI cases FT-64, FT-65, FT-67 to FT-69 and ADM-64 (step 7).
 
 **Recipients are optional** (issue #310) for the logged-in send flow: the web form (`Recipients (optional)`, not `required`), `SendOptions.recipients`
 (default empty; `validate_send_options` no longer refuses an empty list), `POST /api/ft/transfers/{id}/send` (`recipients` defaults to `[]`,
@@ -7139,7 +7220,7 @@ succeeded and failed alike, in batches; ready/running rows never) and `core.clea
 `SessionStore.clear_expired()`; nothing else purges `django_session`). A third daily one,
 `core.purge_old_notifications` (90 days, see "Notifications"), does the same for in-app notifications.
 
-`file_transfer`'s five jobs (`apps/file_transfer/jobs.py`; the fifth, `send_request_notices`, is under "File requests"): `meter_transfers` (daily -- charges at
+`file_transfer`'s six jobs (`apps/file_transfer/jobs.py`; `send_request_notices` is under "File requests" and `purge_previews`, daily, under "File previews"): `meter_transfers` (daily -- charges at
 the shared `BillingSettings` storage price, suspends, re-enables as a fallback -- only transfers
 already suspended when the run started, never one it suspended itself --, deletes files past the
 suspension grace period),

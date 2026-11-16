@@ -151,6 +151,14 @@ def test_validate_anonymous_send_options_rejects_non_allowed_expiry(anon_enabled
         validate_anonymous_send_options(_options(expiry_choice='999'), settings_row)
 
 
+def test_validate_anonymous_send_options_still_requires_a_recipient(anon_enabled):
+    """Recipients are optional for a signed-in sender (issue #310), not for an anonymous one: with
+    an unconfirmed sender and no account, the recipients' emails are the only trail."""
+    settings_row = FileTransferSettings.load()
+    with pytest.raises(ValidationError, match='Add at least one recipient'):
+        validate_anonymous_send_options(_options(recipients=[]), settings_row)
+
+
 def test_validate_anonymous_send_options_rejects_too_many_recipients(anon_enabled):
     settings_row = FileTransferSettings.load()
     settings_row.anonymous_max_recipients = 1

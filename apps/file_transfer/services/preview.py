@@ -4,30 +4,32 @@ are downloaded, and how.
 **The type is read from the file's bytes, never from its name or the uploader's claimed type.**
 `detect_preview_type` runs when an upload completes (`uploads.finish_upload_in_storage`: one ranged
 `GetObject` of the first `SNIFF_BYTES`), and the result is stored on `TransferFile.preview_type`;
-everything afterwards (the page's buttons, the preview endpoint) reads only that column. So an HTML
-file renamed `photo.png` is never previewed as an image: it sniffs as text, and text is shown as
-inert text (below).
+everything afterwards (the page's buttons, the preview endpoints) reads only that column. So an
+HTML file renamed `photo.png` is never previewed as an image: it sniffs as text, and text is shown
+as inert text (below).
 
-What can be previewed, by `PreviewKind`:
+**A preview is a sample, never the file** (the owner's redesign): previewing must not be a way
+around a download limit, so what a preview shows is something smaller than the file.
 
-- `image`: JPEG, PNG, WebP, GIF, shown in an `<img>`.
-- `pdf`: shown by the browser's PDF viewer in an `<iframe>`.
-- `video`: MP4 and WebM, in `<video controls>`.
-- `audio`: MP3, WAV, Ogg and M4A, in `<audio controls>`.
-- `markdown`: a text file (the same check as `text`) whose **name** ends in `.md` or `.markdown`.
-  The name only chooses between formatted and plain among files whose bytes already say "text"
-  (it can never make a binary file previewable). The preview endpoint answers JSON with the raw
-  text and the text rendered by `apps.core.markdown.render` (`extended` profile, no task
-  references: raw HTML is escaped, images are never rendered, the output is sanitised); the dialog
-  has a Formatted / Raw switch.
-- `text`: anything that is valid UTF-8 without control characters in its first chunk and is not one
-  of the above. It is **never** served as HTML: `views.download.preview_file` reads the first
-  `TEXT_PREVIEW_BYTES` itself and answers `text/plain; charset=utf-8` with `nosniff` and a
-  sandboxing CSP, and the page puts it in the dialog with `textContent`. (An SVG or HTML file is
-  text too, so its source is shown, not rendered, and it never gets a Formatted view.)
+- `image` (JPEG, PNG, WebP, GIF) and `pdf`: a downsized WebP -- one image, or one per page of a
+  PDF -- built lazily on the first click and reused (`services.renditions`). The file's own bytes
+  are never served by a preview endpoint.
+- `markdown` and `text`: the **first `TEXT_PREVIEW_BYTES`** (64 KB) of the file. A text file is
+  anything that is valid UTF-8 without control characters in its first chunk; one whose **name**
+  ends in `.md` or `.markdown` is Markdown (the name only chooses between formatted and plain among
+  files whose bytes already say "text"). The endpoint answers the text as `text/plain` (never from
+  S3, never HTML: `nosniff` and a sandboxing CSP) or, for Markdown, JSON with the raw text and the
+  text rendered by `apps.core.markdown.render` (`extended` profile, no task references: raw HTML
+  is escaped, images are never rendered, the output is sanitised). The decoded sample / rendered
+  JSON is cached per file id for `SAMPLE_CACHE_SECONDS` (a file never changes). An SVG or HTML
+  file is text too, so its source is shown, not rendered.
 
-HTML and SVG as images or pages are never inline. `S3Storage.presigned_get_url` independently
-refuses to serve a content type outside `INLINE_CONTENT_TYPES` inline.
+Video and audio have **no preview** (playing them is downloading them, and there is nothing cheap
+to downsize).
+
+Seeing the whole file is "View full image" / "View full document", which **counts as a download**
+(`views.download.preview_full`, `services.downloads`). For text it is offered only for a file the
+sample cut and that is at most `FULL_TEXT_MAX_BYTES`.
 
 A file uploaded before the column existed has `preview_type == ''` and so no preview, until
 `./manage.py file_transfer_backfill_previews` reads its head (the page never sniffs: it would cost
@@ -39,23 +41,30 @@ import logging
 from collections.abc import Iterable
 from enum import StrEnum
 
+from django.core.cache import cache
 from django.template.defaultfilters import filesizeformat
 from django.urls import reverse
 
 from apps.core.markdown import MAX_MARKDOWN_CHARS, render
-from apps.core.services.sniff import looks_like_text, sniff_inline_type, sniff_media_type
+from apps.core.services.sniff import looks_like_text, sniff_inline_type
 
 from ..models import Transfer, TransferFile
 from .storage import S3Storage
 
 logger = logging.getLogger(__name__)
 
-#: How many bytes of the head of an object `detect_preview_type` needs: the WebM document type
-#: sits after the EBML header, and text is judged on this much.
+#: How many bytes of the head of an object `detect_preview_type` needs: text is judged on this much.
 SNIFF_BYTES = 4096
 
-#: How much of a text file the preview shows (and `preview_file` reads from S3).
-TEXT_PREVIEW_BYTES = 1024 * 1024
+#: How much of a text file the preview shows (and `preview_file` reads from S3): a sample.
+TEXT_PREVIEW_BYTES = 64 * 1024
+
+#: The largest text file "View full document" shows (it is read whole by the browser); a larger
+#: one only offers the sample and Download.
+FULL_TEXT_MAX_BYTES = 5 * 1024 * 1024
+
+#: How long a decoded text sample / rendered Markdown is kept in the cache (per file id).
+SAMPLE_CACHE_SECONDS = 300
 
 
 #: Names that make a text file Markdown.
@@ -67,8 +76,6 @@ class PreviewKind(StrEnum):
     PDF = 'pdf'
     TEXT = 'text'
     MARKDOWN = 'markdown'
-    VIDEO = 'video'
-    AUDIO = 'audio'
 
 
 #: The content types a file may be stored as, and what shows them.
@@ -80,12 +87,6 @@ _KINDS: dict[str, PreviewKind] = {
     'application/pdf': PreviewKind.PDF,
     'text/plain': PreviewKind.TEXT,
     'text/markdown': PreviewKind.MARKDOWN,
-    'video/mp4': PreviewKind.VIDEO,
-    'video/webm': PreviewKind.VIDEO,
-    'audio/mpeg': PreviewKind.AUDIO,
-    'audio/wav': PreviewKind.AUDIO,
-    'audio/ogg': PreviewKind.AUDIO,
-    'audio/mp4': PreviewKind.AUDIO,
 }
 
 #: Font Awesome icon of each kind.
@@ -94,8 +95,6 @@ _ICONS: dict[PreviewKind, str] = {
     PreviewKind.PDF: 'fas fa-file-pdf',
     PreviewKind.TEXT: 'fas fa-file-lines',
     PreviewKind.MARKDOWN: 'fas fa-file-lines',
-    PreviewKind.VIDEO: 'fas fa-file-video',
-    PreviewKind.AUDIO: 'fas fa-file-audio',
 }
 
 _GENERIC_ICON = 'fas fa-file'
@@ -113,9 +112,15 @@ _EXTENSION_ICONS: dict[str, str] = {
     'xlsx': 'fas fa-file-excel',
     'ppt': 'fas fa-file-powerpoint',
     'pptx': 'fas fa-file-powerpoint',
+    'mp4': 'fas fa-file-video',
+    'webm': 'fas fa-file-video',
     'mov': 'fas fa-file-video',
     'mkv': 'fas fa-file-video',
     'avi': 'fas fa-file-video',
+    'mp3': 'fas fa-file-audio',
+    'wav': 'fas fa-file-audio',
+    'ogg': 'fas fa-file-audio',
+    'm4a': 'fas fa-file-audio',
     'flac': 'fas fa-file-audio',
     'heic': 'fas fa-file-image',
     'svg': 'fas fa-file-image',
@@ -128,10 +133,10 @@ _EXTENSION_ICONS: dict[str, str] = {
 def detect_preview_type(head: bytes, name: str = '') -> str:
     """The content type a file whose first bytes are `head` may be previewed as, or `''`.
 
-    Order matters: the specific binary formats first, text last (anything that decodes as plain
+    Order matters: the image and PDF formats first, text last (anything that decodes as plain
     text is text, whatever the file is called). `name` matters only for that last step: a text file
     called `*.md` / `*.markdown` is `text/markdown`, every other text file `text/plain`."""
-    return sniff_inline_type(head) or sniff_media_type(head) or _text_type(head, name)
+    return sniff_inline_type(head) or _text_type(head, name)
 
 
 def _text_type(head: bytes, name: str) -> str:
@@ -154,10 +159,10 @@ def sniff_stored_object(storage: S3Storage, key: str, size: int, name: str = '')
 
 
 def render_markdown_preview(raw: bytes) -> dict:
-    """The JSON of a Markdown preview: `text` (the first `TEXT_PREVIEW_BYTES` as UTF-8), `html`
-    (that text rendered, sanitised) and `html_truncated` (the formatted view covers only the first
-    `MAX_MARKDOWN_CHARS` characters, cut at a line end: the renderer refuses more). If it cannot
-    be rendered at all, `html` is `None` and the dialog shows the raw text."""
+    """The JSON of a Markdown preview: `text` (the sample as UTF-8), `html` (that text rendered,
+    sanitised) and `html_truncated` (the formatted view covers only the first `MAX_MARKDOWN_CHARS`
+    characters, cut at a line end: the renderer refuses more). If it cannot be rendered at all,
+    `html` is `None` and the dialog shows the raw text."""
     text = decode_text(raw)
     source = text
     truncated = len(source) > MAX_MARKDOWN_CHARS
@@ -177,9 +182,44 @@ def decode_text(raw: bytes) -> str:
     return codecs.getincrementaldecoder('utf-8')(errors='replace').decode(raw)
 
 
+def text_sample(file: TransferFile, kind: PreviewKind, storage: S3Storage) -> str | dict:
+    """The sample of a text (`str`) or Markdown (`dict`, `render_markdown_preview`) file: its first
+    `TEXT_PREVIEW_BYTES`, decoded (and rendered). **Cached per file id** for `SAMPLE_CACHE_SECONDS`
+    -- a file never changes, so a visitor flipping through files and back costs one S3 read and one
+    render, not one per view. The caller has already applied every gate: the cache is not one."""
+    key = f'ft:preview-sample:{kind.value}:{file.pk}'
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    raw = storage.get_object_range(file.storage_key, 0, TEXT_PREVIEW_BYTES - 1)
+    sample: str | dict = (
+        render_markdown_preview(raw) if kind == PreviewKind.MARKDOWN else decode_text(raw)
+    )
+    cache.set(key, sample, SAMPLE_CACHE_SECONDS)
+    return sample
+
+
 def kind_of(preview_type: str) -> PreviewKind | None:
     """What shows a file stored as `preview_type`, or `None` when it has no preview."""
     return _KINDS.get(preview_type)
+
+
+def is_sample_cut(file: TransferFile) -> bool:
+    """Whether a text file is longer than the sample the preview shows."""
+    return file.size > TEXT_PREVIEW_BYTES
+
+
+def full_label(file: TransferFile, kind: PreviewKind) -> str:
+    """The text of the dialog's "view the whole file" button -- which counts as a download -- or
+    `''` when there is none: an image's, a PDF's, and a text file's only when the sample cut it and
+    the file is small enough to show whole."""
+    if kind == PreviewKind.IMAGE:
+        return 'View full image'
+    if kind == PreviewKind.PDF:
+        return 'View full document'
+    if is_sample_cut(file) and file.size <= FULL_TEXT_MAX_BYTES:
+        return 'View full document'
+    return ''
 
 
 def icon_for(name: str, preview_type: str) -> str:
@@ -196,8 +236,9 @@ def page_context(transfer: Transfer, files: Iterable[TransferFile], *, unlocked:
 
     - `rows`: one `{file, kind, icon, previewable}` per file;
     - `previews`: the previewable files as the page's script wants them (id, name, size, kind,
-      icon, the preview and the download URLs) -- **empty while the transfer is locked by a
-      password**, so a locked page carries no preview URL at all;
+      icon, the URLs of its preview, of "view full" and of its download, whether the text sample
+      was cut) -- **empty while the transfer is locked by a password**, so a locked page carries no
+      preview URL at all;
     - `preview_hint` and `preview_count`: the line above the list and how many files can be
       previewed (the hint also appears locked, worded "once you enter the password");
     - `preview_total`: how many files the transfer has.
@@ -215,6 +256,9 @@ def page_context(transfer: Transfer, files: Iterable[TransferFile], *, unlocked:
             }
         )
         if kind is not None and unlocked:
+            is_text = kind in (PreviewKind.TEXT, PreviewKind.MARKDOWN)
+            label = full_label(file, kind)
+            args = [transfer.slug, file.id]
             previews.append(
                 {
                     'id': str(file.id),
@@ -222,8 +266,15 @@ def page_context(transfer: Transfer, files: Iterable[TransferFile], *, unlocked:
                     'size': filesizeformat(file.size),
                     'kind': kind.value,
                     'icon': icon_for(file.name, file.preview_type),
-                    'url': reverse('t:preview', args=[transfer.slug, file.id]),
-                    'download': reverse('t:download-file', args=[transfer.slug, file.id]),
+                    # Text: the sample itself. Image and PDF: the build's status (the pages' URLs
+                    # come back from it).
+                    'url': reverse('t:preview' if is_text else 't:preview-status', args=args),
+                    'download': reverse('t:download-file', args=args),
+                    'full_url': reverse('t:preview-full', args=args) if label else '',
+                    'full_label': label,
+                    # A text sample the whole file doesn't fit in, with no way to show the rest
+                    # here: the dialog says to download it.
+                    'sample_cut': is_text and is_sample_cut(file),
                 }
             )
     count = sum(1 for row in rows if row['previewable'])

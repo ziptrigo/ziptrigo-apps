@@ -16,7 +16,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
-from . import anon_limits, limits, preview
+from . import anon_limits, limits, preview, renditions
 from .storage import (
     PART_SIZE_BYTES,
     ObjectInfo,
@@ -355,6 +355,7 @@ def remove_file(file: TransferFile, *, storage: S3Storage | None = None) -> None
         storage.abort_multipart_upload(file.storage_key, file.upload_id)
     if file.uploaded:
         storage.delete_object(file.storage_key)
+        renditions.delete_renditions(file, storage=storage)
     file.delete()
 
 

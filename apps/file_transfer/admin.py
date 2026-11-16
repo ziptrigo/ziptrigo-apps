@@ -99,6 +99,8 @@ class TransferFileInline(admin.TabularInline):
         'storage_key',
         'checksum',
         'preview_type',
+        'preview_status',
+        'preview_pages',
         'uploaded',
         'uploaded_at',
         'created_at',
