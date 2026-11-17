@@ -974,9 +974,15 @@ class TestDownload:
         with pytest.raises(ValidationError):
             svc.part_download_url(ready, 1)
 
-    def test_an_unknown_part_is_refused(self, ready):
-        with pytest.raises(ValidationError):
+    def test_an_unknown_part_is_a_typed_refusal(self, ready):
+        from ..services.errors import ExportPartMissingError
+
+        with pytest.raises(ExportPartMissingError):
             svc.part_download_url(ready, 9)
+
+    def test_the_part_comes_with_the_url(self, ready):
+        url, part = svc.part_download(ready, 1)
+        assert part.number == 1 and url.startswith('https://fake-s3.test/')
 
 
 # -- Ending -------------------------------------------------------------------------------------

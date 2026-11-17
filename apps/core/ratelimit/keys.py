@@ -84,6 +84,11 @@ def hit_user(user: _HasPk, rule: str) -> RateLimitResult:
     return hit(str(user.pk), rule)
 
 
+def peek_user(user: _HasPk, rule: str) -> RateLimitResult:
+    """Like `hit_user`, but reports the current state without counting this call."""
+    return peek(str(user.pk), rule)
+
+
 def hit_value(value: str | None, rule: str) -> RateLimitResult:
     """Count against an arbitrary, caller-normalised string: an email address (lowercased,
     stripped), a transfer slug, a verification id, ... `None`/empty is treated as "nothing to

@@ -87,7 +87,12 @@ from ..models import (
 )
 from .accounts import is_frozen
 from .emails import send_export_ready_email
-from .errors import AccountFrozenError, ExportCostChangedError, ExportInProgressError
+from .errors import (
+    AccountFrozenError,
+    ExportCostChangedError,
+    ExportInProgressError,
+    ExportPartMissingError,
+)
 from .export_plan import (
     CSV_NAME,
     CsvEntry,
@@ -844,11 +849,12 @@ def part_name(export: ReceiptExport, number: int) -> str:
     return part_file_name(created, number, export.part_count)
 
 
-def part_download_url(export: ReceiptExport, number: int) -> str:
-    """A short-lived "Save As" URL for one zip file of a ready export.
+def part_download(export: ReceiptExport, number: int) -> tuple[str, ReceiptExportPart]:
+    """A short-lived "Save As" URL for one zip file of a ready export, with that file's row.
 
     Raises `AccountFrozenError` while the account's storage is paused, `ValidationError` for an
-    export that is not ready or a part that does not exist.
+    export that is not ready and `ExportPartMissingError` (a `ValidationError`) for a part that
+    does not exist or is not built.
     """
     if is_frozen(export.user):
         raise AccountFrozenError()
@@ -856,10 +862,16 @@ def part_download_url(export: ReceiptExport, number: int) -> str:
         raise ValidationError('This export is not available to download.')
     part = export.parts.filter(number=number, built_at__isnull=False).first()
     if part is None:
-        raise ValidationError('There is no such file in this export.')
-    return get_storage().presigned_get_url(
+        raise ExportPartMissingError()
+    url = get_storage().presigned_get_url(
         part.key, part_name(export, number), disposition='attachment'
     )
+    return url, part
+
+
+def part_download_url(export: ReceiptExport, number: int) -> str:
+    """`part_download`'s URL alone."""
+    return part_download(export, number)[0]
 
 
 # -- Ending -------------------------------------------------------------------------------------

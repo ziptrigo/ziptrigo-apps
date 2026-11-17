@@ -115,6 +115,8 @@ inv receipts upload local invoice.pdf ./scans   # files or folders; unsupported 
 inv receipts list local --status needs_review --from 2026-10-01 --to 2026-10-31 [--vendor <id>]
 inv receipts get local <receipt-id>              # also the vendor's vetted state and "read as" name
 inv receipts export local --out receipts.csv [--status ... --vendor ... --q ... --from ... --to ...]
+inv receipts export-files local --out ./zips [--layout year-vendor|vendor-year --status ... --vendor ... --q ... --from ... --to ... --duplicates --yes --force --wait 30]   # quotes, asks to confirm the cost, waits, downloads the zip files (issue #315)
+inv receipts exports local | export-get local <id> | export-download local <id> --out ./zips [--force] | export-delete local <id> [--yes]
 inv receipts vendors local [--to-vet] [--q acme] # id, name, vetted, receipt count
 inv receipts vendor-rename local <id> "New name" [--not-vetted]  # a clash (409) names the other
 inv receipts vendor-vet local <id>... [--unvet]
@@ -1897,8 +1899,8 @@ inside `transaction.atomic()` (as does the dashboard's own combined settings for
 
 `apps/receipts/api/` (issue #98 phase 4; `/api/receipts/`) is JWT-only like the file_transfer one
 (router-level `auth=JWTAuth()` in `api/router.py`, so no endpoint can be added without it; endpoint
-modules `receipts.py`, `uploads.py`, `export.py`, `categories.py`, `vendors.py`, `inbox.py` share
-that one `Router`; schemas in `apps/receipts/schemas/`) and calls the exact same
+modules `receipts.py`, `uploads.py`, `export.py`, `exports.py`, `categories.py`, `vendors.py`, `inbox.py`
+share that one `Router`; schemas in `apps/receipts/schemas/`) and calls the exact same
 `apps.receipts.services` the web views do. Paths are relative to the mount, so the list is
 `/api/receipts/receipts`: `GET /receipts` (`status` -- one or several comma-separated, plus the
 `in_progress` shorthand for the three in-flight ones --, `category` an id or `none`, `vendor` a
@@ -1919,7 +1921,36 @@ checksum_sha256}` -> 201 `{receipt_id, url, headers, expires_in}`, the receipt's
 filters, a streamed `text/csv`; filters are validated before streaming starts so a bad one is a 400
 and not a broken download, and before `RECEIPTS_EXPORT_USER` is charged so it costs no budget -- the
 web export parses its lenient filters before charging too, to keep the two in step; it takes
-`vendor=` too), `GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
+`vendor=` too), the **file export endpoints** (issue #315, `api/exports.py`, `schemas/export.py`, every
+class `ReceiptExport...`; the same services and rate-limit budgets as the web's "Download files", no rule of
+its own; see "Receipts" > "Exports"): `POST /exports/quote` (the list's filters -- `status`, `category`,
+`vendor`, `q`, `date_from`, `date_to`, `duplicates`, as body fields, dates hand-parsed so a bad one is a 400 --
+plus `layout` = `year_vendor` (default) or `vendor_year`; answers `{file_count, total_bytes, part_count,
+price_per_file, cost, balance, affordable, frozen, retention_days, part_bytes}`, writes and charges nothing,
+spends `RECEIPTS_EXPORT_DIALOG_USER` after the body is validated), `POST /exports` (the same body and
+`expected_cost`; 201 with the export; **`expected_cost` is the confirmed total: a different cost is a 409 whose
+detail names the real one and says to send `expected_cost=N`, nothing charged; left out, it is accepted
+whatever it costs**, like Short URLs and Notes), `GET /exports` (`limit`/`offset`, `{count, limit, offset,
+results}`, newest first, deleted ones left out, the parts of the whole page in one query), `GET /exports/{id}`
+(`status` `building|ready|failed|expired`, `layout`, `filters` `{summary, params}`, counts and sizes,
+`price_per_file`, `charged_credits`, `refunded_credits`, `skipped_count`, `parts` `[{number, filename,
+size_bytes, file_count, built}]` -- empty for a failed or expired one --, `created_at`, `ready_at`,
+`expires_at`; a deleted one is a 404), `GET /exports/{id}/parts/{number}/url` (`{url, filename, size_bytes,
+expires_in}`: a presigned GET to fetch **without** the `Authorization` header, never the key) and `DELETE
+/exports/{id}` (204, no refund). Registered literal-first (`/exports/quote` before `/exports/{id}`).
+Statuses: **400** a bad layout, filter or date, nothing to export, an export that is not ready (a part's URL);
+**402** frozen account or too few credits; **404** another user's or a deleted export, or a part number the
+export doesn't have (a ready export's built parts only); **409** another export being prepared (one at a time),
+a changed cost (`ExportCostChangedError`) and deleting one still being built (all mapped in
+`common.mapped_errors`, before the generic 400); **429** the shared rules. **A refused request spends none of its
+budget**: `POST /exports` runs `check_export` (the frozen account, one at a time, an empty selection, a changed
+cost, the balance) *before* charging `RECEIPTS_EXPORT_FILES_USER` and hands its `Prepared` to `create_export`
+(the list is read once). **That read is bounded too**: `RECEIPTS_EXPORT_DIALOG_USER` is *peeked* first (429
+over it, nothing read) and *hit* when `check_export` refuses (the refusal read the whole list), so a client
+can't loop a wrong `expected_cost` for free reads; the website's confirm (`views/exports.py::_confirm`) does
+the same. A part's URL is made by `services.part_download` (which returns the part too; a part the export
+doesn't have is `ExportPartMissingError`, mapped to 404 in `mapped_errors`, the frozen 402 coming first)
+before `RECEIPTS_EXPORT_DOWNLOAD_USER` is charged, and the export is looked up first. `GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
 `PATCH|DELETE /categories/{id}`, the **vendor endpoints** (issue #123, `api/vendors.py`; the same
 `services.vendors` the Vendors page calls, with no new rate-limit rule, like categories):
 `GET /vendors` (`status=all|to_vet|vetted`, `q` over names and alias names, `limit`/`offset`,
@@ -3534,7 +3565,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   vendor, see "Vendors"), `receipts.purge_exports` (daily; expires exports past their retention
   and finishes deleting ended ones, see "Exports"); `receipts.retry_due` also resumes stalled export
   builds. Idempotent, per-row `try/except` + `logger.exception`.
-- **Exports** (issue #315, PR 1 of 2: backend and web; the JWT API and CLI are PR 2. `models/export.py`,
+- **Exports** (issue #315, PR 1 of 2: backend and web, PR 2: the JWT API and CLI, see the two bullets at the end of this list. `models/export.py`,
   `services/export_plan.py`, `services/exports.py`, `views/exports.py`, `forms/export.py`, migration
   `0006_exports`; templates `exports.html`, `export.html`, `partials/export_{modal,form,panel}.html`,
   `emails/export_ready.{txt,html}`). **Download files** (dashboard button next to Export CSV) packs the
@@ -3637,7 +3668,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     Vendors and Trash.
   - *Rate limits*: `RECEIPTS_EXPORT_FILES_USER` (5/hour, charged after validation and `check_export`),
     `RECEIPTS_EXPORT_DIALOG_USER` (30/min, the dialog's GET, charged before the scan; over it the usual htmx
-    429 message), `RECEIPTS_EXPORT_DOWNLOAD_USER` (60/min).
+    429 message; the confirm POST and `POST /api/receipts/exports` peek it before reading the list and spend
+    one hit when `check_export` refuses after reading it), `RECEIPTS_EXPORT_DOWNLOAD_USER` (60/min).
   - *Notices*: in-app `Your receipts export is ready` / `could not be prepared` (key `receipts_export:<id>`,
     one per export, url the export's page, written in the transaction of the change in its own savepoint);
     email `send_export_ready_email` (`receipts` queue, fixed subject, autoescaped HTML, confirmed address of an
@@ -3651,6 +3683,35 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     ending, the job, email and notice), `test_views_exports.py`, `apps/core/tests/test_zip_stream.py`, the
     Playwright `tests_e2e/test_receipt_exports.py` (filter, dialog, confirm, download the zip and open it,
     delete) and the AI plan cases RCPT-63 to RCPT-70 (+ MAIL-29, NOTIF-33/34, ADM-66, BILL-38).
+  - *API* (PR 2): the endpoints, statuses and budgets are described under "API" above (`api/exports.py`);
+    `common.export_data` builds an export's JSON from the model with its parts prefetched, `owned_export` is
+    the 404 lookup, and the API's `quote` is `services.quote_export`'s dataclass read as the schema
+    (`affordable` is the property). OpenAPI 2.15.1. Tests: `tests/test_api_exports.py` (every endpoint and
+    status, another user's 404s, refusals that spend no budget, the 409s, the one-query list).
+  - *CLI* (`admin/receipts.py`, PR 2): `export-files <env> [--layout year-vendor|vendor-year --status
+    --category --vendor --q --from --to --duplicates --out DIR --yes --force --wait MIN]` quotes
+    (`POST /exports/quote`), prints files, size, zip files and the cost, stops (exit 1) for nothing to export,
+    a frozen account or a balance that can't pay, **asks `This costs N credits. Continue?`** (no question for a
+    free export) and sends the confirmed amount as `expected_cost` (with `--yes`: no question and no
+    `expected_cost`, whatever it costs), creates the export (a 409 -- another one being prepared, or a changed
+    cost -- is shown and nothing downloaded), then **polls `GET /exports/{id}`** (every 3 s at first, backing off by half
+    again to 15 s; printing "Written so far: N of P zip files" when it changes; a dropped connection, a 5xx or
+    a 429 `_request` gave up on is warned about and tried again within the time limit) until it is no longer `building`,
+    for at most `--wait` minutes (default 30). **Ctrl-C (exit 130), running out of time and any other error that ends the wait leave the export
+    building** and print `receipts export-download <env> <id> --out <dir>`. A `failed` export is reported with
+    its refund (exit 1). Then every built part is downloaded: its URL from `.../parts/N/url`, streamed **with no
+    API token** (it is a storage URL) to `.<name>.part` in `--out` (created if needed), checked against the
+    size the API gave and renamed into place, so a dropped connection leaves nothing cut off; one failing part
+    doesn't stop the rest (exit 1, says to run `export-download`). Before downloading, **a file of the same name is refused
+    without `--force`** (`export-files` also refuses an `--out` folder that already holds any `receipts-*.zip`
+    **before quoting**, so nothing is charged; a clash that still appears after creation says the export is
+    paid for and ready and points at `export-download`); `export-download` instead **skips one that
+    is already complete (the size the API gave)** and refuses only one of another size, which is what lets it
+    finish an interrupted run (sizes only: no checksum exists, so use a folder per export; both helps say so). `exports` lists them,
+    `export-get` shows one (the selection in words, escaped, the charge and refund, the zip files),
+    `export-download <env> <id>` waits for a building one and downloads (no charge), `export-delete <env> <id>`
+    asks first (`--yes`) and answers the API's 409 for one still being prepared. Tests:
+    `admin/tests/test_receipts.py` (the `TestExport...` classes, HTTP mocked); AI cases RCPT-71 and RCPT-72.
 - **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is
   `@task(queue_name='receipts')`, served by its own `db_worker --queue-name receipts` process (see
   "Queue and scheduler" and "Docker"). Tests: `ImmediateBackend` runs a task inline at
@@ -4025,7 +4086,9 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   (the vendor with `(vetted)` / `(not vetted)`, its id, and "Read as" -- the name the AI read --
   when that differs from the vendor's),
   `export --out file.csv` (also `--vendor`; streamed to `.<name>.part` next to `--out` and renamed
-  into place only when complete, so a dropped connection never leaves a cut-off CSV), `inbox` and
+  into place only when complete, so a dropped connection never leaves a cut-off CSV), the zip file
+  exports (`export-files`, `exports`, `export-get`, `export-download`, `export-delete`: issue #315, see
+  "Exports" above), `inbox` and
   `regenerate` (confirms unless `--yes`), and the vendor commands (issue #123): `vendors` (`--to-vet
   --q --limit --offset`; id, name, vetted, receipts incl. "+N in trash", last receipt date),
   `vendor-rename <id> <name> [--not-vetted]` (a 409 clash names the other vendor, quoted, by id and

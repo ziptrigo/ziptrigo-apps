@@ -4,9 +4,10 @@ Receipts CLI
 
 Command line interface for the receipts JWT API (`/api/receipts/`, issue #98 phase 4), on the model
 of `admin/filetransfer.py`: log in, upload receipts and invoices (PDF, JPG, PNG, HEIC, WebP) with
-direct-to-S3 uploads, list and inspect them, export a CSV, look after the vendors the receipts are
-filed under (list, rename, vet, merge), and see or regenerate the inbox address receipts can be
-emailed to.
+direct-to-S3 uploads, list and inspect them, export a CSV, download all their files as zip files
+(`export-files` and its companions, issue #315), look after the vendors the receipts are filed
+under (list, rename, vet, merge), and see or regenerate the inbox address receipts can be emailed
+to.
 """
 
 import base64
@@ -18,6 +19,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .utils import (
@@ -59,6 +61,15 @@ MAX_RETRY_AFTER_SECONDS = 60
 MAX_TOTAL_RETRY_WAIT_SECONDS = 120
 # Read a file for hashing in chunks rather than all at once.
 HASH_CHUNK_BYTES = 1024 * 1024
+# Exports (issue #315): how often to ask whether it is ready (3 s at first, backing off by half
+# again each time to at most 15 s: a zip file takes far longer to build than 3 s), how long to wait
+# for it by default (minutes), and the chunks a zip file is written in. A zip file is about 100 MB.
+EXPORT_POLL_SECONDS = 3
+EXPORT_POLL_MAX_SECONDS = 15
+EXPORT_WAIT_MINUTES = 30
+DOWNLOAD_CHUNK_BYTES = 256 * 1024
+#: What `--layout` accepts -> what the API calls it.
+EXPORT_LAYOUTS = {'year-vendor': 'year_vendor', 'vendor-year': 'vendor_year'}
 
 #: What the API accepts (`ReceiptsSettings.allowed_types`, checked by the server again against the
 #: file's contents): file extension -> content type.
@@ -867,6 +878,549 @@ def receipts_regenerate(
     response = _request('post', api_url('/receipts/inbox/regenerate'), headers=headers)
     _raise_for_api_error(response)
     logger.info(f'New address: {response.json()["address"]}')
+
+
+# -- Exports: all the files as zip files (issue #315) ---------------------------------------------
+
+
+def _say(text: str) -> None:
+    """A line of output; `text` may hold user text (a vendor's name), so it is not read as Rich
+    markup."""
+    logger.info(escape(text))
+
+
+def _fail(text: str) -> typer.Exit:
+    """Log an error and return the exception to `raise`."""
+    logger.error(escape(text))
+    return typer.Exit(1)
+
+
+def _credits(amount: int) -> str:
+    return f'{amount} credit{"" if amount == 1 else "s"}'
+
+
+def _size_text(size: int) -> str:
+    """`884 B`, `12.3 MB` (1,024-based, like the website)."""
+    value = float(size)
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if value < 1024 or unit == 'GB':
+            return f'{int(value)} B' if unit == 'B' else f'{value:.1f} {unit}'
+        value /= 1024
+    return f'{size} B'  # pragma: no cover - the loop always returns
+
+
+def _layout_value(layout: str) -> str:
+    key = layout.strip().lower().replace('_', '-')
+    if key not in EXPORT_LAYOUTS:
+        raise _fail('Choose --layout year-vendor or vendor-year.')
+    return EXPORT_LAYOUTS[key]
+
+
+def _export_selection(
+    layout: str,
+    status: str | None,
+    category: str | None,
+    vendor: int | None,
+    q: str,
+    date_from: str | None,
+    date_to: str | None,
+    duplicates: bool,
+) -> dict:
+    """The body of `POST /exports/quote` and `POST /exports`: the list's filters and the layout."""
+    body: dict = {'layout': _layout_value(layout)}
+    for name, value in (
+        ('status', status),
+        ('category', category),
+        ('vendor', vendor),
+        ('q', q),
+        ('date_from', date_from),
+        ('date_to', date_to),
+    ):
+        if value:
+            body[name] = value
+    if duplicates:
+        body['duplicates'] = True
+    return body
+
+
+def _export_url(export_id: str, suffix: str = '') -> str:
+    return api_url(f'/receipts/exports/{export_id}{suffix}')
+
+
+def _describe_quote(quote: dict) -> None:
+    files = quote['file_count']
+    _say(
+        f'{files} file{"" if files == 1 else "s"} ({_size_text(quote["total_bytes"])}) in '
+        f'{quote["part_count"]} zip file{"" if quote["part_count"] == 1 else "s"} of about '
+        f'{_size_text(quote["part_bytes"])} each, with a receipts.csv of their data.'
+    )
+    _say(
+        f'Cost: {_credits(quote["cost"])} ({quote["price_per_file"]} per file). '
+        f'Your balance is {quote["balance"]}. They stay available for {quote["retention_days"]} '
+        'days.'
+    )
+
+
+def _fetch_hint(export_id: str, out: Path) -> str:
+    return (
+        f'Fetch it later with: receipts export-download {current_environment()} {export_id} '
+        f'--out {shlex.quote(str(out))}'
+    )
+
+
+def _wait_for_export(export_id: str, headers: dict, minutes: float, hint: str) -> dict:
+    """Poll the export until it is no longer being prepared; returns it. Ctrl-C, running out of
+    time and an error that ends the wait all leave it building (it carries on in the background)
+    and say how to fetch it later. A dropped connection, a 5xx and a 429 that `_request` gave up
+    on are not errors: they are tried again until the time is up."""
+    limit = minutes * 60
+    waited = 0.0
+    delay = float(EXPORT_POLL_SECONDS)
+    shown: int | None = None
+    _say('Preparing your zip files (Ctrl-C stops waiting; the export carries on without you)...')
+    try:
+        while True:
+            problem: str | None = None
+            try:
+                response = _request(
+                    'get', _export_url(export_id), headers=headers, exit_on_error=False
+                )
+            except NetworkError as e:
+                problem = f'Could not reach the site ({e})'
+            else:
+                if response.status_code >= 500 or response.status_code == 429:
+                    problem = f'The site answered {response.status_code}'
+                else:
+                    try:
+                        _raise_for_api_error(response)
+                    except typer.Exit:
+                        _say(hint)
+                        raise
+                    export = response.json()
+                    if export['status'] != 'building':
+                        return export
+                    built = sum(1 for part in export['parts'] if part['built'])
+                    if built != shown:
+                        shown = built
+                        _say(f'Written so far: {built} of {export["part_count"]} zip files.')
+            if problem:
+                logger.warning(escape(f'{problem}; trying again...'))
+            if waited >= limit:
+                _say(f'Still not ready after {_format_wait(limit)}. {hint}')
+                raise typer.Exit(1)
+            time.sleep(delay)
+            waited += delay
+            delay = min(delay * 1.5, float(EXPORT_POLL_MAX_SECONDS))
+    except KeyboardInterrupt:
+        _say(f'Stopped waiting. The export is still being prepared. {hint}')
+        raise typer.Exit(130) from None
+
+
+class DownloadFailed(Exception):
+    """One zip file could not be downloaded; the message says why. The rest carry on."""
+
+
+def _download_part(export_id: str, part: dict, target: Path, headers: dict) -> None:
+    """Download one zip file: ask the API for a short-lived URL, then stream it **without the API
+    token** (it is a presigned storage URL) to `.<name>.part` next to `target`, renamed into place
+    only once complete and of the size the export says, so an interrupted download never leaves a
+    cut-off zip behind.
+
+    Raises:
+        DownloadFailed: with the reason.
+    """
+    import requests
+
+    try:
+        info = _request(
+            'get',
+            _export_url(export_id, f'/parts/{part["number"]}/url'),
+            headers=headers,
+            exit_on_error=False,
+        )
+    except NetworkError as e:
+        raise DownloadFailed(str(e)) from e
+    if not info.ok:
+        raise DownloadFailed(_error_text(info))
+    ticket = info.json()
+    try:
+        response = _request('get', ticket['url'], stream=True, exit_on_error=False)
+    except NetworkError as e:
+        raise DownloadFailed(f'download failed: {e}') from e
+    try:
+        if not response.ok:
+            raise DownloadFailed(f'the download from storage failed ({response.status_code})')
+        partial = target.with_name(f'.{target.name}.part')
+        size = 0
+        try:
+            with partial.open('wb') as fh:
+                for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_BYTES):
+                    fh.write(chunk)
+                    size += len(chunk)
+            if size != ticket['size_bytes']:
+                raise DownloadFailed(f'received {size} bytes, expected {ticket["size_bytes"]}')
+            partial.replace(target)
+        except (requests.exceptions.RequestException, OSError) as e:
+            partial.unlink(missing_ok=True)
+            raise DownloadFailed(f'download failed: {e}') from e
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+    finally:
+        response.close()
+
+
+def _download_export(
+    export: dict,
+    out: Path,
+    headers: dict,
+    *,
+    force: bool,
+    resume: bool = False,
+    paid: bool = False,
+) -> None:
+    """Download every zip file of a ready export into the folder `out` (created if needed).
+
+    Before anything is downloaded, a file of the same name is refused unless `force` is set
+    (`--force` replaces it). With `resume` (`export-download`, for finishing an interrupted run) a
+    file that is already complete (the size the export says) is skipped instead of refused, and
+    only one of a different size is. `paid` says the export was just created and charged (a clash
+    then points at `export-download`, not at making another). Exits 1 if any file failed (the
+    others are still downloaded).
+
+    Resuming compares sizes only (the API has no checksum per file), so use a folder per export.
+    """
+    parts = [part for part in export['parts'] if part['built']]
+    if not parts:
+        raise _fail('This export has no zip files to download.')
+    targets: list[tuple[dict, Path]] = []
+    for part in parts:
+        name = Path(part['filename']).name
+        if name in ('', '.', '..'):
+            raise _fail(f'The site gave an unusable file name: {part["filename"]!r}.')
+        targets.append((part, out / name))
+    clashes = [
+        target
+        for part, target in targets
+        if target.exists()
+        and not force
+        and not (resume and target.stat().st_size == part['size_bytes'])
+    ]
+    if clashes:
+        listing = ', '.join(str(target) for target in clashes)
+        if paid:
+            raise _fail(
+                f'{listing} already exists. The export is paid for and ready: run `receipts '
+                f'export-download {current_environment()} {export["id"]} --out <a folder for this '
+                'export>` (add --force to replace the existing file) rather than exporting '
+                'again, which would charge a second time.'
+            )
+        raise _fail(f'{listing} already exists. Use --force to replace it.')
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise _fail(f'Could not create {out}: {e}') from e
+
+    failed = 0
+    for part, target in targets:
+        if resume and not force and target.exists():
+            _say(f'{target.name}: already downloaded, skipped.')
+            continue
+        _say(f'{target.name}: downloading {_size_text(part["size_bytes"])}...')
+        try:
+            _download_part(export['id'], part, target, headers)
+        except DownloadFailed as e:
+            failed += 1
+            logger.error(escape(f'{target.name}: {e}'))
+        else:
+            _say(f'Wrote {target}.')
+    if failed:
+        raise _fail(
+            f'{failed} of {len(targets)} zip files failed. Run `receipts export-download '
+            f'{current_environment()} {export["id"]} --out {shlex.quote(str(out))}` to get the '
+            'rest.'
+        )
+    _say(f'Downloaded {len(targets)} zip file{"" if len(targets) == 1 else "s"} to {out}.')
+
+
+@app.command(name='export-files')
+def receipts_export_files(
+    environment: EnvironmentAnnotation,
+    layout: str = typer.Option(
+        'year-vendor',
+        '--layout',
+        help='How the files are organized in the zip files: year-vendor (2026/Acme/x.pdf) or '
+        'vendor-year (Acme/2026/x.pdf).',
+    ),
+    status: str | None = typer.Option(None, '--status', help='As for `list`.'),
+    category: str | None = typer.Option(None, '--category', help='As for `list`.'),
+    vendor: int | None = typer.Option(None, '--vendor', help='As for `list`.'),
+    q: str = typer.Option('', '--q', help='Search the vendor, the notes and the amount.'),
+    date_from: str | None = typer.Option(None, '--from', help='Earliest receipt date.'),
+    date_to: str | None = typer.Option(None, '--to', help='Latest receipt date.'),
+    duplicates: bool = typer.Option(False, '--duplicates', help='Only possible duplicates.'),
+    out: Path = typer.Option(
+        Path('.'), '--out', '-o', help='The folder to save the zip files in (created if needed).'
+    ),
+    yes: bool = typer.Option(
+        False, '--yes', '-y', help='Do not ask to confirm the cost (and accept whatever it is).'
+    ),
+    force: bool = typer.Option(False, '--force', help='Replace zip files that already exist.'),
+    wait: float = typer.Option(
+        EXPORT_WAIT_MINUTES, '--wait', help='Minutes to wait for the zip files to be prepared.'
+    ),
+):
+    """
+    Download the files of your receipts (the ones the filters match; the Trash never) as zip files:
+    each of about 100 MB, independent, the first with a receipts.csv of their data. It costs
+    credits per file, so the cost is shown and you are asked to confirm it first. The zip files are
+    prepared in the background; this command waits for them and downloads them. Ctrl-C stops
+    waiting without cancelling the export. Use a folder of its own for each export: files are told
+    apart by name and size only.
+
+    Example:
+        receipts export-files local --out ./my-receipts
+        receipts export-files local --out ./2026 --from 2026-01-01 --to 2026-12-31 --layout vendor-year
+        receipts export-files prod --vendor 12 --yes
+    """
+    select_environment(environment)
+    headers = get_headers(CLI)
+    body = _export_selection(layout, status, category, vendor, q, date_from, date_to, duplicates)
+    if out.exists() and not out.is_dir():
+        raise _fail(f'Not a folder: {out}')
+    # Before anything is quoted or charged: a folder that already holds zip files of an export
+    # would clash with the new ones (their names are receipts-<date>[-part-NN-of-MM].zip).
+    existing = sorted(out.glob('receipts-*.zip')) if out.is_dir() else []
+    if existing and not force:
+        raise _fail(
+            f'{out} already holds {", ".join(p.name for p in existing)}. Use an empty folder '
+            '(--out), or --force to replace files of the same name. Nothing was charged.'
+        )
+
+    quote_response = _request(
+        'post', api_url('/receipts/exports/quote'), json=body, headers=headers
+    )
+    _raise_for_api_error(quote_response)
+    quote = quote_response.json()
+    if quote['file_count'] == 0:
+        raise _fail('There are no files to download with these filters.')
+    _describe_quote(quote)
+    if quote['frozen']:
+        raise _fail('Your receipts are paused until you add credits.')
+    if not quote['affordable']:
+        raise _fail(
+            f'That costs {_credits(quote["cost"])} and your balance is {quote["balance"]}. '
+            'Top up your credits on the website.'
+        )
+
+    # `--yes` accepts whatever it costs (no `expected_cost` is sent); otherwise the amount that was
+    # shown and confirmed is sent, so a cost that changed meanwhile is refused, not charged.
+    create_body = body
+    if not yes:
+        if quote['cost'] > 0 and not typer.confirm(
+            f'This costs {_credits(quote["cost"])}. Continue?'
+        ):
+            raise _fail('Cancelled; nothing was charged.')
+        create_body = {**body, 'expected_cost': quote['cost']}
+
+    created = _request('post', api_url('/receipts/exports'), json=create_body, headers=headers)
+    if created.status_code == 409:
+        # Another export is being prepared, or the cost changed since it was quoted: either way
+        # nothing was charged, and the message says which.
+        raise _fail(
+            f'{_error_text(created)}. Check `receipts exports {current_environment()}`, then try '
+            'again.'
+        )
+    _raise_for_api_error(created)
+    export = created.json()
+    if export['charged_credits']:
+        _say(f'Charged {_credits(export["charged_credits"])}.')
+    _say(f'Export {export["id"]} started.')
+
+    export = _wait_for_export(export['id'], headers, wait, _fetch_hint(export['id'], out))
+    if export['status'] != 'ready':
+        refunded = export['refunded_credits']
+        raise _fail(
+            f'The export {export["status"]}'
+            + (f' and {_credits(refunded)} were refunded.' if refunded else '.')
+        )
+    if export['skipped_count']:
+        _say(
+            f'{export["skipped_count"]} file(s) had vanished and were left out '
+            f'({_credits(export["refunded_credits"])} refunded).'
+        )
+    _download_export(export, out, headers, force=force, paid=True)
+
+
+@app.command(name='exports')
+def receipts_exports(
+    environment: EnvironmentAnnotation,
+    limit: int = typer.Option(20, '--limit', help='Max exports to show (1-100).'),
+    offset: int = typer.Option(0, '--offset', help='Number of exports to skip.'),
+):
+    """
+    List your exports of files (see `export-files`), newest first.
+
+    Example:
+        receipts exports local
+    """
+    select_environment(environment)
+    response = _request(
+        'get',
+        api_url('/receipts/exports'),
+        params={'limit': limit, 'offset': offset},
+        headers=get_headers(CLI),
+    )
+    _raise_for_api_error(response)
+    body = response.json()
+    exports = body['results']
+    if not exports:
+        logger.info('No exports.')
+        return
+
+    table = Table(title='Your Exports')
+    table.add_column('ID', style='cyan', no_wrap=True)
+    table.add_column('Created', style='white', no_wrap=True)
+    table.add_column('Status', style='green', no_wrap=True)
+    table.add_column('Files', style='white', justify='right')
+    table.add_column('Charged', style='magenta', justify='right')
+    table.add_column('Expires', style='white', no_wrap=True)
+    for export in exports:
+        table.add_row(
+            export['id'],
+            export['created_at'][:10],
+            export['status'],
+            str(export['file_count']),
+            str(export['charged_credits']),
+            (export['expires_at'] or '')[:10],
+        )
+    Console().print(table)
+
+    shown_through = body['offset'] + len(exports)
+    if shown_through < body['count']:
+        logger.info(
+            f'Showing {body["offset"] + 1}-{shown_through} of {body["count"]}. '
+            f'Use --offset {shown_through} to see more.'
+        )
+
+
+@app.command(name='export-get')
+def receipts_export_get(environment: EnvironmentAnnotation, export_id: str):
+    """
+    Show one export: its status, what it was made from, the cost and its zip files.
+
+    Example:
+        receipts export-get local 1b6e2f4a-...
+    """
+    select_environment(environment)
+    response = _request('get', _export_url(export_id), headers=get_headers(CLI))
+    _raise_for_api_error(response)
+    export = response.json()
+
+    console = Console()
+    selection = '; '.join(export['filters']['summary']) or 'everything'
+    files = f'{export["file_count"]}'
+    if export['skipped_count']:
+        files += f' ({export["skipped_count"]} left out: gone when zipped)'
+    ready_parts = sum(1 for part in export['parts'] if part['built'])
+    rows = [
+        ('ID', export['id']),
+        ('Status', export['status']),
+        ('Selection', selection),
+        ('Layout', export['layout']),
+        ('Files', files),
+        ('Size', _size_text(export['total_bytes'])),
+        ('Zip files', f'{export["part_count"]} ({ready_parts} written)'),
+        ('Charged', _credits(export['charged_credits'])),
+        ('Refunded', _credits(export['refunded_credits']) if export['refunded_credits'] else ''),
+        ('Created', export['created_at']),
+        ('Ready', export['ready_at'] or ''),
+        ('Expires', export['expires_at'] or ''),
+    ]
+    for label, value in rows:
+        if value:
+            console.print(f'[cyan]{label}:[/cyan] {escape(str(value))}', highlight=False)
+
+    if export['parts']:
+        table = Table(title='Zip files')
+        table.add_column('#', style='cyan', justify='right', no_wrap=True)
+        table.add_column('Name', style='white')
+        table.add_column('Files', style='white', justify='right')
+        table.add_column('Size', style='white', justify='right')
+        table.add_column('Written', style='green', no_wrap=True)
+        for part in export['parts']:
+            table.add_row(
+                str(part['number']),
+                part['filename'],
+                str(part['file_count']),
+                _size_text(part['size_bytes']) if part['built'] else '',
+                'yes' if part['built'] else 'no',
+            )
+        console.print(table)
+
+
+@app.command(name='export-download')
+def receipts_export_download(
+    environment: EnvironmentAnnotation,
+    export_id: str,
+    out: Path = typer.Option(
+        Path('.'), '--out', '-o', help='The folder to save the zip files in (created if needed).'
+    ),
+    force: bool = typer.Option(False, '--force', help='Replace zip files that already exist.'),
+    wait: float = typer.Option(
+        EXPORT_WAIT_MINUTES, '--wait', help='Minutes to wait if it is still being prepared.'
+    ),
+):
+    """
+    Download the zip files of an export (waits for it if it is still being prepared). Each is
+    written to a temporary file and renamed when complete. A file that is already there with the
+    right size is skipped, so an interrupted download can be finished by running this again; one
+    with a different size is refused unless you pass --force. Use a folder of its own for each
+    export: files are told apart by name and size only (there is no checksum), so a zip file of
+    another export with the same name and size would be taken for this one. No credits are charged.
+
+    Example:
+        receipts export-download local 1b6e2f4a-... --out ./my-receipts
+    """
+    select_environment(environment)
+    headers = get_headers(CLI)
+    if out.exists() and not out.is_dir():
+        raise _fail(f'Not a folder: {out}')
+    response = _request('get', _export_url(export_id), headers=headers)
+    _raise_for_api_error(response)
+    export = response.json()
+    if export['status'] == 'building':
+        export = _wait_for_export(export_id, headers, wait, _fetch_hint(export_id, out))
+    if export['status'] != 'ready':
+        raise _fail(
+            f'This export is {export["status"]}, so there is nothing to download. '
+            'Start a new one with `export-files`.'
+        )
+    _download_export(export, out, headers, force=force, resume=True)
+
+
+@app.command(name='export-delete')
+def receipts_export_delete(
+    environment: EnvironmentAnnotation,
+    export_id: str,
+    yes: bool = typer.Option(False, '--yes', '-y', help='Do not ask for confirmation.'),
+):
+    """
+    Delete an export: its zip files are removed now. Nothing is refunded. An export that is still
+    being prepared can't be deleted.
+
+    Example:
+        receipts export-delete local 1b6e2f4a-...
+    """
+    select_environment(environment)
+    headers = get_headers(CLI)
+    if not yes and not typer.confirm(
+        'The zip files are deleted now and nothing is refunded. Delete?'
+    ):
+        raise _fail('Cancelled; nothing was deleted.')
+    response = _request('delete', _export_url(export_id), headers=headers)
+    _raise_for_api_error(response)
+    _say('Deleted.')
 
 
 if __name__ == '__main__':

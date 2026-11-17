@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.14.0
+  version: 2.15.1
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -1429,6 +1429,199 @@ paths:
         the web export; a request with invalid filters is a 400 and does not spend any of that
 
         budget.'
+      tags:
+      - Receipts
+      security:
+      - JWTAuth: []
+  /api/receipts/exports/quote:
+    post:
+      operationId: apps_receipts_api_exports_quote_export
+      summary: Quote Export
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptExportQuoteSchema'
+      description: 'What an export of these filters would be: how many files, their size, how many zip files,
+
+        the cost in credits, your balance and whether it is `affordable`. Writes and charges nothing.
+
+        The quote reads the whole filtered list, so it is limited per user
+
+        (`RECEIPTS_EXPORT_DIALOG_USER`), the budget the website''s dialog uses; a request with invalid
+
+        filters or layout is a 400 and spends none of it.'
+      tags:
+      - Receipts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptExportRequestSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/receipts/exports:
+    post:
+      operationId: apps_receipts_api_exports_create_export
+      summary: Create Export
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptExportSchema'
+      description: 'Charge for and start an export: every live receipt that has a stored file and matches the
+
+        filters, packed into independent zip files (about `part_bytes` each) with a `receipts.csv` of
+
+        their data in number 1. Costs `price_per_file` credits per file, charged now; kept for
+
+        `retention_days` once ready. Answers 201 with the export, `status: building`.
+
+
+        Send `expected_cost` (the quote''s `cost`) to be sure of what you pay: if the cost is now
+
+        different the answer is a 409 naming the real total, and nothing is charged. Without it the
+
+        export is created whatever it costs.
+
+
+        400 for a bad layout or filter or when no file matches; 402 while the account is frozen or the
+
+        balance can''t pay; 409 while another export is being prepared (one at a time) or the cost
+
+        changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend, or over
+
+        `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list read of a refused request spends.'
+      tags:
+      - Receipts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptExportCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    get:
+      operationId: apps_receipts_api_exports_list_exports
+      summary: List Exports
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          default: 20
+          title: Limit
+          type: integer
+        required: false
+      - in: query
+        name: offset
+        schema:
+          default: 0
+          title: Offset
+          type: integer
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptExportListSchema'
+      description: 'The caller''s exports, newest first (a deleted one is not listed). `limit` (1-100, default
+
+        20) and `offset` page the result; `count` is the total.'
+      tags:
+      - Receipts
+      security:
+      - JWTAuth: []
+  /api/receipts/exports/{export_id}:
+    get:
+      operationId: apps_receipts_api_exports_get_export
+      summary: Get Export
+      parameters:
+      - in: path
+        name: export_id
+        schema:
+          format: uuid
+          title: Export Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptExportSchema'
+      description: 'One export: its status, the zip files (`parts`, with `built` while they are being
+
+        written), what was charged and refunded, what it was made from and when it expires.'
+      tags:
+      - Receipts
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_receipts_api_exports_delete_export
+      summary: Delete Export
+      parameters:
+      - in: path
+        name: export_id
+        schema:
+          format: uuid
+          title: Export Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Delete an export: its zip files go now (nothing is refunded). 409 while it is still being
+
+        prepared; a deleted export is a 404.'
+      tags:
+      - Receipts
+      security:
+      - JWTAuth: []
+  /api/receipts/exports/{export_id}/parts/{number}/url:
+    get:
+      operationId: apps_receipts_api_exports_export_part_url
+      summary: Export Part Url
+      parameters:
+      - in: path
+        name: export_id
+        schema:
+          format: uuid
+          title: Export Id
+          type: string
+        required: true
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptExportPartUrlSchema'
+      description: 'A short-lived presigned URL for one zip file of a ready export (`GET` it with no
+
+        `Authorization` header; it downloads as `filename`). Ask again for each download. 400 for an
+
+        export that is not ready, 402 while the account is frozen, 404 for a part number the export
+
+        doesn''t have; limited per user (`RECEIPTS_EXPORT_DOWNLOAD_USER`, the website''s budget), which
+
+        a refused request does not spend.'
       tags:
       - Receipts
       security:
@@ -7562,6 +7755,356 @@ components:
       required:
       - ids
       title: CategoryOrderSchema
+      type: object
+    ReceiptExportQuoteSchema:
+      description: 'What an export of these filters would be. `cost` is `file_count x price_per_file` credits
+
+        (`0` is free). `affordable` is `balance >= cost`; `frozen` says the account''s storage is
+
+        paused (an export would be refused with a 402). `retention_days` is how long the zip files
+
+        stay downloadable after they are ready; `part_bytes` is about how big each zip file is.'
+      properties:
+        file_count:
+          title: File Count
+          type: integer
+        total_bytes:
+          title: Total Bytes
+          type: integer
+        part_count:
+          title: Part Count
+          type: integer
+        price_per_file:
+          title: Price Per File
+          type: integer
+        cost:
+          title: Cost
+          type: integer
+        balance:
+          title: Balance
+          type: integer
+        affordable:
+          title: Affordable
+          type: boolean
+        frozen:
+          title: Frozen
+          type: boolean
+        retention_days:
+          title: Retention Days
+          type: integer
+        part_bytes:
+          title: Part Bytes
+          type: integer
+      required:
+      - file_count
+      - total_bytes
+      - part_count
+      - price_per_file
+      - cost
+      - balance
+      - affordable
+      - frozen
+      - retention_days
+      - part_bytes
+      title: ReceiptExportQuoteSchema
+      type: object
+    ReceiptExportRequestSchema:
+      additionalProperties: false
+      description: "Body for `POST /exports/quote`: which receipts' files to pack (the filters of\n`GET /receipts`, same meaning; the Trash and receipts with no stored file are never included)\nand how to organize them in the zip files.\n\n- `layout`: `year_vendor` (default: `2026/Acme/invoice.pdf`) or `vendor_year`\n  (`Acme/2026/invoice.pdf`). Anything else is a 400.\n- `status`: one or more of `received`, `processing`, `waiting_for_credits`, `needs_review`,\n  `processed`, `failed`, comma-separated; `in_progress` stands for the first three.\n- `category`: a category id, or `none` for uncategorized. `vendor`: a vendor id.\n- `q`: matches the vendor, the notes and, for a number like `75`, the amount.\n- `date_from` / `date_to`: `YYYY-MM-DD`, inclusive, applied to `receipt_date` (a malformed\n  date is a 400).\n- `duplicates`: only receipts flagged as possible duplicates."
+      properties:
+        layout:
+          default: year_vendor
+          title: Layout
+          type: string
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+        category:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Category
+        vendor:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Vendor
+        q:
+          default: ''
+          title: Q
+          type: string
+        date_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date From
+        date_to:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date To
+        duplicates:
+          default: false
+          title: Duplicates
+          type: boolean
+      title: ReceiptExportRequestSchema
+      type: object
+    ReceiptExportFilterInfoSchema:
+      description: 'What the export was made from: `summary` is short lines for display (`Vendor: Acme`; empty
+
+        for everything) and `params` the filters that were used (the body''s keys).'
+      properties:
+        summary:
+          items:
+            type: string
+          title: Summary
+          type: array
+        params:
+          additionalProperties: true
+          title: Params
+          type: object
+      required:
+      - summary
+      - params
+      title: ReceiptExportFilterInfoSchema
+      type: object
+    ReceiptExportPartSchema:
+      description: 'One zip file of an export. The zip files are independent (each opens on its own);
+
+        `receipts.csv` is in number 1. `built` is false while it is still being written (`size_bytes`
+
+        is 0 until then); `filename` is the name it downloads as.'
+      properties:
+        number:
+          title: Number
+          type: integer
+        filename:
+          title: Filename
+          type: string
+        size_bytes:
+          title: Size Bytes
+          type: integer
+        file_count:
+          title: File Count
+          type: integer
+        built:
+          title: Built
+          type: boolean
+      required:
+      - number
+      - filename
+      - size_bytes
+      - file_count
+      - built
+      title: ReceiptExportPartSchema
+      type: object
+    ReceiptExportSchema:
+      description: 'One export, as every export endpoint returns it.
+
+
+        `status` is `building` (the zip files are being written: poll until it changes), `ready`
+
+        (download the parts until `expires_at`), `failed` (it could not be built and every credit was
+
+        refunded) or `expired` (past its retention; the files are gone). A deleted export is a 404.
+
+
+        `charged_credits` was spent when the export was created; `refunded_credits` is given back for
+
+        a failed export (all of it) or for files that had vanished by the time they were zipped
+
+        (`skipped_count`, left out of the zip files). `file_count` is the number planned, so the zip
+
+        files hold `file_count - skipped_count` once ready. `parts` is empty for a failed or expired
+
+        export (its rows are gone). `ready_at` and `expires_at` are `null` until it is ready.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        status:
+          enum:
+          - building
+          - ready
+          - failed
+          - expired
+          title: Status
+          type: string
+        layout:
+          enum:
+          - year_vendor
+          - vendor_year
+          title: Layout
+          type: string
+        filters:
+          $ref: '#/components/schemas/ReceiptExportFilterInfoSchema'
+        file_count:
+          title: File Count
+          type: integer
+        skipped_count:
+          title: Skipped Count
+          type: integer
+        total_bytes:
+          title: Total Bytes
+          type: integer
+        part_count:
+          title: Part Count
+          type: integer
+        price_per_file:
+          title: Price Per File
+          type: integer
+        charged_credits:
+          title: Charged Credits
+          type: integer
+        refunded_credits:
+          title: Refunded Credits
+          type: integer
+        parts:
+          items:
+            $ref: '#/components/schemas/ReceiptExportPartSchema'
+          title: Parts
+          type: array
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        ready_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Ready At
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Expires At
+      required:
+      - id
+      - status
+      - layout
+      - filters
+      - file_count
+      - skipped_count
+      - total_bytes
+      - part_count
+      - price_per_file
+      - charged_credits
+      - refunded_credits
+      - parts
+      - created_at
+      - ready_at
+      - expires_at
+      title: ReceiptExportSchema
+      type: object
+    ReceiptExportCreateSchema:
+      additionalProperties: false
+      description: 'Body for `POST /exports`: the quote''s fields and `expected_cost`.
+
+
+        `expected_cost` is the total in credits the client confirmed (the quote''s `cost`). If what
+
+        the export costs now is different (receipts were added or removed, or the price changed) the
+
+        answer is a 409 naming the real total and nothing is charged or created. Left out, the export
+
+        is created whatever it costs, for a client with no one to ask.'
+      properties:
+        layout:
+          default: year_vendor
+          title: Layout
+          type: string
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+        category:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Category
+        vendor:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Vendor
+        q:
+          default: ''
+          title: Q
+          type: string
+        date_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date From
+        date_to:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date To
+        duplicates:
+          default: false
+          title: Duplicates
+          type: boolean
+        expected_cost:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          title: Expected Cost
+      title: ReceiptExportCreateSchema
+      type: object
+    ReceiptExportListSchema:
+      properties:
+        count:
+          title: Count
+          type: integer
+        limit:
+          title: Limit
+          type: integer
+        offset:
+          title: Offset
+          type: integer
+        results:
+          items:
+            $ref: '#/components/schemas/ReceiptExportSchema'
+          title: Results
+          type: array
+      required:
+      - count
+      - limit
+      - offset
+      - results
+      title: ReceiptExportListSchema
+      type: object
+    ReceiptExportPartUrlSchema:
+      description: 'A short-lived presigned URL for one zip file: `GET` it (no `Authorization` header) within
+
+        `expires_in` seconds; it downloads as `filename`. Never cache it; ask again.'
+      properties:
+        url:
+          title: Url
+          type: string
+        filename:
+          title: Filename
+          type: string
+        size_bytes:
+          title: Size Bytes
+          type: integer
+        expires_in:
+          title: Expires In
+          type: integer
+      required:
+      - url
+      - filename
+      - size_bytes
+      - expires_in
+      title: ReceiptExportPartUrlSchema
       type: object
     ForwardingConfirmationSchema:
       description: 'The latest Gmail forwarding confirmation (of the last 7 days) the user has to act on: type
