@@ -132,8 +132,6 @@ def _list_context(request: AuthenticatedHttpRequest, parsed: ParsedFilters) -> d
         'page_query': page_query,
         'list_url': reverse('receipts:list'),
         'dashboard_url': reverse('receipts:dashboard'),
-        'export_url': _with_query(reverse('receipts:export'), parsed.query()),
-        'export_files_url': _with_query(reverse('receipts:export-new'), parsed.query()),
         'prev_query': parsed.query(page=page_obj.previous_page_number())
         if page_obj.has_previous()
         else '',
@@ -174,7 +172,7 @@ def receipt_list(request: AuthenticatedHttpRequest) -> HttpResponse:
         return redirect(_with_query(reverse('receipts:dashboard'), query))
 
     context = _list_context(request, parsed)
-    context['oob_export'] = True
+    context['oob_tabs'] = True
     # Plain `render`, not `render_page`: the partial needs neither the Receipts account nor the
     # frozen banner, and this is the hot path (a poll every 3 s, a request per search keystroke).
     response = render(request, 'receipts/partials/receipt_list.html', context)

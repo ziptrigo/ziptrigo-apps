@@ -17,7 +17,7 @@ a text body in the sandboxed frame, the "needs your attention" email, the Recent
 outcomes, the Gmail forwarding confirmation; these use a **shell step**), the "storage paused" email
 and in-app notification, the effect of the Receipts settings (price 0, the daily file limit), a
 re-run without enough credits, phone width, dark mode and keyboard use. RCPT-63 to RCPT-70: **Download files**
-(issue #315): the dialog and its cost, confirming and opening the zip, a cost that changed, several zip files, folder
+(issue #315; its buttons and **Export CSV** are in the account page's **App actions**): the dialog and its cost, confirming and opening the zip, a cost that changed, several zip files, folder
 and file names, a file that has gone, a failed build and its refund (these use **shell steps**), and the rules around
 an export's life (one at a time, paused storage, delete, expiry, other users' exports). RCPT-71 and RCPT-72: the same
 exports through the JWT API (`/api/receipts/exports`) and the `inv receipts` CLI (`export-files` and companions).
@@ -173,12 +173,12 @@ Example: `rcptPick([{ name: 'staples-1.png', type: 'image/png', base64: PNG_A }]
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/receipts/`. | Page title "Receipts - ZipTrigo", heading **Receipts**, buttons **Export CSV** and **Upload** top right. |
+| 1 | Go to `/receipts/`. | Page title "Receipts - ZipTrigo", heading **Receipts**, the **Upload** button top right (no **Export CSV** or **Download files**: they are in the account page's App actions, RCPT-63). |
 | 2 | Read the address strip under the heading. | "Email receipts to" followed by an address of the form `receipts+xxxxxxxx@ziptrigo.com` (8 lowercase letters/digits, none of `i l o 0 1`), a **Copy** button and a **Settings ->** link. **Record** it as `ADDR1`. |
 | 3 | Look at the tabs row. | Tabs **All** (underlined, current), **Needs review**, **Processing**, **Failed**, **Duplicates**, none with a count badge. On the right **Vendors** (no "to vet" badge) and **Trash** (no number). |
 | 4 | Look at the filters. | Search box with placeholder "Search vendor, notes or amount"; **Category** select with "All categories", "Uncategorized", then the 12 defaults in this order: Advertising & marketing, Bank & payment fees, Equipment, Meals & entertainment, Office supplies, Professional services, Rent & utilities, Software & subscriptions, Phone & internet, Travel, Vehicle & fuel, Other; **Receipt date** select with Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom. No date fields are visible. |
 | 5 | Look at the list. | Header row: **Receipt date** (sortable), Vendor, **Added** (sortable), Category, Amount, Status. One empty-state row: "No receipts yet. Upload one, or email it to your address above." |
-| 6 | Inspect the **Export CSV** link. | `href` is `/receipts/export.csv` (no query). |
+| 6 | Look for **Export CSV** and **Download files**. | Neither is on the dashboard (they moved to `/account/` > Apps > App actions, RCPT-63). The **Exports** link is still next to Vendors and Trash. |
 | 7 | Reload the page. | Same address `ADDR1` (the account is not recreated). |
 
 ### RCPT-03 Settings page, first look
@@ -454,8 +454,8 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | 4 | Search `42,10`. | R2, R3, R4 (USD 42.10); not R1 (12.50). |
 | 5 | Search `$42`. | Same three. |
 | 6 | Search `12.5`. | Only R1. |
-| 7 | Search `zzz`. | "No receipts found." (not the "No receipts yet" wording). The **Export CSV** link's `href` is `/receipts/export.csv?q=zzz`. |
-| 8 | Click the clear (x) button. | Box empty, all 5 rows back, URL `/receipts/`, export link back to `/receipts/export.csv`. |
+| 7 | Search `zzz`. | "No receipts found." (not the "No receipts yet" wording). |
+| 8 | Click the clear (x) button. | Box empty, all 5 rows back, URL `/receipts/`. |
 
 ### RCPT-25 Category filter
 
@@ -497,10 +497,10 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | 4 | Click **Added**. | Newest added first: R2/R3/R4 (uploaded together in RCPT-08), then fake.pdf, then R1 last (restoring R2 did not change when it was added). URL `?sort=-created_at`; **Added** is now the dark, active header. Click **Added** again: oldest first (R1, fake.pdf, then R2-R4), URL `?sort=created_at`. |
 | 5 | With `?sort=created_at` active, search `staples`. | The sort is kept (URL has both `q=staples` and `sort=created_at`). |
 
-### RCPT-28 URL state survives reload, and Export CSV honours the filters
+### RCPT-28 URL state survives reload, and Export CSV honours the date range
 
-**Purpose:** the address bar always carries the dashboard URL; the export downloads exactly the
-filtered receipts with the documented columns.
+**Purpose:** the address bar always carries the dashboard URL; **Export CSV** (App actions on `/account/`) downloads
+the receipts in the chosen receipt-date range with the documented columns.
 **Preconditions:** `/receipts/`.
 
 | # | Action | Expected result |
@@ -508,9 +508,10 @@ filtered receipts with the documented columns.
 | 1 | Pick tab **Duplicates**, category "Office supplies", search `42`. | Only R2. URL contains `status=duplicates`, `category=<id>` and `q=42`, and is a `/receipts/?…` URL (never `/receipts/list/…`). |
 | 2 | Reload. | Same tab, category, search and list. |
 | 3 | Open `/receipts/list/?status=failed` directly in the address bar. | Redirected to `/receipts/?status=failed` (the full page). |
-| 4 | Go to `/receipts/?q=staples&sort=created_at`; read the **Export CSV** `href`. | `/receipts/export.csv?q=staples&sort=created_at`. |
-| 5 | In the console: `const r = await fetch(document.getElementById('export-link').href); [r.headers.get('content-type'), r.headers.get('content-disposition'), await r.text()]`. | `text/csv; charset=utf-8`; `attachment; filename="receipts-<today YYYY-MM-DD>.csv"`; first line exactly `receipt_date,vendor,amount,currency,category,document_type,document_number,payment_method,notes,status,source,added,original_filename,vendor_as_read`; then 4 rows, oldest added first: R1, then R2, R3 and R4 in the order their uploads were created in RCPT-08 (they upload in parallel, so that order varies). R4's row has vendor `ODP` and the last column `vendor_as_read` = `Staples`; R1's row has `2025-06-30,Staples,12.50,USD,Travel,receipt,INV-001,Visa ••1111,client lunch,processed,upload,…,staples-1.png,Staples`. No fake.pdf row, no trashed receipts. |
-| 6 | Click **Export CSV**. | The browser downloads `receipts-<today>.csv`; the page stays. |
+| 4 | Go to `/account/`; under Apps > App actions > Receipts leave **Receipt date** on **Any date** and read the form: the **Export CSV** button submits a GET form to `/receipts/export.csv`. | No date fields are visible. Choosing **Custom** shows two date fields (and sends `date_range=custom&date_from=...&date_to=...`); choosing another preset hides them again. |
+| 5 | In the console: `const r = await fetch('/receipts/export.csv'); [r.headers.get('content-type'), r.headers.get('content-disposition'), await r.text()]`. | `text/csv; charset=utf-8`; `attachment; filename="receipts-<today YYYY-MM-DD>.csv"`; first line exactly `receipt_date,vendor,amount,currency,category,document_type,document_number,payment_method,notes,status,source,added,original_filename,vendor_as_read`; then one row per live receipt, oldest added first, among them (with the other receipts of this run, e.g. fake.pdf's, in their places): R1, then R2, R3 and R4 in the order their uploads were created in RCPT-08 (they upload in parallel, so that order varies). R4's row has vendor `ODP` and the last column `vendor_as_read` = `Staples`; R1's row has `2025-06-30,Staples,12.50,USD,Travel,receipt,INV-001,Visa ••1111,client lunch,processed,upload,…,staples-1.png,Staples`. No trashed receipts. |
+| 6 | On `/account/` click **Export CSV**. | The browser downloads `receipts-<today>.csv`; the page stays. |
+| 7 | Choose **Custom** with `Receipt date` from `2025-06-01` to `2025-06-30` and click **Export CSV**. | The file has only R1 (receipt date 2025-06-30) and every other receipt dated in that range; no receipt outside it and none without a date. |
 
 ### RCPT-29 Pagination (25 per page)
 
@@ -606,7 +607,7 @@ filtered receipts with the documented columns.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | On `/receipts/vendors/` click ODP's receipt count ("2 receipts from ODP"). | `/receipts/?vendor=<ODP_ID>`: a chip "Vendor: **ODP**" with an x (aria-label "Remove the vendor filter"); only R3 and R4 listed. Export CSV `href` contains `vendor=<ODP_ID>`. |
+| 1 | On `/receipts/vendors/` click ODP's receipt count ("2 receipts from ODP"). | `/receipts/?vendor=<ODP_ID>`: a chip "Vendor: **ODP**" with an x (aria-label "Remove the vendor filter"); only R3 and R4 listed. |
 | 2 | Click the **Failed** tab. | "No receipts found."; the chip stays; URL has both `vendor` and `status=failed`. |
 | 3 | Click **All**, then the chip's x. | The chip disappears, all receipts are back (page 1 of 2), URL has no `vendor=`. |
 | 4 | Open `/receipts/?vendor=999999`. | No chip and the normal unfiltered list (an unknown vendor id is ignored). |
@@ -889,7 +890,7 @@ up at sign-in) and `T20` the date 20 days before it.
 | 1 | On `J1` set **Notes** `=HYPERLINK("http://evil.example","click")` and **Number** `-1`; **Save**. On `W1` set **Notes** `@SUM(A1)`; **Save**. | "Saved." each; the page shows the values exactly as typed (no apostrophe on the page). |
 | 2 | In the console: `await fetch('/receipts/export.csv?q=evil').then((r) => r.text())`. | The header line, then one row for `J1` whose `document_number` cell is `'-1` and whose `notes` cell is `"'=HYPERLINK(""http://evil.example"",""click"")"` (CSV-quoted, apostrophe first). |
 | 3 | `await fetch('/receipts/export.csv?q=SUM').then((r) => r.text())`. | One row for `W1` with the notes cell `'@SUM(A1)`. |
-| 4 | Click **Export CSV** on `/receipts/?q=evil` and open the file in a text editor (or a spreadsheet, if the tool has one). | The download is the same text as step 2; a spreadsheet shows the note as text, not a link. |
+| 4 | Click **Export CSV** on `/account/` and open the file in a text editor (or a spreadsheet, if the tool has one). | The download has the same rows as steps 2 and 3; a spreadsheet shows the note as text, not a link. |
 | 5 | Put `J1`'s notes back to empty and **Number** to `R-55102`, `W1`'s notes to empty; **Save** each. | "Saved." |
 
 ### RCPT-54 Email receipts: the body is shown in a sandbox -- shell step
@@ -1123,7 +1124,7 @@ from the keyboard.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Set the window to 375x812 and open `/receipts/`. | No horizontal scroll. The heading, **Export CSV** and **Upload** wrap; the address strip breaks inside the address rather than overflowing; tabs and the Vendors/Trash links wrap. The list's header shows only the **Receipt date** and **Added** sort links (no Vendor/Category/Amount/Status columns). Each row: the vendor (or file name) and the pill on the first line, then "<date or No date> · <category> · <currency amount>", then the source line. |
+| 1 | Set the window to 375x812 and open `/receipts/`. | No horizontal scroll. The heading and **Upload** wrap; the address strip breaks inside the address rather than overflowing; tabs and the Vendors/Trash links wrap. The list's header shows only the **Receipt date** and **Added** sort links (no Vendor/Category/Amount/Status columns). Each row: the vendor (or file name) and the pill on the first line, then "<date or No date> · <category> · <currency amount>", then the source line. |
 | 2 | Open `J1`, then `E1`. | The preview is above the form (one column); the form's fields and buttons fit the width; the email frame fits too. |
 | 3 | Open `/receipts/upload/`, `/receipts/trash/`, `/receipts/settings/`. | Nothing overflows: the drop zone's two buttons fit (or wrap), the category editor's buttons stay on screen, the Recent emails rows stack (date, sender and subject, outcome). |
 | 4 | Open `/receipts/vendors/`. | Each row shows the name, its chip and, under it, "N receipts · last YYYY-MM-DD" (the count and date columns are hidden); a row menu opens fully on screen. Tick a vendor: the bulk bar fits. |
@@ -1160,7 +1161,7 @@ Receipt date column and filters, the receipt page, the trash and the vendors pag
 | 1 | Open `/receipts/`. | R1's date column reads `10/09/2026`; the second line ends "added <MM/DD>" (e.g. `added 11/05`; with the year, `11/05/2025`, when it was added in another year). |
 | 2 | Open R1. | Heading "Staples · 10/09/2026"; "Added <MM/DD/YYYY or MM/DD, h:mm AM/PM> (receipt dated 10/09)"; the **Receipt date** field is a text box with a calendar button showing `10/09/2026` (not a browser date input). Type `10/10/2026` and **Save**: the heading follows. |
 | 3 | Type `25/10/2026`... no: with `mm/dd/yyyy` type the ISO `2026-10-25` into the Receipt date box, Tab, **Save**; then on the account page choose `dd/mm/yyyy` + `24-hour` and reload R1, `/receipts/`, `/receipts/trash/` (move R1 to the Trash, look, then restore it) and `/receipts/vendors/`. | The heading, the list, the trash row and the vendor's last receipt all read `25/10/2026` (day first; 25 cannot be a month, so the order is unmistakable); "Added" times read 24-hour (`21:05`); the Receipt date box reads `25/10/2026` with the placeholder `dd/mm/yyyy`. |
-| 4 | Export CSV from the dashboard. | The `receipt_date` column is `2026-10-25` and `added` an ISO timestamp: exports do not follow the display format. |
+| 4 | Export CSV from `/account/` (App actions). | The `receipt_date` column is `2026-10-25` and `added` an ISO timestamp: exports do not follow the display format. |
 | 5 | Check the Receipts attention email (RCPT-55) with the account on `dd/mm/yyyy` + `24-hour`. | The email's "received ..." line is `Nov 5, 2026, 9:05 PM UTC` style (public wording and UTC). |
 | 6 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 
@@ -1181,8 +1182,8 @@ Receipt date column and filters, the receipt page, the trash and the vendors pag
 
 ### RCPT-63 Download files: the dialog
 
-**Purpose:** the dashboard's **Download files** button opens a dialog that says what would be downloaded and
-what it costs, for what the list shows now (issue #315).
+**Purpose:** the **Download files** button in the account page's App actions opens a dialog that says what would be
+downloaded and what it costs, for the receipt-date range chosen there (issue #315).
 **Preconditions:** signed in as `F` with several live receipts (RCPT-47 onward; at least one in the Trash is fine:
 it is never included). **Record** `N` = the number of live receipts on `/receipts/` (the **All** tab has no count,
 so count the list) and the balance on `/billing/credits/` as `B0`. The export price is the default **3 credits per
@@ -1190,13 +1191,13 @@ file** (admin > Receipts settings > **Export per receipt**).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/receipts/`. | The header has **Download files** (zip icon), **Export CSV** and **Upload**; next to Vendors and Trash there is an **Exports** link. |
-| 2 | Click **Download files**. | A dialog "Download files" opens over the page with focus on a button: "**N files** (size) in **1 zip file** of about 100.0 MB each. Each zip opens on its own, and the first one also holds `receipts.csv`, a list of every file with its date, vendor, type and amount." then "All your receipts. To download only some, filter the list first. Receipts in the Trash are not included."; **Organize the folders as** with two cards, **Year / Vendor** (checked, `2026/Acme/invoice.pdf`) and **Vendor / Year** (`Acme/2026/invoice.pdf`); "This costs **3N credits** (3 per file). Your balance is `B0`. You are charged now; if we can't make the files, you get the credits back." and "We prepare the files in the background and tell you here and by email when they are ready. You can download them for 30 days, then they are deleted."; **Cancel** and **Download for 3N credits**. Nothing was charged yet. |
+| 1 | Open `/receipts/`, then `/account/`. | The dashboard's header has only **Upload**; next to Vendors and Trash there is an **Exports** link. On `/account/`, in the **Apps** section below the apps list and above "Notifications on this device", an **App actions** area has a **Receipts** block (receipt icon): "Download your receipt files as zip files, or a CSV list of your receipts.", a **Receipt date** select (Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom; no date fields until Custom), the buttons **Download files** (zip icon) and **Export CSV**, and a **Your exports** link to `/receipts/exports/`. |
+| 2 | On `/account/` click **Download files**. | A dialog "Download files" opens over the page with focus on a button: "**N files** (size) in **1 zip file** of about 100.0 MB each. Each zip opens on its own, and the first one also holds `receipts.csv`, a list of every file with its date, vendor, type and amount." then "All your receipts. To download only some, choose a date range first. Receipts in the Trash are not included."; **Organize the folders as** with two cards, **Year / Vendor** (checked, `2026/Acme/invoice.pdf`) and **Vendor / Year** (`Acme/2026/invoice.pdf`); "This costs **3N credits** (3 per file). Your balance is `B0`. You are charged now; if we can't make the files, you get the credits back." and "We prepare the files in the background and tell you here and by email when they are ready. You can download them for 30 days, then they are deleted."; **Cancel** and **Download for 3N credits**. Nothing was charged yet. |
 | 3 | Press Escape; open it again and click **Cancel**; open it and click the backdrop. | The dialog closes each time and focus returns to **Download files**. Balance still `B0`. |
-| 4 | Type `staples` in the search box (the list narrows, the URL gets `?q=staples`), then open the dialog. | It counts only the matching receipts ("**M files**" and "This costs **3M credits**"), says "Only what the list shows now: Search: "staples"." |
-| 5 | Choose the **Failed** tab (or any tab with fewer receipts) and open the dialog; then clear the filters. | The count and the price follow the list each time ("Status: Failed"); the button always carries the current filters (also after the list refreshed by htmx, without a reload). |
-| 6 | Filter to something that matches nothing (`q=zzzz`) and open the dialog. | "There are no receipt files to download with the current filters."; the download button is disabled. |
-| 7 | Open `/receipts/exports/new/` directly (not from the button). | You land on the dashboard (the dialog is a fragment). |
+| 4 | Choose **Last 15 days** (or **This year**) and open the dialog. | It counts only the receipts whose receipt date is in that range ("**M files**" and "This costs **3M credits**"), says "Only these receipts: Receipt date: <from> to <to>." |
+| 5 | Choose **Custom**, enter a from and a to date, and open the dialog; then choose **Any date**. | The count and the price follow the range each time (the dates appear in the dialog's text); with **Any date** it is every receipt again and the text says "All your receipts". The dialog needs no reload to follow the select. |
+| 6 | Choose a custom range in which no receipt falls (for example in 2001) and open the dialog. | "There are no receipt files to download with the chosen filters."; the download button is disabled. |
+| 7 | Open `/receipts/exports/new/` directly (not from the button). | You land on `/account/#apps` (the dialog is a fragment). |
 | 8 | As `qa.admin` set **Export per receipt** to `5` (admin > Receipts > Receipts settings); as `F` open the dialog. | "This costs **5N credits** (5 per file)": the price is read live. Set it back to `3`. |
 | 9 | Set **Export per receipt** to `0`; open the dialog. | "This is free." and the button reads **Download files**. Set it back to `3`. |
 | 10 | As a user with fewer credits than `3N` (`qa.broke@example.com` after RCPT-43/44 has 5; give them one receipt first or use any user with a few receipts), open the dialog. | "Your balance is ..." and, in the message line under it, a **Top up your credits** link to `/billing/credits/`. |
@@ -1228,7 +1229,7 @@ export is ready when its page opens.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | In tab A open `/receipts/` and the **Download files** dialog (it says `3N credits`). | As in RCPT-63. |
+| 1 | In tab A open `/account/` and the **Download files** dialog (it says `3N credits`). | As in RCPT-63. |
 | 2 | In tab B upload one more receipt (`/receipts/upload/`, any image). | "Uploaded". |
 | 3 | In tab A click **Download for 3N credits**. | The dialog stays open and shows the red line "The cost changed. Please confirm the new total."; the text now says "**N+1 files**" and "**3(N+1) credits**" and the button "Download for 3(N+1) credits". The balance is unchanged (`/billing/credits/`) and `/receipts/exports/` has no new export. |
 | 4 | Click the button again. | Charged 3(N+1) once; the export's page opens (RCPT-64 step 2 with N+1 files). |
@@ -1311,10 +1312,10 @@ second and third failures.) It prints the id, `failed`, the charge and the same 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `/receipts/exports/`. | The new export is listed with a red **Failed** pill. |
-| 2 | Open it. | "We couldn't prepare the zip files. The 3N credits you paid were refunded. You can try again from the dashboard." "Charged 3N credits, 3N refunded." No download button; **Delete** is offered. |
+| 2 | Open it. | "We couldn't prepare the zip files. The 3N credits you paid were refunded. You can try again from your account page." "Charged 3N credits, 3N refunded." No download button; **Delete** is offered. |
 | 3 | `/billing/credits/`. | A Spend of 3N and a Refund "Receipts export could not be prepared" of 3N: balance `B2`. |
 | 4 | Open the bell. | "Your receipts export could not be prepared": "Something went wrong, so we couldn't make your zip files. The 3N credits you paid were refunded."; no email was sent for it. |
-| 5 | Start a normal export from the dashboard. | It works (a failed one doesn't block the next). |
+| 5 | Start a normal export from `/account/` (App actions). | It works (a failed one doesn't block the next). |
 
 ### RCPT-70 Download files: one at a time, paused storage, ending an export, other people's exports
 
@@ -1327,7 +1328,7 @@ second and third failures.) It prints the id, `failed`, the charge and the same 
 | 2 | Open `/receipts/exports/<that id>/`. | A blue **Preparing** pill; "Preparing your zip files: 0 of P done. This page updates by itself. You can leave it: we'll tell you when it is ready." (it re-fetches every 3 s for about two minutes, then says "Reload the page to check again."); no **Delete** and no download button. |
 | 3 | Open the dialog and confirm another export. | The dialog stays open with "An export is already being prepared. Wait for it to finish first."; nothing charged. |
 | 4 | (Shell step) build it now: `python tests_e2e/ai/manage.py shell -c "from apps.receipts.models import ReceiptExport; import apps.receipts.services.exports as e; ex = ReceiptExport.objects.get(status='building'); e.build_part.call(str(ex.pk), e.first_part_to_build(ex.part_count)); ex.refresh_from_db(); print(ex.status)"` and reload the page (the polling panel switches by itself). | `ready`; the page shows its download buttons. |
-| 5 | (Shell step) freeze `F` as in RCPT-44, then open `X1`'s page and click **Download**. | Back on the page with the red flash "Your receipts are paused until you add credits."; the dialog on the dashboard says "Storage is paused, so files can't be downloaded until you add credits." with a **Top up your credits** link and a disabled button. Add credits to lift it (RCPT-44 step 9). |
+| 5 | (Shell step) freeze `F` as in RCPT-44, then open `X1`'s page and click **Download**. | Back on the page with the red flash "Your receipts are paused until you add credits."; the dialog on `/account/` says "Storage is paused, so files can't be downloaded until you add credits." with a **Top up your credits** link and a disabled button. Add credits to lift it (RCPT-44 step 9). |
 | 6 | As `G` open `/receipts/exports/<X1>/`, `/receipts/exports/<X1>/panel/` and `/receipts/exports/<X1>/parts/1/download/`; POST its delete (the console: `fetch('/receipts/exports/<X1>/delete/', {method: 'POST', headers: {'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)[1]}})`). | Each is a **404**; `X1` is still ready for `F`. `G`'s `/receipts/exports/` doesn't list it. |
 | 7 | As `F` open `X1` and click **Delete**, then **Delete** in the dialog ("Delete this export? The zip files are deleted now and you will not get the credits back."). | Back on `/receipts/exports/` with "The export was deleted."; it is no longer listed; opening its URL is a 404; the credits were not refunded. |
 | 8 | Open a ready export's download link, copy the S3 URL it redirected to, delete the export, then open that URL again (shell: nothing else). | The old link fails (the object is gone). |

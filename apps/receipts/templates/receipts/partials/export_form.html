@@ -1,6 +1,7 @@
-{% comment %} The form of the "Download files" dialog. It carries the dashboard's filters as hidden fields, so what is
-   exported is what the list showed, and the total it states as `confirm_cost`: the server refuses (nothing charged)
-   and shows this again when that is no longer the cost. {% endcomment %}
+{% comment %} The form of the "Download files" dialog. It carries the receipt-date range chosen on the account
+   page as hidden fields, so what is exported is what the dialog described, and the total it states as
+   `confirm_cost`: the server refuses (nothing charged) and shows this again when that is no longer the cost.
+   {% endcomment %}
 <form method="post" action="{% url 'receipts:export-new' %}" hx-post="{% url 'receipts:export-new' %}"
       hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find button[type='submit']" class="p-6">
     {% csrf_token %}
@@ -14,7 +15,7 @@
         <a href="{% url 'billing:credits-history' %}" class="underline">Top up your credits</a>
     </p>
     {% elif not quote.file_count %}
-    <p class="text-sm text-gray-700 dark:text-gray-300">There are no receipt files to download with the current filters.</p>
+    <p class="text-sm text-gray-700 dark:text-gray-300">There are no receipt files to download with the chosen filters.</p>
     {% else %}
     <p class="text-sm text-gray-700 dark:text-gray-300">
         <strong class="font-semibold">{{ quote.file_count }} file{{ quote.file_count|pluralize }}</strong>
@@ -22,7 +23,7 @@
         of about {{ quote.part_bytes|filesizeformat }} each. Each zip opens on its own, and the first one also holds <code class="font-mono">receipts.csv</code>, a list of every file with its date, vendor, type and amount.
     </p>
     <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-        {% if filter_lines %}Only what the list shows now: {{ filter_lines|join:'; ' }}.{% else %}All your receipts. To download only some, filter the list first.{% endif %}
+        {% if filter_lines %}Only these receipts: {{ filter_lines|join:'; ' }}.{% else %}All your receipts. To download only some, choose a date range first.{% endif %}
         Receipts in the Trash are not included.
     </p>
 

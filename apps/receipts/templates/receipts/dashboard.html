@@ -6,7 +6,6 @@
 <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
     <h1 class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Receipts</h1>
     <div class="flex items-center gap-3">
-        {% include 'receipts/partials/export_link.html' %}
         <a href="{% url 'receipts:upload' %}"
            class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
             <i class="fas fa-arrow-up-from-bracket mr-2" aria-hidden="true"></i>Upload
@@ -30,9 +29,6 @@
 </div>
 
 {% include 'receipts/partials/tabs.html' %}
-
-{# Where the "Download files" dialog is loaded. #}
-<div id="export-modal"></div>
 
 <form id="receipt-filters" method="get" action="{% url 'receipts:dashboard' %}"
       hx-get="{% url 'receipts:list' %}" hx-target="#receipt-list" hx-swap="innerHTML"

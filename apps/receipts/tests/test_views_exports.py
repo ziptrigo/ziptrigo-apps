@@ -52,12 +52,6 @@ def three(make_receipt):
     ]
 
 
-def button_tag(content: str) -> str:
-    match = re.search(r'<button[^>]*id="export-files-link".*?>', content, re.S)
-    assert match
-    return match.group(0)
-
-
 def flashed(response) -> list[str]:
     return [str(m) for m in get_messages(response.wsgi_request)]
 
@@ -82,31 +76,75 @@ def ready(funded_user, three):
     return export
 
 
-# -- The dashboard ------------------------------------------------------------------------------
+# -- The account page ---------------------------------------------------------------------------
 
 
-class TestDashboardButton:
-    def test_has_the_button_the_csv_link_and_the_dialog_host(self, web, three):
-        content = web.get(reverse('receipts:dashboard')).content.decode()
+class TestAccountActions:
+    def test_the_account_page_has_the_receipts_block(self, web, three):
+        content = web.get(reverse('accounts:account')).content.decode()
 
-        assert 'id="export-files-link"' in content and 'Download files' in content
-        assert f'hx-get="{reverse(NEW)}"' in content
+        assert 'data-app-actions="receipts"' in content
+        assert 'id="receipts-export-files"' in content and 'Download files' in content
+        assert f'hx-get="{reverse(NEW)}"' in content and 'hx-include="closest form"' in content
         assert 'id="export-modal"' in content
-        assert 'id="export-link"' in content
+        assert 'id="receipts-export-csv"' in content and 'Export CSV' in content
+        assert f'action="{reverse("receipts:export")}"' in content
+        assert 'name="date_range"' in content and 'Last 15 days' in content
+        assert 'name="date_from"' in content and 'name="date_to"' in content
         assert reverse('receipts:exports') in content
 
-    def test_the_button_carries_the_current_filters(self, web, three):
-        content = web.get(
-            reverse('receipts:dashboard'), {'q': 'acme', 'status': 'failed'}
-        ).content.decode()
-        button = button_tag(content)
-        assert 'hx-get="/receipts/exports/new/?status=failed&amp;q=acme"' in button
+    def test_the_block_sits_between_the_apps_and_the_notifications(self, web):
+        content = web.get(reverse('accounts:account')).content.decode()
+        assert content.index('id="apps-form"') < content.index('data-app-actions="receipts"')
 
-    def test_a_list_refresh_sends_the_button_again_out_of_band(self, web, three):
-        response = web.get(reverse('receipts:list'), {'q': 'acme'}, **HTMX)
-        content = response.content.decode()
-        button = button_tag(content)
-        assert 'hx-swap-oob="true"' in button and 'q=acme' in button
+    def test_the_dashboard_no_longer_has_the_buttons(self, web, three):
+        content = web.get(reverse('receipts:dashboard')).content.decode()
+
+        assert 'receipts-export-files' not in content and 'id="receipts-export-csv"' not in content
+        assert 'id="export-modal"' not in content
+        assert reverse('receipts:exports') in content  # the Exports link stays
+        content = web.get(reverse('receipts:list'), **HTMX).content.decode()
+        assert 'receipts-export-files' not in content and 'id="receipts-export-csv"' not in content
+
+    def test_the_block_loads_its_dialog_script_once(self, web):
+        content = web.get(reverse('accounts:account')).content.decode()
+        assert content.count('receipts/js/common.js') == 1
+        assert content.index('receipts/js/common.js') < content.index('data-app-actions="receipts"')
+
+    def test_any_date_is_preselected_and_the_custom_dates_are_disabled(self, web):
+        content = web.get(reverse('accounts:account')).content.decode()
+        block = content.split('data-app-actions="receipts"')[1]
+        assert '<option value="any" selected>' in block
+        assert re.search(r'name="date_from"[^>]*\sdisabled(?=[\s>])', block, re.S)
+
+    def test_a_range_in_the_query_is_preselected(self, web):
+        content = web.get(
+            reverse('accounts:account'),
+            {'receipts_date_from': '2026-01-01', 'receipts_date_to': '2026-02-28'},
+        ).content.decode()
+        block = content.split('data-app-actions="receipts"')[1]
+        assert '<option value="custom" selected>' in block
+        assert 'value="2026-01-01"' in block and 'value="2026-02-28"' in block
+        assert not re.search(r'name="date_from"[^>]*\sdisabled(?=[\s>])', block, re.S)
+
+        preset = web.get(
+            reverse('accounts:account'), {'receipts_date_range': 'this_month'}
+        ).content.decode()
+        assert (
+            '<option value="this_month" selected>' in preset.split('data-app-actions="receipts"')[1]
+        )
+
+    def test_unprefixed_or_bad_values_are_ignored(self, web):
+        content = web.get(
+            reverse('accounts:account'), {'date_range': 'this_month', 'receipts_date_range': 'nope'}
+        ).content.decode()
+        assert '<option value="any" selected>' in content.split('data-app-actions="receipts"')[1]
+
+    def test_viewing_the_account_page_creates_no_receipts_account(self, web, user):
+        from ..models import ReceiptsAccount
+
+        web.get(reverse('accounts:account'))
+        assert not ReceiptsAccount.objects.filter(pk=user.pk).exists()
 
 
 # -- The dialog ---------------------------------------------------------------------------------
@@ -169,10 +207,31 @@ class TestDialog:
             r'<button type="button" disabled', content
         )
 
-    def test_opened_directly_it_goes_to_the_dashboard_keeping_the_filters(self, web):
+    def test_opened_directly_it_goes_to_the_account_page(self, web):
         response = web.get(reverse(NEW), {'q': 'acme'})
         assert response.status_code == 302
-        assert response['Location'] == f'{reverse("receipts:dashboard")}?q=acme'
+        assert response['Location'] == f'{reverse("accounts:account")}#apps'
+
+    def test_a_custom_date_range_quotes_only_those_receipts(self, web, three):
+        content = web.get(
+            reverse(NEW),
+            {'date_range': 'custom', 'date_from': '2026-01-01', 'date_to': '2026-12-31'},
+            **HTMX,
+        ).content.decode()
+        assert '1 file' in content and 'name="confirm_cost" value="3"' in content
+        assert 'Only these receipts:' in content and 'Receipt date:' in content
+
+    def test_a_preset_range_quotes_the_receipts_in_it(self, web, three, funded_user):
+        today = timezone.localdate()
+        three[1].receipt_date = today
+        three[1].save(update_fields=['receipt_date'])
+        content = web.get(reverse(NEW), {'date_range': 'last_15_days'}, **HTMX).content.decode()
+        assert '1 file' in content and 'name="confirm_cost" value="3"' in content
+
+    def test_any_date_quotes_everything_and_says_so(self, web, three):
+        content = web.get(reverse(NEW), {'date_range': 'any'}, **HTMX).content.decode()
+        assert '3 files' in content
+        assert 'choose a date range first' in content
 
     def test_it_needs_a_login(self, client):
         response = client.get(reverse(NEW), **HTMX)
@@ -270,14 +329,38 @@ class TestConfirm:
         response = web.post(reverse(NEW), body, **HTMX)
         assert response.status_code == 422 and get_balance(funded_user) == 100
 
-    def test_a_refusal_without_htmx_is_a_flash_and_the_dashboard(self, web, three):
+    def test_a_refusal_without_htmx_is_a_flash_and_the_account_page(self, web, three):
         response = web.post(
             reverse(NEW), {'layout': 'year_vendor', 'confirm_cost': '1', 'q': 'Beta'}
         )
-        assert response.status_code == 302 and response['Location'].startswith(
-            reverse('receipts:dashboard')
+        assert response.status_code == 302 and response['Location'] == (
+            f'{reverse("accounts:account")}#apps'
         )
         assert 'cost changed' in ' '.join(flashed(response))
+
+    def test_a_refusal_without_htmx_keeps_the_chosen_range(self, web, three):
+        response = web.post(
+            reverse(NEW),
+            {
+                'layout': 'year_vendor',
+                'confirm_cost': '99',
+                'date_from': '2026-01-01',
+                'date_to': '2026-12-31',
+            },
+        )
+        assert response.status_code == 302
+        assert response['Location'] == (
+            f'{reverse("accounts:account")}'
+            '?receipts_date_from=2026-01-01&receipts_date_to=2026-12-31#apps'
+        )
+
+        preset = web.post(
+            reverse(NEW),
+            {'layout': 'year_vendor', 'confirm_cost': '99', 'date_range': 'this_year'},
+        )
+        assert preset['Location'] == (
+            f'{reverse("accounts:account")}?receipts_date_range=this_year#apps'
+        )
 
     def test_get_and_post_only(self, web):
         assert web.put(reverse(NEW)).status_code == 405
@@ -340,7 +423,7 @@ class TestRateLimit:
         assert second.status_code == 429 and second['Retry-After']
         assert 'Quote' not in second.content.decode()
 
-    def test_a_dialog_redirected_to_the_dashboard_spends_none_of_it(self, web, three):
+    def test_a_dialog_redirected_to_the_account_page_spends_none_of_it(self, web, three):
         assert web.get(reverse(NEW)).status_code == 302
         assert web.get(reverse(NEW)).status_code == 302
         assert web.get(reverse(NEW), **HTMX).status_code == 200

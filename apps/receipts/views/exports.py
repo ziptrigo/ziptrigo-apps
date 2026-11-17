@@ -1,10 +1,11 @@
-"""Exports (issue #315): the "Download files" dialog on the dashboard, the list of exports, one
-export's page (with a download button per zip file) and the actions on it.
+"""Exports (issue #315): the "Download files" dialog (opened from the account page's "App actions",
+`receipts/partials/account_actions.html`), the list of exports, one export's page (with a download
+button per zip file) and the actions on it.
 
 The dialog is a fragment fetched into `#export-modal` (like the vendor rename dialog). It carries the
-dashboard's filters as query parameters (`GET`) and as hidden fields (`POST`), so "what the list
-shows now" is what is exported. Credits are never spent unseen: the dialog states the cost, and the
-form posts it back (`confirm_cost`); if it is no longer true (`ExportCostChangedError`) the dialog
+receipt-date range chosen on the account page as query parameters (`GET`) and as hidden fields
+(`POST`), so the receipts in that range are what is exported. Credits are never spent unseen: the
+dialog states the cost, and the form posts it back (`confirm_cost`); if it is no longer true (`ExportCostChangedError`) the dialog
 comes back with the new total and nothing was charged. A refusal is a 422 that re-renders the form
 in place.
 
@@ -12,6 +13,7 @@ Another user's export is a 404. A deleted one too.
 """
 
 import logging
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -39,6 +41,7 @@ from ..services import (
     part_download_url,
     prepare_export,
 )
+from ..services.account_actions import DATE_FIELDS, QUERY_PREFIX
 from ..services.exports import Prepared, describe_filters, part_name
 from .common import render_page
 from .dashboard import resolve_vendor_filter
@@ -97,6 +100,21 @@ def _dialog_context(
     }
 
 
+def account_actions_url(parsed=None) -> str:
+    """Where the dialog's buttons are: the account page's Apps section, with the date range of
+    `parsed` preselected (under the block's `receipts_` prefix, `services.account_actions`)."""
+    query = ''
+    if parsed is not None:
+        query = urlencode(
+            {
+                f'{QUERY_PREFIX}{key}': value
+                for key, value in parsed.params.items()
+                if key in DATE_FIELDS
+            }
+        )
+    return f'{reverse("accounts:account")}{"?" + query if query else ""}#apps'
+
+
 def _layout_of(value: object) -> str:
     return str(value) if value in ExportLayout.values else str(ExportLayout.YEAR_VENDOR)
 
@@ -104,16 +122,13 @@ def _layout_of(value: object) -> str:
 @login_required
 @require_http_methods(['GET', 'POST'])
 def export_new(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """GET: the dialog (a fragment; opened directly it goes to the dashboard). POST: confirm it
+    """GET: the dialog (a fragment; opened directly it goes to the account page). POST: confirm it
     and start the export."""
     if request.method == 'GET':
+        if not is_htmx(request):
+            return redirect(account_actions_url())
         parsed = parse_filters(request)
         resolve_vendor_filter(request, parsed)
-        if not is_htmx(request):
-            query = parsed.query()
-            return redirect(
-                f'{reverse("receipts:dashboard")}?{query}' if query else 'receipts:dashboard'
-            )
         # The dialog reads the whole filtered list to quote it: bounded, loosely.
         limited = ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
         if not limited.allowed:
@@ -133,7 +148,7 @@ def _refused(
     top_up: bool = False,
 ) -> HttpResponse:
     """The form again with what was wrong (htmx swaps it in place); without htmx, flash messages
-    and back to the dashboard."""
+    and back to the account page, with the date range that was chosen."""
     if is_htmx(request):
         context = _dialog_context(
             request,
@@ -146,8 +161,7 @@ def _refused(
         return render(request, 'receipts/partials/export_form.html', context, status=422)
     for line in messages_list:
         messages.error(request, line)
-    query = parsed.query()
-    return redirect(f'{reverse("receipts:dashboard")}?{query}' if query else 'receipts:dashboard')
+    return redirect(account_actions_url(parsed))
 
 
 def _confirm(request: AuthenticatedHttpRequest) -> HttpResponse:

@@ -680,13 +680,12 @@ class TestDashboardFilter:
 
         assert f'hx-get="{url("list")}?q=x"' in content
 
-    def test_it_travels_with_the_tabs_the_export_and_the_pager(self, web, acme):
+    def test_it_travels_with_the_tabs_and_the_pager(self, web, acme):
         content = web.get(url('dashboard'), {'vendor': acme.pk}).content.decode()
 
         assert f'status=needs_review&amp;vendor={acme.pk}' in content or (
             f'vendor={acme.pk}&amp;status=needs_review' in content
         )
-        assert f'{url("export")}?vendor={acme.pk}' in content
 
     def test_the_list_partial_keeps_it(self, web, acme):
         response = web.get(url('list'), {'vendor': acme.pk}, **HX)
@@ -703,7 +702,6 @@ class TestDashboardFilter:
 
         assert 'Vendor: <strong' not in content
         assert content.count('<li id="receipt-') == 2
-        assert 'vendor=' not in content.split('id="export-link"')[1].split('>')[0]
 
     def test_a_vendor_that_does_not_exist_is_dropped(self, web, acme):
         content = web.get(url('dashboard'), {'vendor': '999999', 'q': 'x'}).content.decode()

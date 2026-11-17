@@ -1,5 +1,5 @@
-"""Receipts "Download files" (issue #315), end to end in a real browser: filter the list, open the
-dialog, confirm the cost, land on the export's page (the zip files are built by the inline task
+"""Receipts "Download files" (issue #315), end to end in a real browser: open it from the account
+page's "App actions", choose a date range, open the dialog, confirm the cost, land on the export's page (the zip files are built by the inline task
 backend during the request), download a zip and look inside it, then delete the export.
 
 Runs on `receipts_server` (fake S3 and AI, see `receipts_e2e_settings.py`); its fake bucket serves
@@ -44,16 +44,25 @@ def test_download_files_confirm_the_cost_download_the_zip_and_delete_it(
     page.click('button:has-text("Save")')
     expect(page.locator('body')).to_contain_text('Saved.')
 
-    # The dialog exports what the list shows: just that receipt.
+    # The buttons live on the account page (App actions), not on the dashboard.
     page.goto(f'{url}/receipts/')
-    page.fill('#q', token)
-    expect(page).to_have_url(re.compile(f'q={token}'))
-    expect(page.locator('#receipt-list li a:has-text("Staples")')).to_have_count(1)
-    page.click('#export-files-link')
+    expect(page.locator('#receipts-export-files')).to_have_count(0)
+    expect(page.locator('#receipts-export-csv')).to_have_count(0)
+    page.goto(f'{url}/account/')
+    block = page.locator('[data-app-actions=receipts]')
+    expect(block).to_contain_text('Download files')
+    expect(block.locator('input[name=date_from]')).to_be_hidden()
+    block.locator('select[name=date_range]').select_option('custom')
+    expect(block.locator('#receipts-export-from')).to_be_visible()
+    block.locator('select[name=date_range]').select_option('any')
+    expect(block.locator('#receipts-export-from')).to_be_hidden()
+
+    page.click('#receipts-export-files')
     dialog = page.locator('#export-modal [role=dialog]')
-    expect(dialog).to_contain_text('1 file')
+    expect(dialog).to_contain_text('All your receipts')
+    expect(dialog).to_contain_text(re.compile(r'\d+ files?'))
     expect(dialog).to_contain_text('1 zip file')
-    expect(dialog).to_contain_text('This costs 3 credits (3 per file)')
+    expect(dialog).to_contain_text('(3 per file)')
     expect(dialog).to_contain_text('Year / Vendor')
     expect(dialog).to_contain_text('Vendor / Year')
     dialog.locator('input[value=vendor_year]').check()
@@ -83,7 +92,7 @@ def test_download_files_confirm_the_cost_download_the_zip_and_delete_it(
         assert archive.read(files[0]) == original
         rows = list(csv.reader(io.StringIO(archive.read('receipts.csv').decode())))
     assert rows[0] == ['date', 'vendor', 'type', 'amount', 'currency', 'file', 'part']
-    assert [row[5] for row in rows[1:]] == files and rows[1][6] == '1'
+    assert files[0] in [row[5] for row in rows[1:]] and rows[1][6] == '1'
 
     # It is listed, and deleting it (a confirmation first) removes it.
     page.click('text=Exports')

@@ -571,7 +571,7 @@ two paid notes; the admin spends the balance down to exactly 7; shell access.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | As `qa.user`, **Download files** on `/receipts/`, confirm (RCPT-64 step 1). | The export's page opens, **Ready**. |
+| 1 | As `qa.user`, **Download files** in the App actions on `/account/`, confirm (RCPT-64 step 1). | The export's page opens, **Ready**. |
 | 2 | `/__e2e__/mail/?to=qa.user@example.com` (reload until it arrives). | Exactly one new email, subject exactly `Your receipts export is ready` (nothing from the receipts in it). |
 | 3 | Text body. | `Your receipts export is ready: N receipt files in 1 zip file.`, a blank line, `The zip files are available to download until <date, time> UTC. Then they are deleted.` (the public wording: `Dec 16, 2026, 9:05 AM`, whatever the account's date format), then `Download them from your exports page (you need to be signed in):` and `<BASE>/receipts/exports/<id>/`, then `--` and `The ZipTrigo Team`. No S3 address and no file name anywhere. |
 | 4 | HTML source. | The same sentences, a link "Open your exports page" to `<BASE>/receipts/exports/<id>/`; no raw `<script>`; the greeting-free layout of the other Receipts emails. |

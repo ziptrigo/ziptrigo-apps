@@ -6,14 +6,13 @@
 {% if parsed.params.sort %}<input type="hidden" name="sort" value="{{ parsed.params.sort }}">{% endif %}
 {% if vendor_filter %}<input type="hidden" name="vendor" value="{{ vendor_filter.pk }}">{% endif %}
 
-{% if oob_export %}
+{% if oob_tabs %}
 {% include 'receipts/partials/tabs.html' with oob=True %}
-{% include 'receipts/partials/export_link.html' with oob=True %}
 {% endif %}
 
 {% if vendor_filter %}
 {% comment %} The vendor filter (`?vendor=<id>`, from the Vendors page): a chip that removes it. The hidden input
-   above makes it travel with the search, tabs, paging and the export link like every other filter. {% endcomment %}
+   above makes it travel with the search, tabs and paging like every other filter. {% endcomment %}
 <div class="mb-4 flex flex-wrap items-center gap-2">
     <span class="inline-flex items-center gap-2 rounded-full border border-sage-300 dark:border-sage-600 bg-sage-50 dark:bg-gray-800 py-1 pl-3 pr-1 text-sm">
         Vendor: <strong class="font-semibold">{{ vendor_filter.name }}</strong>
