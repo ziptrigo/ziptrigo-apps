@@ -163,6 +163,9 @@ inv todo list local --project Website [--project none --include-archived --sort 
 inv todo remind local 1234 60 [--channel in_app|email|both] | unremind local 1234 <reminder-id>
 inv todo upload local 1234 contract.pdf photo.jpg   # SHA-256, presigned PUT, complete; exit 1 if any failed
 inv todo download local <attachment-id> [--out contract.pdf --force]   # streams to .part, then renames
+inv todo export-files local --out ./zips [--range this-year|last-30-days|... --from 2026-01-01 --to 2026-12-31 --yes --force --wait 30]   # the files of the tasks created in the range as zip files: quotes, asks to confirm the cost, waits, downloads (issue #326)
+inv todo exports local | export-get local <id> | export-download local <id> --out ./zips [--force] | export-delete local <id> [--yes]
+inv todo export-xlsx local --out tasks.xlsx [--range ... --from ... --to ... --force]   # the free quick workbook of the tasks (a Tasks and a Comments sheet)
 inv todo filters local | filter-run local <id-or-name> [--limit 20]
 inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both]
 inv todo inbox local                            # the address tasks can be emailed to
@@ -2034,7 +2037,7 @@ test_api_*.py` over Django's test client (the real `/api/receipts/...` URLs), he
 
 `apps/todo/api/` (issue #187; `/api/todo/`) is JWT-only like the receipts one (router-level
 `auth=JWTAuth()` in `api/router.py`; endpoint modules `tasks.py`, `labels.py`, `comments.py`,
-`reminders.py`, `attachments.py`, `filters.py`, `settings.py`, `parse.py` share that one `Router`;
+`reminders.py`, `attachments.py`, `filters.py`, `settings.py`, `parse.py`, `exports.py` share that one `Router`;
 schemas in `apps/todo/schemas/`) and calls the exact same `apps.todo.services` the web views do,
 adding no rule of its own. A task is addressed by its **number** (`/tasks/{number}`), everything
 else by its UUID. **Version 2 of the API (issue #275, `docs/openapi.yml` 2.0.0) is a breaking
@@ -2098,6 +2101,33 @@ attachment endpoints keep the web's order (charged before the lookup; `cancel` a
 completed file first). Where the endpoint looks up a task the lookup (404) comes before its limit is
 charged. Tests: `apps/todo/tests/test_api_*.py` over Django's test
 client (the real `/api/todo/...` URLs), helpers in `tests/api_support.py`.
+
+The **file export endpoints** (issue #326, `api/exports.py`, `schemas/export.py`, every class `TodoExport...`;
+OpenAPI 2.16.0; the same services and rate-limit budgets as the web's "Download files" and Export XLSX, no rule of
+their own; Receipts' export API without the `layout` and with a created-date range for the filters; see "To-do" >
+"Exports"): `POST /exports/quote` (body `date_range` = `any`, `last_15_days`, `last_30_days`, `this_month`,
+`this_quarter`, `this_year` or `custom`, with `date_from`/`date_to` as `YYYY-MM-DD`; answers `{file_count,
+total_bytes, part_count, price_per_file, cost, balance, affordable, frozen, retention_days, part_bytes}`, writes
+and charges nothing, spends `TODO_EXPORT_DIALOG_USER` once the range is valid), `POST /exports` (the same body plus
+`expected_cost`; 201 with the export, `status: building`; `expected_cost` is the confirmed total: a different cost is a
+409 naming the real one, nothing charged, and left out it is accepted whatever it costs), `GET /exports` (`limit`/
+`offset`, newest first, deleted ones left out, the parts of the page in one query), `GET /exports/{id}`,
+`GET /exports/{id}/parts/{number}/url` (`{url, filename, size_bytes, expires_in}`: a presigned GET to fetch
+**without** the `Authorization` header) and `DELETE /exports/{id}` (204, no refund), plus `GET /export.xlsx`
+(`date_range`/`date_from`/`date_to`; the free quick workbook, `tasks-<date>.xlsx`, `private, no-store`,
+`TODO_EXPORT_XLSX_USER`). The range is validated **strictly** (`common.export_range`: the web's lenient parsing would
+quietly widen what a client pays for): an unknown `date_range`, a malformed date, dates sent with a preset or with `any`
+and a first date after the last are a 400; no `date_range` is `custom` when a date is sent, else `any`; `custom` with
+no date is every task. Statuses as Receipts' (`common.mapped_errors` maps the export errors before the generic 400):
+**400** a bad range, nothing to export (no file in the range; use `GET /export.xlsx`), a part's URL of an export that
+is not ready; **402** frozen account or too few credits; **404** another user's or a deleted export or a part number
+it doesn't have; **409** another export being prepared (one at a time), a changed cost and deleting one still being
+built; **429** the shared rules. **A refused request spends none of its budget**, in Receipts' order: the range is
+validated first; `POST /exports` *peeks* `TODO_EXPORT_DIALOG_USER` (over it nothing is read), runs `check_export` (frozen,
+one at a time, nothing to export, a changed cost, the balance), *hits* the dialog budget when that refuses (it read the
+files) and charges `TODO_EXPORT_FILES_USER` only after it passed, handing its `Prepared` to `create_export`; a part's
+URL (`services.part_download`) is made before `TODO_EXPORT_DOWNLOAD_USER` is charged. Tests: `apps/todo/tests/
+test_api_exports.py`.
 
 **Resumable uploads** (spec section 2, issue #55 phase 3): `TransferFile.client_last_modified`
 (nullable, the browser/CLI's `lastModified`, ms since epoch) plus its name and size let a client
@@ -5897,13 +5927,42 @@ this section is what is To-do's own.
   the singleton, the Privacy Policy retention line (`TERMS_VERSION` **not** bumped; the owner decides), and the
   `openpyxl` dependency.
 - **Not included**: a project filter, a layout choice, exporting the Trash or comment revisions, a public share link,
-  re-building an expired export for free, and (PR 2 of #326) the JWT API and the `inv todo` commands.
+  re-building an expired export for free.
+- **API** (PR 2): `POST /exports/quote`, `POST /exports`, `GET /exports`, `GET /exports/{id}`,
+  `GET /exports/{id}/parts/{n}/url`, `DELETE /exports/{id}` and `GET /export.xlsx` under `/api/todo/`, described under
+  "API" above (`api/exports.py`; the range is parsed strictly, a 400 for anything the web would quietly drop; the
+  budgets are the web's and a refused request spends none). `common.export_data` builds an export's JSON from the model
+  with its parts prefetched (the names of the parts are dated in the owner's zone, so `owned_export` joins the user),
+  `common.owned_export` is the 404 lookup. OpenAPI 2.16.0.
+- **CLI** (`admin/todo.py`, PR 2): Receipts' export commands with a range in place of the filters and layout.
+  `export-files <env> [--range any|last-15-days|last-30-days|this-month|this-quarter|this-year|custom --from --to --out
+  DIR --yes --force --wait MIN]` checks the range before any request (`--range` as typed in any case with `-` or `_`;
+  `--from`/`--to` with a preset other than `custom` is refused: they go with `custom` or with no `--range`), quotes,
+  prints the files, size, zip files and cost, stops (exit 1) for nothing to export (pointing at `export-xlsx`), a frozen
+  account or a balance that can't pay, **asks `This costs N credits. Continue?`** (no question for a free export) and
+  sends the confirmed amount as `expected_cost` (with `--yes`: no question and none, whatever it costs), creates the
+  export (a 409 is shown with a pointer at `exports`, nothing downloaded), **polls** `GET /exports/{id}` (3 s, backing off
+  by half again to 15 s, "Written so far: N of P zip files"; a dropped connection, a 5xx or a 429 is tried again within
+  `--wait`, default 30 minutes; **Ctrl-C (130), the time limit and any other error leave the export building** and print
+  `todo export-download <env> <id> --out <dir>`), reports a failed export with its refund, then downloads every built
+  part: its URL from `.../parts/N/url`, streamed **with no API token** to `.<name>.part` in `--out`, size-checked and
+  renamed, one failing part not stopping the rest. A file of the same name is refused without `--force` (and `--out`
+  folder already holding `task-files-*.zip` is refused **before quoting**, so nothing is charged; a clash that appears
+  after creation says the export is paid for and points at `export-download`); `export-download` skips a complete file
+  (sizes only) and refuses one of another size. `exports`, `export-get`, `export-download <env> <id>` (waits for a
+  building one, no charge) and `export-delete <env> <id> [--yes]` are as Receipts'. `export-xlsx <env> --out FILE
+  [--range --from --to --force]` streams `GET /export.xlsx` to `.<name>.part` and renames it (`--out` may be an
+  existing folder: the file is then named as the site says, `tasks-<date>.xlsx`); an existing file is refused before
+  the request unless `--force`, because it spends one of the few per-minute exports. Tests: `admin/tests/test_todo.py`
+  (`TestExportFiles`, `TestExportDownload`, `TestExportListGetDelete`, `TestExportXlsx`, HTTP mocked); AI cases TODO-74
+  to TODO-77.
 - **Tests**: `tests/test_export_plan.py`, `test_export_workbook.py` (opened with openpyxl: every column, time zones,
   the range's bounds, comments, the formula guard also read from the raw XML), `test_exports.py` (selection, the range,
   quote, create and every refusal, building against the fake storage, skipped files, both refunds, resuming, download,
   ending, the jobs, notice and email), `test_views_exports.py` (the account block next to Receipts', the dialog, confirm,
-  rate limits, the quick XLSX, pages, other users' 404s, costs, admin), the Playwright `tests_e2e/test_todo_exports.py`
-  and the AI plan cases in `tests_e2e/ai/todo.md` (TODO-70 to TODO-73) plus ACC, MAIL, NOTIF, ADM and BILL ones.
+  rate limits, the quick XLSX, pages, other users' 404s, costs, admin), `test_api_exports.py` (PR 2: every endpoint and
+  status, other users' 404s, refusals that spend no budget, the 409s, the one-query list, the quick workbook), the
+  Playwright `tests_e2e/test_todo_exports.py` and the AI plan cases in `tests_e2e/ai/todo.md` (TODO-70 to TODO-73) plus ACC, MAIL, NOTIF, ADM and BILL ones.
 
 #### Reminders
 

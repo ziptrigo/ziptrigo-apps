@@ -11,6 +11,7 @@ from . import (
 )
 from . import blockers as _blockers  # noqa: F401 -- same
 from . import comments as _comments  # noqa: F401 -- same
+from . import exports as _exports  # noqa: F401 -- same
 from . import filters as _filters  # noqa: F401 -- same
 from . import labels as _labels  # noqa: F401 -- same
 from . import parse as _parse  # noqa: F401 -- same

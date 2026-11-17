@@ -1,6 +1,6 @@
 """The shared `Router` instance for `/api/todo/`. Every endpoint module (`tasks.py`, `labels.py`,
 `comments.py`, `reminders.py`, `attachments.py`, `filters.py`, `settings.py`, `parse.py`,
-`blockers.py`, `activity.py`)
+`blockers.py`, `activity.py`, `exports.py`)
 registers onto this one object -- the same shape as `apps.receipts.api.router` -- so the package
 stays one domain per file.
 

@@ -17,13 +17,20 @@ Status codes (documented once, here):
   (deleting a task forever that isn't in the Trash).
 - **409** `POST /tasks` while a repeating task's next occurrence is waiting to be paid for:
   `{detail, unpaid_task_numbers}`.
+- **402 / 409 / 404 for exports** (issue #326, as Receipts' export API): `POST /exports` while the
+  account is frozen or the balance can't pay is a 402; while another export is being prepared (one
+  at a time) or with an `expected_cost` that is no longer the cost (the detail names the real
+  total; nothing was charged or created) a 409, and `DELETE /exports/{id}` of one still being
+  prepared a 409; another user's export, a deleted one and a part number the export doesn't have
+  are a 404. Files in no task of the range ("nothing to export") are a 400.
 - **422** django-ninja's own validation, before an endpoint runs, with a *list-valued* `detail`:
   a malformed id or number in the path, a mistyped query parameter or body field, an unknown key
   in a body (`extra='forbid'`).
 - **429** the site-wide rate limiter (`ratelimit.enforce`), with `Retry-After`. The rules and so
   the budgets are the web's (`TODO_CREATE_USER`, `TODO_EDIT_USER`, `TODO_COMMENT_USER`,
   `TODO_SEARCH_USER`, `TODO_PARSE_USER`, `TODO_UPLOAD_USER`, `TODO_UPLOAD_COMPLETE_USER`,
-  `TODO_DOWNLOAD_USER`, `TODO_REGENERATE_USER`).
+  `TODO_DOWNLOAD_USER`, `TODO_REGENERATE_USER`, and for exports `TODO_EXPORT_FILES_USER`,
+  `TODO_EXPORT_DIALOG_USER`, `TODO_EXPORT_DOWNLOAD_USER` and `TODO_EXPORT_XLSX_USER`).
 """
 
 from collections.abc import Generator, Iterable
@@ -42,10 +49,25 @@ from ninja.errors import HttpError
 from apps.accounts.models import User
 from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
+from apps.core.date_ranges import DATE_RANGE_ANY, DATE_RANGE_CUSTOM, DATE_RANGES
 from apps.core.datetime_format import PUBLIC
 from apps.core.markdown import ReferenceResolver
+from apps.core.services.export_errors import (
+    ExportCostChangedError,
+    ExportInProgressError,
+    ExportPartMissingError,
+)
 
-from ..models import Attachment, Reminder, Resolution, Task, TaskBlocker, TodoAccount
+from ..models import (
+    Attachment,
+    ExportStatus,
+    Reminder,
+    Resolution,
+    Task,
+    TaskBlocker,
+    TodoAccount,
+    TodoExport,
+)
 from ..services import (
     AccountFrozenError,
     dates,
@@ -59,6 +81,8 @@ from ..services import (
     with_open_occurrences,
     with_subtask_counts,
 )
+from ..services.export_range import ExportRange
+from ..services.exports import part_name
 
 #: The columns of a linked task that `task_ref` reads.
 LINK_FIELDS = ('number', 'title', 'completed_at', 'deleted_at')
@@ -91,6 +115,17 @@ def mapped_errors(*, keep: type[ValidationError] | None = None) -> Generator[Non
         raise HttpError(402, exc.messages[0]) from exc
     except InsufficientCreditsError as exc:
         raise HttpError(402, str(exc) or 'Insufficient credits') from exc
+    except ExportCostChangedError as exc:
+        # Before the generic `ValidationError`, which the export errors all subclass.
+        raise HttpError(
+            409,
+            f'The cost changed: it is now {exc.quote} credits. '
+            f'Send expected_cost={exc.quote} to confirm it.',
+        ) from exc
+    except ExportInProgressError as exc:
+        raise HttpError(409, exc.messages[0]) from exc
+    except ExportPartMissingError as exc:
+        raise HttpError(404, exc.messages[0]) from exc
     except ValidationError as exc:
         if keep is not None and isinstance(exc, keep):
             raise
@@ -123,7 +158,74 @@ def parse_date(name: str, value: str | None) -> date | None:
         raise HttpError(400, f'{name} must be a date like 2026-10-09.') from None
 
 
+def export_range(date_range: str | None, date_from: str | None, date_to: str | None) -> ExportRange:
+    """The "Task created" range of an export request, validated (a 400 for anything wrong, before
+    any rate limit is charged). Stricter than the account page's form, which quietly drops what it
+    can't read: a client that pays for an export must get the range it asked for, so an unknown
+    `date_range`, a malformed date, dates sent with a preset (or with `any`) and a first date after
+    the last are all refused. No `date_range` is `custom` when a date is sent, else `any`."""
+    first = parse_date('date_from', date_from)
+    last = parse_date('date_to', date_to)
+    key = (date_range or '').strip()
+    if key:
+        key = choice('date_range', key, (value for value, _label in DATE_RANGES))
+    else:
+        key = DATE_RANGE_CUSTOM if first or last else DATE_RANGE_ANY
+    if key != DATE_RANGE_CUSTOM:
+        if first or last:
+            raise HttpError(
+                400, f'date_from and date_to go with date_range=custom, not with {key}.'
+            )
+        return ExportRange(date_range=key)
+    if first and last and first > last:
+        raise HttpError(400, 'date_from must not be after date_to.')
+    return ExportRange(date_range=key, date_from=first, date_to=last)
+
+
 # -- Lookups -------------------------------------------------------------------------------------
+
+
+def owned_export(request, export_id: UUID) -> TodoExport:
+    """The caller's export (not a deleted one), or a 404, never a 403. Its owner is joined (the
+    part names are dated in their time zone) and its parts are prefetched."""
+    return get_object_or_404(
+        TodoExport.objects.exclude(status=ExportStatus.DELETED)
+        .select_related('user')
+        .prefetch_related('parts'),
+        pk=export_id,
+        user=request.auth,
+    )
+
+
+def export_data(export: TodoExport) -> dict:
+    """An export as the response schema reads it. The parts come from a prefetch (`parts` is
+    ordered by number), so a list of exports costs one query for all of them."""
+    stored = export.filters or {}
+    return {
+        'id': export.pk,
+        'status': export.status,
+        'filters': {'summary': stored.get('summary', []), 'params': stored.get('params', {})},
+        'file_count': export.file_count,
+        'skipped_count': export.skipped_count,
+        'total_bytes': export.total_bytes,
+        'part_count': export.part_count,
+        'price_per_file': export.price_per_file,
+        'charged_credits': export.charged_credits,
+        'refunded_credits': export.refunded_credits,
+        'parts': [
+            {
+                'number': part.number,
+                'filename': part_name(export, part.number),
+                'size_bytes': part.size_bytes,
+                'file_count': part.file_count,
+                'built': part.built_at is not None,
+            }
+            for part in export.parts.all()
+        ],
+        'created_at': export.created_at,
+        'ready_at': export.ready_at,
+        'expires_at': export.expires_at,
+    }
 
 
 def owned_task(request, number: int, *, trashed: bool | None = None) -> Task:
