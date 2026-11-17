@@ -583,6 +583,31 @@ owner's session in another context; the bell empty of `Shared note` notices.
 | 2 | Delete the failed export from its page, then reopen the notice. | The notice stays (a record); its link is now a 404 page. |
 | 3 | A free export (price 0) that fails. | The body has no refund sentence. |
 
+### NOTIF-35 To-do: a finished export is one notice, replaced, never a direct file link
+
+**Purpose:** a ready To-do export notifies the owner once and links to its page (issue #326).
+**Preconditions:** `qa.user@example.com` with files on tasks, signed in.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Make an export (TODO-71 step 1). | The page opens **Ready**; the bell badge counts a new notification. |
+| 2 | Open the dropdown. | "Your to-do export is ready", body "N files in 1 zip file. Available until <date>." (the public wording, e.g. `Dec 16, 2026`). Click it: it opens `/todo/exports/<id>/` (not a file). |
+| 3 | `/notifications/`. | The notice is listed, read. |
+| 4 | Make a second export. | A second notice (one per export, each linking to its own page). |
+| 5 | Run TODO-73 step 2 (a file is gone). | The notice counts only the files that went in ("N-1 files in 1 zip file"). |
+| 6 | Escaping: nothing the owner typed (a task title, a file name) is in the notice. | The title and body are fixed text and numbers. |
+
+### NOTIF-36 To-do: a failed export notifies that the credits were refunded
+
+**Purpose:** a failed build says so and says the credits came back (issue #326).
+**Preconditions:** TODO-73 step 3 done (a failed export).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | The bell. | "Your to-do export could not be prepared", body "Something went wrong, so we couldn't make your zip files. The 3N credits you paid were refunded." It opens the failed export's page. |
+| 2 | Delete the failed export from its page, then reopen the notice. | The notice stays (a record); its link is now a 404 page. |
+| 3 | A free export (price 0) that fails. | The body has no refund sentence. |
+
 ## Out of scope
 
 - Real inbound email to `todo+` addresses through SES (NOTIF-18 runs the same ingest on a local

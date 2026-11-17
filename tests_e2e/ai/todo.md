@@ -38,6 +38,10 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 - **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and **Settings**
   `/todo/settings/` (default due time, default reminder and channel, what tasks cost, the storage line, the email
   address with Copy and Regenerate, accepted senders, recent emails);
+- **Exports** (issue #326, TODO-70 to TODO-73): the To-do block of the account page's App actions -- **Download files**
+  (the task files and comment files as zip files, 3 credits per file, with `tasks.xlsx`) and **Export XLSX** (the task
+  list as a spreadsheet, free) -- the dialog, the zip's folders and the workbook, the export's pages, refunds and
+  paused storage;
 - credits: the first 10 tasks of a calendar month are free, then 10 credits each; subtasks and occurrences count;
 - access control: logged-out visitors, another user's task numbers, attachments and filters.
 
@@ -1345,6 +1349,74 @@ one`; a second user (Session B) with a task.
 | 4 | Quick-add `Follow up #1234`. | The title stays `Follow up #1234`, in no project. |
 | 5 | On a task's page add the subtask `Sub #WSA @home`. | The subtask is `Sub #WSA` (a subtask is in its parent's project) with the `home` label. |
 | 6 | `POST /api/todo/tasks` `{"title": "Api #WSA @home"}` with TODO-55's JWT. | 201: `title` `Api`, `project.name` `WSA`, the `home` label. |
+
+### TODO-70 Exports: the To-do block of App actions and the dialog
+
+**Purpose:** To-do's **Download files** and **Export XLSX** live on the account page, next to Receipts' (issue #326); the dialog
+says what would be downloaded and what it costs for the **Task created** range chosen there.
+**Preconditions:** `qa.user@example.com` with a task in a project (`WSA`) that has a file attached and a comment with a
+file (TODO-24 and TODO-62 make such tasks), another task with a file in no project, and one task in the Trash with a file
+(never included); the export price at its default (**3 credits per file**, admin > To-do settings > **Export per file**).
+**Record** `N` = the number of files on live tasks and comments (the Trash's is not counted) and the balance `B0` on
+`/billing/credits/`.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Open `/account/` and scroll to **Apps** > **App actions**. | There are two blocks: **Receipts** (with **Receipt date**) and **To-do** (checkbox icon): "Download your task files as zip files, or your tasks as a spreadsheet.", a **Task created** select (Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom; no date fields until Custom), the buttons **Download files** (zip icon) and **Export XLSX** (spreadsheet icon) and a **Your exports** link to `/todo/exports/`. Choosing Custom in one block does not change the other. |
+| 2 | In the To-do block click **Download files**. | A dialog "Download files" opens with focus on a button: "**N files** (size) in **1 zip file** of about 100.0 MB each. Each zip opens on its own, and the first one also holds `tasks.xlsx`, a spreadsheet of the tasks and their comments with the files listed against them.", "All your tasks. To download only some, choose a date range first. Files of tasks in the Trash and of deleted comments are not included.", "This costs **3N credits** (3 per file). Your balance is `B0`. You are charged now; if we can't make the files, you get the credits back." and "... You can download them for 30 days, then they are deleted."; **Cancel** and **Download for 3N credits**. There is no folder-layout choice. Nothing was charged yet. |
+| 3 | Press Escape; open it again and click **Cancel**; open it and click the backdrop. | The dialog closes each time and focus returns to the button. Balance still `B0`. Receipts' dialog (`#export-modal`) is not affected. |
+| 4 | Choose **This month**, open the dialog. | It counts only files of tasks **created** this month (not when the file was attached), says "Only tasks created in this range: Task created: <first> to <last>." and the price follows. Choose **Custom**, enter a from and a to date, open it again: the count follows; the dates are the account's day, from midnight to midnight in the account's time zone. |
+| 5 | Choose a custom range in 2001. | "No files in this range; use Export XLSX for the task list."; the download button is disabled. |
+| 6 | Open `/todo/exports/new/` directly. | You land on `/account/#apps`. |
+| 7 | As `qa.admin` set **Export per file** to `5` (admin > To-do > To-do settings); as `qa.user` open the dialog. | "This costs **5N credits** (5 per file)": the price is read live. Set `0`: "This is free." and the button reads **Download files**. Set it back to `3`. |
+| 8 | As a user with fewer credits than `3N` open the dialog. | "Your balance is ..." and, in the message line, a **Top up your credits** link to `/billing/credits/`. |
+
+### TODO-71 Exports: confirm, download the zip and open the workbook
+
+**Purpose:** confirming charges once, builds the zip, and the export's page offers it; the zip has the files in
+`<project>/<number> - <title>/` folders and `tasks.xlsx` (issue #326).
+**Preconditions:** TODO-70; `qa.user@example.com` with balance `B0`; no other export. The server runs tasks inline, so the
+export is ready when its page opens.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Open the dialog (**Any date**) and click **Download for 3N credits**. | A spinner ("Starting..."), then `/todo/exports/<id>/` opens with the flash "We're preparing your zip files. We'll tell you here and by email when they are ready." |
+| 2 | Look at the page. | Heading **Export**; a green **Ready** pill, "N files, <size>, in 1 zip file . asked for <date, time>"; "Available to download until **<date in 30 days>**, then it is deleted."; one row `task-files-<YYYY-MM-DD>.zip` with "N files, with tasks.xlsx" and a **Download** button; "Charged 3N credits."; **Delete**. The sidebar of To-do is still there, **Settings** highlighted. |
+| 3 | `/billing/credits/`. | Balance `B0 - 3N`; the newest row is a Spend "To-do export: N files" for 3N, source To-do. |
+| 4 | Click **Download**, open the zip. | `WSA/<number> - <title>/<file>` for the project task's own files, `WSA/<number> - <title>/comments/<file>` for its comment's, `No project/<number> - <title>/<file>` for the other task, and `tasks.xlsx` at the root. The task in the Trash and its file are absent. Every file's bytes equal the attachment's. |
+| 5 | Open `tasks.xlsx`. | Two sheets, **Tasks** and **Comments**, header row bold and frozen. **Tasks**: number, title, description, state, resolution, priority, due date, due time, project, section, labels, parent, created, closed, comments, files -- one row for every live task created in the range, **including ones with no file, closed ones and subtasks**, not the trashed one; the dates are real dates in the account's time zone; **Files** has one line per file, its path in the zip. **Comments**: task number, task title, created, edited, comment, files; no deleted comment. |
+| 6 | Add a task titled `=1+1` with a comment `@SUM(1,1)`, export again (delete the first export first) and open the workbook. | The two cells show the text with a leading apostrophe (`'=1+1`, `'@SUM(1,1)`): nothing is a formula. |
+| 7 | Open the bell, then `/todo/exports/`. | "Your to-do export is ready": "N files in 1 zip file. Available until <date>." opening the export's page. The list shows it with its date, "N files . size . 1 zip file . until <date>", a **Ready** pill and **Open**. |
+| 8 | Delete the export on its page (a confirmation first). | "The export was deleted."; it is gone from the list and its page is a 404; no refund. |
+
+### TODO-72 Exports: Export XLSX
+
+**Purpose:** the quick download is the same workbook on its own, free (issue #326).
+**Preconditions:** TODO-70; balance `B0`.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | On `/account/`, To-do block, **Any date**, click **Export XLSX**. | `tasks-<today>.xlsx` downloads and the page stays; the balance is still `B0` and `/todo/exports/` has no new export. |
+| 2 | Open it. | The same two sheets as TODO-71 step 5, but **Files** holds file names (`report.pdf`), not zip paths. |
+| 3 | Choose **Last 15 days** and export again; then a Custom range in 2001. | Only tasks created in the range; for 2001 just the header rows. |
+| 4 | Pause the storage (TODO-31's shell step) and export again. | It still works (the workbook holds no files). Unpause afterwards. |
+| 5 | Open `/todo/export.xlsx` signed out. | The sign-in page. |
+
+### TODO-73 Exports: several zip files, a file that is gone, a failed build, paused storage and other people's exports -- shell steps
+
+**Purpose:** the rules around an export's life (issue #326; the engine is shared with Receipts' RCPT-66 to RCPT-70).
+**Preconditions:** `qa.user@example.com` with at least four files on tasks; balance noted. Shell steps need the repo's
+shell (`python tests_e2e/ai/manage.py shell -c "..."`); without one mark them **BLOCKED (needs-shell)**.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | (Shell) `from apps.todo.models import TodoSettings; TodoSettings.objects.update(export_part_bytes=1500)`, open the dialog. | "N files (size) in **P zip files** of about 1.5 KB each", P at least 2. Confirm: the page lists `task-files-<date>-part-01-of-0P.zip` ... and only the first says "with tasks.xlsx". Each opens on its own; part 1's workbook lists every file with ` (part N)` after its path. Put the part size back (`100*1024*1024`). |
+| 2 | (Shell) delete one attachment's object (`get_storage().delete_object(attachment_key(user.pk, attachment.pk))`), then export. | **Ready**, "1 file was no longer there and left out; 3 credits refunded.", "Charged 3N credits, 3 refunded."; the zip and the workbook do not have that file; `/billing/credits/` has a Refund "To-do export: 1 file(s) no longer there". |
+| 3 | (Shell) make the build fail three times, as RCPT-69 does but with `from apps.todo.services import exports as e`, `from apps.todo.models import TodoExport` and `engine.write_part` (from `apps.core.services.exports`) replaced by a function `boom(kind, export, part)` that raises, then `e.create_export(user, None)` and three `e.build_part.call(str(ex.pk), 1)` calls (clearing `lease_until` before each). | The export is **Failed**: "We couldn't prepare the zip files. The 3N credits you paid were refunded." A Refund "To-do export could not be prepared"; the bell says it could not be prepared; **no email**. |
+| 4 | (Shell) start an export without queueing its build (as RCPT-70 step 1), open the dialog and confirm another. | The page shows **Preparing**; the second is refused with "An export is already being prepared. Wait for it to finish first." |
+| 5 | Pause storage (TODO-31's shell step) and open the dialog; try to download a ready export's zip. | The dialog says "Storage is paused, so files can't be downloaded until you add credits." with a Top up link and a disabled button; the download redirects back to the export's page with "Storage is paused: top up your credits to upload or download files." Unpause afterwards. |
+| 6 | As another user open `/todo/exports/<id>/` and its `/parts/1/download/`. | A 404 page for each; the other user's `/todo/exports/` does not list it. |
+| 7 | (Shell) set an export's `expires_at` in the past and run `from apps.todo import jobs; jobs.purge_exports()`. | The export reads **Expired** ("These zip files were deleted <date>..."), its download button is gone and its objects are deleted. |
 
 ## Out of scope
 

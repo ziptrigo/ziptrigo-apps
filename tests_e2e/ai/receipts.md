@@ -1292,16 +1292,17 @@ the build raise three times, like a storage outage, then starts an export for `F
 python tests_e2e/ai/manage.py shell -c "
 from apps.accounts.models import User
 from apps.receipts.models import ReceiptExport
+from apps.core.services import exports as engine
 from apps.receipts.services import exports as e
 user = User.objects.get(email='<F>')
-def boom(export, part): raise RuntimeError('S3 is down')
-real = e._write_part
-e._write_part = boom
+def boom(kind, export, part): raise RuntimeError('S3 is down')
+real = engine.write_part
+engine.write_part = boom
 ex = e.create_export(user, None, 'year_vendor')
 for _ in range(e.MAX_ATTEMPTS):
     ReceiptExport.objects.filter(pk=ex.pk).update(lease_until=None)
     e.build_part.call(str(ex.pk), 1)
-e._write_part = real
+engine.write_part = real
 ex.refresh_from_db(); print(ex.pk, ex.status, ex.charged_credits, ex.refunded_credits)
 "
 ```
