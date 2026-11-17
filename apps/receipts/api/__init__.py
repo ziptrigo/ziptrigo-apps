@@ -8,6 +8,7 @@ from . import (
     categories as _categories,  # noqa: F401 -- imported for its side effect (registers endpoints)
 )
 from . import export as _export  # noqa: F401 -- same
+from . import exports as _exports  # noqa: F401 -- same
 from . import inbox as _inbox  # noqa: F401 -- same
 from . import receipts as _receipts  # noqa: F401 -- same
 from . import uploads as _uploads  # noqa: F401 -- same

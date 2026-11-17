@@ -1,6 +1,16 @@
 """Pydantic/ninja schemas for the receipts JWT API (`/api/receipts/`)."""
 
 from .category import CategoryNameSchema, CategoryOrderSchema, CategorySchema
+from .export import (
+    ReceiptExportCreateSchema,
+    ReceiptExportFilterInfoSchema,
+    ReceiptExportListSchema,
+    ReceiptExportPartSchema,
+    ReceiptExportPartUrlSchema,
+    ReceiptExportQuoteSchema,
+    ReceiptExportRequestSchema,
+    ReceiptExportSchema,
+)
 from .inbox import ForwardingConfirmationSchema, InboxSchema, InboxUpdateSchema
 from .receipt import (
     CategoryRefSchema,
@@ -29,6 +39,14 @@ __all__ = [
     'ForwardingConfirmationSchema',
     'InboxSchema',
     'InboxUpdateSchema',
+    'ReceiptExportCreateSchema',
+    'ReceiptExportFilterInfoSchema',
+    'ReceiptExportListSchema',
+    'ReceiptExportPartSchema',
+    'ReceiptExportPartUrlSchema',
+    'ReceiptExportQuoteSchema',
+    'ReceiptExportRequestSchema',
+    'ReceiptExportSchema',
     'ReceiptListSchema',
     'ReceiptSchema',
     'ReceiptUpdateSchema',
