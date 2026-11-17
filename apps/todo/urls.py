@@ -61,6 +61,19 @@ urlpatterns = [
         views.attachment_delete,
         name='attachment-delete',
     ),
+    # Exports (issue #326): the quick XLSX, the "Download files" dialog (GET) and its confirmation
+    # (POST), the list, one export, its status panel, and the actions on it.
+    path('export.xlsx', views.export_xlsx, name='export-xlsx'),
+    path('exports/', views.exports_page, name='exports'),
+    path('exports/new/', views.export_new, name='export-new'),
+    path('exports/<uuid:export_id>/', views.export_detail, name='export-detail'),
+    path('exports/<uuid:export_id>/panel/', views.export_panel, name='export-panel'),
+    path(
+        'exports/<uuid:export_id>/parts/<int:number>/download/',
+        views.export_part_download,
+        name='export-part-download',
+    ),
+    path('exports/<uuid:export_id>/delete/', views.export_delete, name='export-delete'),
     path('search/', views.search_page, name='search'),
     path('search/list/', views.search_list, name='search-list'),
     path('filters/', views.filters_page, name='filters'),

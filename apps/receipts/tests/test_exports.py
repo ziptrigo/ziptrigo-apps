@@ -6,7 +6,7 @@ notification and email."""
 import csv
 import io
 import zipfile
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -18,6 +18,7 @@ from apps.accounts.models import User
 from apps.billing.models import CreditTransaction, CreditTransactionType
 from apps.billing.services import InsufficientCreditsError, get_balance
 from apps.core.models import Notification
+from apps.core.services import exports as engine
 
 from .. import jobs
 from ..models import (
@@ -541,20 +542,20 @@ class TestBuild:
         price.save()
         export = make_export(funded_user)
         number = svc.next_part_to_build(export)
-        real_claim = svc._claim
+        real_claim = engine.claim
 
-        def other_worker_builds_first(export_id):
+        def other_worker_builds_first(kind, export_id):
             # Worker A builds and finishes the part between B's read of it and B's claim.
-            monkeypatch.setattr(svc, '_claim', real_claim)
+            monkeypatch.setattr(engine, 'claim', real_claim)
             svc.build_part.call(str(export.pk), number)
-            return real_claim(export_id)
+            return real_claim(kind, export_id)
 
         writes = []
-        real_write = svc._write_part
+        real_write = engine.write_part
         monkeypatch.setattr(
-            svc, '_write_part', lambda *a, **k: writes.append(1) or real_write(*a, **k)
+            engine, 'write_part', lambda *a, **k: writes.append(1) or real_write(*a, **k)
         )
-        monkeypatch.setattr(svc, '_claim', other_worker_builds_first)
+        monkeypatch.setattr(engine, 'claim', other_worker_builds_first)
         svc.build_part.call(str(export.pk), number)  # worker B
 
         part = export.parts.get(number=number)
@@ -568,15 +569,15 @@ class TestBuild:
         self, funded_user, three, fake_storage, monkeypatch
     ):
         export = make_export(funded_user)
-        real = svc._write_part
+        real = engine.write_part
 
-        def other_worker_finishes_meanwhile(exp, part):
-            result = real(exp, part)
+        def other_worker_finishes_meanwhile(kind, exp, part):
+            result = real(kind, exp, part)
             ReceiptExportPart.objects.filter(pk=part.pk).update(built_at=timezone.now())
             assert svc.finish_export(exp.pk)
             return result
 
-        monkeypatch.setattr(svc, '_write_part', other_worker_finishes_meanwhile)
+        monkeypatch.setattr(engine, 'write_part', other_worker_finishes_meanwhile)
         svc.build_part.call(str(export.pk), 1)
 
         export.refresh_from_db()
@@ -702,14 +703,14 @@ class TestFailure:
         self, funded_user, three, fake_storage, monkeypatch
     ):
         export = make_export(funded_user)
-        real = svc._write_part
+        real = engine.write_part
 
-        def write_then_fail_elsewhere(exp, part):
-            result = real(exp, part)
+        def write_then_fail_elsewhere(kind, exp, part):
+            result = real(kind, exp, part)
             svc.fail_export(exp.pk, 'failed elsewhere')
             return result
 
-        monkeypatch.setattr(svc, '_write_part', write_then_fail_elsewhere)
+        monkeypatch.setattr(engine, 'write_part', write_then_fail_elsewhere)
         svc.build_part.call(str(export.pk), 1)
         assert not any(k.endswith('.zip') for k in fake_storage.objects)
 
@@ -727,12 +728,12 @@ class TestFailure:
         export = make_export(funded_user)
         assert get_balance(funded_user) == 91
         for _ in range(svc.MAX_ATTEMPTS):
-            assert svc._claim(export.pk)  # a worker takes the part ... and is killed
+            assert engine.claim(svc.KIND, export.pk)  # a worker takes the part ... and is killed
             ReceiptExport.objects.filter(pk=export.pk).update(
                 lease_until=timezone.now() - timedelta(minutes=1),
                 progress_at=timezone.now() - timedelta(minutes=30),
             )
-        assert not svc._claim(export.pk)  # the attempts are spent
+        assert not engine.claim(svc.KIND, export.pk)  # the attempts are spent
 
         assert svc.resume_stalled() == 1
 
@@ -758,7 +759,7 @@ class TestFailure:
         export = make_export(funded_user)
         # two interrupted claims, then the parts are built: progress resets the count
         for _ in range(svc.MAX_ATTEMPTS - 1):
-            assert svc._claim(export.pk)
+            assert engine.claim(svc.KIND, export.pk)
             ReceiptExport.objects.filter(pk=export.pk).update(lease_until=None)
         build_all(export)
         export.refresh_from_db()
@@ -766,11 +767,11 @@ class TestFailure:
 
     def test_a_claim_released_for_nothing_is_not_an_attempt(self, funded_user, three):
         export = make_export(funded_user)
-        assert svc._claim(export.pk)
-        svc._release(export.pk)
+        assert engine.claim(svc.KIND, export.pk)
+        engine.release(svc.KIND, export.pk)
         export.refresh_from_db()
         assert export.attempts == 0 and export.lease_until is None
-        svc._release(export.pk)  # never below zero
+        engine.release(svc.KIND, export.pk)  # never below zero
         export.refresh_from_db()
         assert export.attempts == 0
 
@@ -866,7 +867,7 @@ class TestReady:
     def test_one_notice_per_export(self, funded_user, three):
         export = make_export(funded_user)
         build_all(export)
-        svc._notify_ready(export)
+        engine._notify_ready(svc.KIND, export)
         assert (
             Notification.objects.filter(user=funded_user, key=svc.notice_key(export.pk)).count()
             == 1
@@ -952,6 +953,18 @@ class TestDownload:
         assert call['disposition'] == 'attachment'
         assert call['filename'] == svc.part_name(ready, 1) and call['filename'].endswith('.zip')
         assert url.startswith('https://fake-s3.test/')
+
+    def test_the_part_is_dated_where_the_user_is(self, ready):
+        # 22:30 on the 16th in Los Angeles is already the 17th in UTC, the server's zone.
+        User.objects.filter(pk=ready.user_id).update(timezone='America/Los_Angeles')
+        ReceiptExport.objects.filter(pk=ready.pk).update(
+            created_at=datetime(2026, 11, 17, 6, 30, tzinfo=UTC)
+        )
+        ready = ReceiptExport.objects.get(pk=ready.pk)
+        assert svc.part_name(ready, 1) == 'receipts-2026-11-16.zip'
+        User.objects.filter(pk=ready.user_id).update(timezone='UTC')
+        ready = ReceiptExport.objects.get(pk=ready.pk)
+        assert svc.part_name(ready, 1) == 'receipts-2026-11-17.zip'
 
     def test_a_multi_part_name_says_which(self, ready):
         ReceiptExport.objects.filter(pk=ready.pk).update(part_count=5)
@@ -1081,16 +1094,16 @@ class TestEnding:
         other = make_export(funded_user)
         build_all(other)
         ReceiptExport.objects.update(expires_at=timezone.now() - timedelta(days=1))
-        real = svc._end
+        real = engine.end
         calls = []
 
-        def flaky(export, **kw):
+        def flaky(kind, export, **kw):
             calls.append(export.pk)
             if len(calls) == 1:
                 raise RuntimeError('boom')
-            return real(export, **kw)
+            return real(kind, export, **kw)
 
-        monkeypatch.setattr(svc, '_end', flaky)
+        monkeypatch.setattr(engine, 'end', flaky)
         assert svc.expire_exports() == 1
         assert len(calls) == 2
 

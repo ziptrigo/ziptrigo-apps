@@ -63,4 +63,12 @@
     <p class="text-sm text-gray-500 dark:text-gray-400">No emails yet.</p>
     {% endif %}
 </section>
+{% comment %} Exports (issue #326): the buttons are on the account page's "App actions"; this is where the list of exports is linked. {% endcomment %}
+<section class="mb-8" aria-labelledby="exports-title">
+    <h2 id="exports-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Exports</h2>
+    <p class="text-sm text-gray-600 dark:text-gray-300">
+        Download the files attached to your tasks as zip files, or your tasks as a spreadsheet, from <a href="{% url 'accounts:account' %}#apps" class="underline">your account page</a>.
+        <a href="{% url 'todo:exports' %}" class="text-sage-600 dark:text-sage-300 hover:underline">Your exports</a>
+    </p>
+</section>
 {% endblock %}

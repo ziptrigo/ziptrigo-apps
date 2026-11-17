@@ -1,0 +1,64 @@
+{% comment %} The form of the "Download files" dialog (issue #326). It carries the "Task created" range chosen on the account
+   page as hidden fields, so what is exported is what the dialog described, and the total it states as
+   `confirm_cost`: the server refuses (nothing charged) and shows this again when that is no longer the cost.
+   {% endcomment %}
+<form method="post" action="{% url 'todo:export-new' %}" hx-post="{% url 'todo:export-new' %}"
+      hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find button[type='submit']" class="p-6">
+    {% csrf_token %}
+    {% for key, value in filter_params %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+    <input type="hidden" name="confirm_cost" value="{{ quote.cost }}">
+    <h3 id="todo-export-modal-title" class="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Download files</h3>
+
+    {% if quote.frozen %}
+    <p class="rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
+        <i class="fas fa-triangle-exclamation mr-1 text-amber-600 dark:text-amber-400" aria-hidden="true"></i>Storage is paused, so files can't be downloaded until you add credits.
+        <a href="{% url 'billing:credits-history' %}" class="underline">Top up your credits</a>
+    </p>
+    {% elif not quote.file_count %}
+    <p class="text-sm text-gray-700 dark:text-gray-300">No files in this range; use Export XLSX for the task list.</p>
+    {% else %}
+    <p class="text-sm text-gray-700 dark:text-gray-300">
+        <strong class="font-semibold">{{ quote.file_count }} file{{ quote.file_count|pluralize }}</strong>
+        ({{ quote.total_bytes|filesizeformat }}) in <strong class="font-semibold">{{ quote.part_count }} zip file{{ quote.part_count|pluralize }}</strong>
+        of about {{ quote.part_bytes|filesizeformat }} each. Each zip opens on its own, and the first one also holds <code class="font-mono">tasks.xlsx</code>, a spreadsheet of the tasks and their comments with the files listed against them.
+    </p>
+    <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+        {% if filter_lines %}Only tasks created in this range: {{ filter_lines|join:'; ' }}.{% else %}All your tasks. To download only some, choose a date range first.{% endif %}
+        Files of tasks in the Trash and of deleted comments are not included.
+    </p>
+
+    <p class="mt-4 text-sm text-gray-700 dark:text-gray-300">
+        {% if quote.cost %}
+        This costs <strong class="font-semibold">{{ quote.cost }} credit{{ quote.cost|pluralize }}</strong> ({{ quote.price_per_file }} per file). Your balance is {{ quote.balance }}.
+        You are charged now; if we can't make the files, you get the credits back.
+        {% else %}
+        This is free.
+        {% endif %}
+    </p>
+    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+        We prepare the files in the background and tell you here and by email when they are ready. You can download them for {{ quote.retention_days }} day{{ quote.retention_days|pluralize }}, then they are deleted.
+    </p>
+    {% endif %}
+
+    <div id="todo-export-msg" class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">
+        {% for line in errors %}{{ line }}<br>{% endfor %}
+        {% if top_up and not quote.frozen %}<a href="{% url 'billing:credits-history' %}" class="underline">Top up your credits</a>{% endif %}
+    </div>
+
+    <div class="mt-6 flex flex-wrap justify-end gap-3">
+        <button type="button" @click="close()"
+                class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Cancel</button>
+        {% if can_submit %}
+        <button type="submit" data-autofocus
+                class="btn group inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
+            <span class="group-disabled:hidden"><i class="fas fa-download mr-2" aria-hidden="true"></i>{% if quote.cost %}Download for {{ quote.cost }} credit{{ quote.cost|pluralize }}{% else %}Download files{% endif %}</span>
+            <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2" aria-hidden="true"></i>Starting&hellip;</span>
+        </button>
+        {% else %}
+        <button type="button" disabled
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary opacity-50 cursor-not-allowed">
+            <i class="fas fa-download mr-2" aria-hidden="true"></i>Download files
+        </button>
+        {% endif %}
+    </div>
+</form>

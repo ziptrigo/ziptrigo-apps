@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from apps.accounts.models import User
 
-from ..models import Attachment, Label, Task
+from ..models import Attachment, Comment, Label, Task
 from ..services import get_account
 from ..services.accounts import add_stored_bytes
 from ..services.storage import attachment_key
@@ -32,6 +32,23 @@ def make_task(user: User, **fields) -> Task:
     task = Task.objects.create(user=user, **fields)
     if labels:
         task.labels.set(labels)
+    return task
+
+
+def make_comment(task: Task, body: str = 'A comment', **fields) -> Comment:
+    """A saved comment straight in the database (no services, no search text)."""
+    created_at = fields.pop('created_at', None)
+    comment = Comment.objects.create(task=task, user=task.user, body=body, **fields)
+    if created_at is not None:
+        Comment.objects.filter(pk=comment.pk).update(created_at=created_at)
+        comment.refresh_from_db()
+    return comment
+
+
+def created(task: Task, when: datetime) -> Task:
+    """Set `task.created_at` (an `auto_now_add` field, so not settable at creation)."""
+    Task.objects.filter(pk=task.pk).update(created_at=when)
+    task.refresh_from_db()
     return task
 
 

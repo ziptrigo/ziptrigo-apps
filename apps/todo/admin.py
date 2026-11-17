@@ -31,6 +31,8 @@ from .models import (
     TaskBlocker,
     TaskEvent,
     TodoAccount,
+    TodoExport,
+    TodoExportPart,
     TodoSettings,
 )
 from .services.billing import month_key
@@ -509,6 +511,41 @@ class InboundEmailAdmin(ReadOnlyModelAdmin):
     list_select_related = ['user']
 
 
+class TodoExportPartInline(admin.TabularInline):
+    model = TodoExportPart
+    extra = 0
+    can_delete = False
+    fields = ['number', 'key', 'size_bytes', 'file_count', 'built_at']
+    readonly_fields = fields
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
+class TodoExportAdmin(ReadOnlyModelAdmin):
+    """Download-files exports (issue #326): who asked for what, the credits charged and refunded,
+    and why a build failed. Read-only: an export's files and rows go through
+    `services.exports` (deleting a row here would orphan its S3 objects)."""
+
+    list_display = [
+        'id',
+        'user',
+        'status',
+        'file_count',
+        'part_count',
+        'skipped_count',
+        'charged_credits',
+        'refunded_credits',
+        'created_at',
+        'expires_at',
+    ]
+    list_filter = ['status', 'created_at']
+    search_fields = ['id', 'user__email', 'last_error']
+    list_select_related = ['user']
+    date_hierarchy = 'created_at'
+    inlines = [TodoExportPartInline]
+
+
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
 custom_admin_site.register(TaskBlocker, TaskBlockerAdmin)
@@ -524,3 +561,4 @@ custom_admin_site.register(ReminderDelivery, ReminderDeliveryAdmin)
 custom_admin_site.register(SavedFilter, SavedFilterAdmin)
 custom_admin_site.register(InboundMessage, InboundMessageAdmin)
 custom_admin_site.register(InboundEmail, InboundEmailAdmin)
+custom_admin_site.register(TodoExport, TodoExportAdmin)

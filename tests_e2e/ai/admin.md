@@ -1117,6 +1117,21 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | 6 | Delete a user who has exports (a throwaway account that made one) from `/admin/accounts/user/`. | The delete page lists the user's exports among the objects removed and is allowed; afterwards the export rows are gone and the zip objects too (the user's whole prefix is deleted). |
 | 7 | `/admin/core/scheduledjob/`. | `receipts.purge_exports` is listed (daily) with its description "Deletes the zip files of receipt exports once their retention days have passed...". |
 
+### ADM-67 To-do exports and the "Export per file" setting
+
+**Purpose:** staff can see To-do exports (read-only) and change the export price and retention (issue #326).
+**Preconditions:** TODO-71 and TODO-73 done (a ready, a partly-skipped and a failed export).
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | As `qa.admin@example.com`, open `/admin/todo/todosettings/` (it goes straight to the form). | The fields **Export per file** (3), **Export retention days** (30) and **Export part size (bytes)** (104857600). Set **Export per file** to `0` and **Save**: saved; the To-do Download files dialog now says "This is free." and the Costs page (BILL-39) shows Free. Put it back to `3`. |
+| 2 | Enter `0` in **Export retention days**; enter `5` in **Export part size**. | Each is refused (minimums 1 day and 10 MB). |
+| 3 | Open `/admin/todo/todoexport/`. | The list shows id, user, status, file count, part count, skipped, charged, refunded, created and expires; filters by status and date; search by id, email and error. |
+| 4 | Filter by status **Failed**; open that export. | Every field read-only (`last_error` shows the cause); "refunded credits" equals "charged credits"; no parts. No Add, Save or Delete; `/admin/todo/todoexport/add/` is a 403. |
+| 5 | Open the ready export. | The Parts table lists `number`, `key` (`todo/users/<user id>/exports/<id>/part-01.zip`), size, file count and built time, read-only. |
+| 6 | Delete a throwaway user who made an export from `/admin/accounts/user/`. | The delete page lists the user's exports among the objects removed and is allowed; afterwards the export rows and the zip objects are gone. |
+| 7 | `/admin/core/scheduledjob/`. | `todo.purge_exports` (daily, "Deletes the zip files of to-do exports once their retention days have passed...") and `todo.retry_exports` (every 5 minutes, "Resumes to-do exports whose build stalled...") are listed. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

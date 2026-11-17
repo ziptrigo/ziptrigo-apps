@@ -119,7 +119,7 @@ apps/<app>/
 | `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
 | `/links/…` | short_url: dashboard (`/links/`), create and edit, a link's page and its stats (`<id>/stats/`) |
 | `/s/<code>` | short_url short links (`/s/<code>+` previews one, `/s/<code>/unlock` is the password page of a protected one) — at the root because they're printed and shared |
-| `/todo/…` | todo: Today (`/todo/`), `upcoming/`, `all/`, `completed/`, `trash/`, a task's page (`<number>/`), `labels/`, `settings/` |
+| `/todo/…` | todo: Today (`/todo/`), `upcoming/`, `all/`, `completed/`, `trash/`, a task's page (`<number>/`), `labels/`, `settings/`, `export.xlsx` and `exports/` (the zip exports of task files) |
 | `/notes/…` | notes: the list (`/notes/`), `archived/`, `trash/`, `tags/`, `search/`, `filters/`, a note's page (`<id>/`), the editor (`new/`, `<id>/edit/`), history |
 | `/n/<code>` | notes: shared notes (`/n/<code>/raw`, `/download`, `/edit` for an editable link) — at the root because they're shared as addresses |
 | `/time/…` | world_time: the first tab's grid (`/time/`), a tab (`<id>/`, `?date=YYYY-MM-DD` for another day), the location search, the user's shared events (`events/`, `events/<id>/`) |

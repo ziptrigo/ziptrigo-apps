@@ -61,6 +61,7 @@ Subjects are quoted from the code; `<...>` is filled in at send time.
 | 27 | `You've been asked to upload files` | A file request for "Only these people" is created, an address is added to it, or **Resend** on an invitee | Each invitee address | MAIL-27 |
 | 28 | `Your file request is done` | Someone **other than the owner** marks a file request done | The owner, if confirmed | MAIL-28 |
 | 29 | `Your receipts export is ready` | A Receipts "Download files" export finishes (issue #315) | The owner, if confirmed | MAIL-29 |
+| 30 | `Your to-do export is ready` | A To-do "Download files" export finishes (issue #326) | The owner, if confirmed | MAIL-30 |
 
 Out of scope (see the end of the file): the Google / Microsoft wording of email 2, delivery
 failures, and rate-limited sends.
@@ -581,10 +582,26 @@ two paid notes; the admin spends the balance down to exactly 7; shell access.
 | 8 | Un-confirm `qa.user` (shell, as MAIL-28 step 8), make an export. | The export is ready and the bell has its notice (NOTIF-33) but **no email**. Re-confirm afterwards. |
 | 9 | A failed export (RCPT-69). | **No email** is sent (the notice and the refund only). |
 
+### MAIL-30 To-do: "Your to-do export is ready"
+
+**Purpose:** when a To-do export (TODO-71) finishes the owner gets one email with a link to the export's page, never to a file (issue #326).
+**Preconditions:** `qa.user@example.com` (confirmed) with files on tasks; the export price at its default.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | As `qa.user`, **Download files** in the To-do block on `/account/`, confirm (TODO-71 step 1). | The export's page opens, **Ready**. |
+| 2 | `/__e2e__/mail/?to=qa.user@example.com` (reload until it arrives). | Exactly one new email, subject exactly `Your to-do export is ready` (nothing from the tasks in it). |
+| 3 | Text body. | `Your to-do export is ready: N files in 1 zip file, with the spreadsheet of your tasks in the first one.`, a blank line, `The zip files are available to download until <date, time> UTC. Then they are deleted.`, then `Download them from your exports page (you need to be signed in):` and `<BASE>/todo/exports/<id>/`, then `--` and `The ZipTrigo Team`. No S3 address, no file name and no task title anywhere. |
+| 4 | HTML source. | The same sentences, a link "Open your exports page" to `<BASE>/todo/exports/<id>/`; no raw `<script>`. |
+| 5 | Click the link signed out, then sign in. | The sign-in page, then the export's page. |
+| 6 | Make an export after a file's object was deleted (TODO-73 step 2). | The email adds `1 file was no longer there and left out; the 3 credits for it were refunded.` |
+| 7 | Un-confirm `qa.user` (shell, as MAIL-28 step 8), make an export. | The export is ready and the bell has its notice (NOTIF-35) but **no email**. Re-confirm afterwards. |
+| 8 | A failed export (TODO-73 step 3). | **No email** is sent (the notice and the refund only). |
+
 ### MAIL-23 Every email of the run follows the rules
 
 **Purpose:** a final sweep over everything this file made the site send.
-**Preconditions:** MAIL-01 to MAIL-29 have run.
+**Preconditions:** MAIL-01 to MAIL-30 have run.
 
 | # | Action | Expected result |
 |---|---|---|

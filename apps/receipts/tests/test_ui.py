@@ -127,7 +127,7 @@ class TestEveryPage:
         content = web.get(reverse(f'receipts:{name}')).content.decode()
 
         # Not `defer`: its `alpine:init` listener has to exist before Alpine starts.
-        assert '<script src="/static/receipts/js/common.js"></script>' in content
+        assert '<script src="/static/core/js/fragment_modal.js"></script>' in content
 
     def test_the_csrf_cookie_is_set_for_pages_that_post_with_script(self, web):
         for name in ('dashboard', 'upload', 'trash', 'settings', 'vendors'):

@@ -129,6 +129,7 @@ def list_exports(request, limit: int = DEFAULT_LIMIT, offset: int = 0):
         ReceiptExport.objects.filter(user=request.auth)
         .exclude(status=ExportStatus.DELETED)
         .order_by('-created_at', '-pk')
+        .select_related('user')  # the part names are dated in the user's time zone
         .prefetch_related('parts')
     )
     return {

@@ -31,7 +31,10 @@ apps/core/            Site shell: base.html, landing page, the Privacy Policy an
                       in through, read by To-do's activity log),
                       and the Alpine components every product
                       shares (`core/js/components.js`: `copyText`, `confirmModal`,
-                      `notificationBell`).
+                      `notificationBell`; `core/js/fragment_modal.js`: `fragmentModal`),
+                      and the export engine Receipts and To-do share (issue #326:
+                      `core/models/exports.py`, `core/services/exports.py`,
+                      `export_names.py`, `export_errors.py`, `core/date_ranges.py`).
 apps/accounts/        User model, auth pages + API, JWT auth classes, the memory of confirmed
                       addresses (`KnownEmail`, issue #160), sign-in by emailed code or link (#295).
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
@@ -724,9 +727,13 @@ Alpine component; a block's query fields on the account page take a prefix of it
 with the request inside a block with its icon and name (`core/partials/app_actions.html`, subheading "App actions"), and
 renders nothing when no product has actions. A provider that raises is logged (`logger.exception`) and its block says
 "Not available right now."; the page stays up. A provider must not create the product's account. **A new action registers
-a provider (or extends the product's template); nothing is added to the account page.** Receipts is the first user (its
-Download files and Export CSV, see "Receipts" > "Exports"). Tests: `apps/core/tests/test_app_actions.py`, the Receipts
-view tests, AI case ACC-55.
+a provider (or extends the product's template); nothing is added to the account page.** Receipts (its
+Download files and Export CSV, see "Receipts" > "Exports") and To-do (Download files and Export XLSX, issue #326, see
+"To-do" > "Exports") use it: each block prefixes its query fields with its app (`receipts_`, `todo_`), keeps its own
+`<app>-export-*` ids and its own dialog host (`#export-modal`, `#todo-export-modal`), and both list
+`core/js/fragment_modal.js` (the `fragmentModal` dialog component), which is written once. The two blocks share the
+date ranges (`apps.core.date_ranges`). Tests: `apps/core/tests/test_app_actions.py`, the Receipts and To-do view
+tests, AI case ACC-55.
 
 **Time zone** (issue #177) is a property of the account, for "today", due dates with a time and
 reminders in the user's local time (the To-do app, #161). `User.timezone` is an IANA name or `''` for
@@ -3496,7 +3503,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     names and aliases, 50 per page, row menu, bulk bar) follows the dashboard's pattern; its bulk
     checkboxes belong to a hidden `#vendor-bulk` form through their `form` attribute, so the search
     form around the list never sends them. The rename and merge dialogs are fragments fetched into a
-    `#vendor-modal` host (`fragmentModal` in `common.js`); a refusal re-renders the form in place
+    `#vendor-modal` host (`fragmentModal` in `core/js/fragment_modal.js`); a refusal re-renders the form in place
     (422), success is an `HX-Redirect` to `next` with a flash message, and bulk/row actions
     re-render the list from `HX-Current-URL`. htmx 2.0 can't resolve an inherited
     `hx-disabled-elt="find ..."` for a control with no such button inside it (it throws), so every
@@ -3585,6 +3592,28 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `0006_exports`; templates `exports.html`, `export.html`, `partials/export_{modal,form,panel}.html`,
   `emails/export_ready.{txt,html}`). **Download files** (a button in the account page's "App actions", next to Export CSV, see "Auth" > "Apps") packs the
   user's receipt files into independent zip files and one CSV, kept in S3 for 30 days.
+  - *Shared engine* (issue #326: To-do's export, see "To-do" > "Exports", reuses everything that is not
+    about receipts; Receipts' behaviour, URLs, API and data did not change, and its migration is a no-op):
+    `apps/core/models/exports.py` (abstract `BaseExport` / `BaseExportPart` / `BaseExportItem` with the shared
+    columns, `ExportStatus`; `ReceiptExport*` subclass them with the same table names, constraint and indexes),
+    `apps/core/services/export_names.py` (pure: the folder and file name cleaning, `Folders` and `unique_path`
+    for the case-insensitive uniqueness, `pack_parts`, `part_file_name`, and the formula guard `cell_text` (over `looks_like_formula`), which
+    `filters._cell` is now an alias of), `apps/core/services/export_errors.py` (`ExportCostChangedError`,
+    `ExportInProgressError`, `ExportPartMissingError`, re-exported by `receipts.services.errors`),
+    `apps/core/date_ranges.py` (the date select) and `apps/core/services/exports.py`: the lifecycle from the
+    moment the rows are written -- `build_part`, the lease/attempts/`resume_stalled`, `finish_export` and
+    `fail_export` with their refunds, the notices, `part_download`, `discard`, `delete_export`,
+    `expire_exports` -- written against an **`ExportKind`** a product fills in (its three models, storage and key
+    prefix, the `build_part` and email tasks, `source`, the notice texts, `is_frozen` and its
+    `AccountFrozenError`, `can_notify`, `write_index` -- what goes into part 1 besides the files, here the CSV --
+    and `refund`, a hook because `core` can't import `billing`). `apps/receipts/services/exports.py` keeps
+    `select_rows`, `prepare_export`, `check_export`, `create_export`, the `KIND`, the `@task(queue_name='receipts')
+    build_part` and thin wrappers (`finish_export(id)`, `resume_stalled()`, `part_download_url(export, n)`, ...)
+    with their old signatures, so its views, API and CLI did not change; its tests that patched a private step
+    (`_claim`, `_write_part`, `_end`) patch `apps.core.services.exports` (`claim`, `write_part`, `end`, which
+    take the `kind` first). The creation half (planning, the quote, the refusals, the charge) stays in each
+    product, because what a file is and what a "selection" is differ. Tests: `apps/core/tests/test_export_names.py`,
+    `test_export_models.py`, `test_date_ranges.py`; the engine itself is tested through both products.
   - *Settings* (`ReceiptsSettings`, all `db_default`ed): `export_price_per_file` (verbose name **"Export
     per receipt"**, default **3** credits, 0 = free; nothing hard-codes the number, the dialog, the
     Costs page and the emails read it), `export_retention_days` (30) and `export_part_bytes` (100 MB, "about":
@@ -3635,13 +3664,13 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     rolls everything back.
   - *Building*: **one task per part** (`build_part(export_id, number)`, `receipts` queue), each queueing the
     next. **Part 1 is built last** (`build_order`: 2, 3, ... then 1), because its CSV must say what really
-    went in. `_write_part` streams every file from S3 into a zip written through `S3MultipartWriter`
+    went in. `write_part` streams every file from S3 into a zip written through `S3MultipartWriter`
     (16 MB buffer, never a whole file or zip in memory); an object that is gone (`NoSuchKey`) marks its item
     `skipped` and is left out. A part is claimed with a **lease** (`lease_until`, 15 min, conditional
     `UPDATE`) and marked built by one conditional update; a task for the wrong part hands over to the right
     one. **A duplicate task** (`resume_stalled`, an out-of-order hand-over) that claims a part another worker
-    has just finished looks the part up again after its claim and lets go (`_release`: the claim is not an
-    attempt); and `_part_done` deletes the object it wrote **only when the export has ended** (failed, expired,
+    has just finished looks the part up again after its claim and lets go (`release`: the claim is not an
+    attempt); and `part_done` deletes the object it wrote **only when the export has ended** (failed, expired,
     deleted), never for a `ready` or still `building` one: a late duplicate writes the same bytes under the same
     key, so the object is the part. After the last part `finish_export` runs: one transaction whose
     compare-and-swap is `building` -> `ready` (`expires_at = now + retention`, `skipped_count` recounted from
@@ -3666,7 +3695,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     is a 404; an expired or failed one stays listed with its state and what was charged or refunded.
   - *Download*: `part_download_url` (`AccountFrozenError` while storage is paused, `ValidationError` unless
     `ready` and the part is built) presigns an attachment URL named `receipts-2026-11-16-part-01-of-05.zip`
-    (no suffix for one part). **No public link**: the page is behind sign-in; the email links to the page,
+    (no suffix for one part), the date being the day it was asked for **in the user's time zone** (`ExportKind.timezone_of`,
+    issue #326; the server's UTC date before). **No public link**: the page is behind sign-in; the email links to the page,
     never to a file.
   - *Web*: the buttons are **not on the dashboard** any more: they are Receipts' block of the account page's
     **App actions** (`apps.core.app_actions`, see "Auth" > "Apps"; `services/account_actions.py`,
@@ -3674,7 +3704,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     **Receipt date** select (the dashboard's `DATE_RANGES`; Custom shows the two core date pickers, disabled and so
     unsent otherwise; ids `receipts-export-*`) and the buttons: **Export CSV** submits it, **Download files**
     (`#receipts-export-files`, `hx-include="closest form"`) fetches `GET /receipts/exports/new/?date_range=...` into
-    `#export-modal` (inside the block; `fragmentModal` from `receipts/js/common.js`, which the provider lists in
+    `#export-modal` (inside the block; `fragmentModal` from `core/js/fragment_modal.js`, which the provider lists in
     `AppActions.scripts`, like the vendor rename dialog; a non-htmx GET redirects to `/account/#apps`, spending
     nothing, and a confirm refused without htmx goes back there with its range preselected, `?receipts_date_range=`
     / `receipts_date_from` / `receipts_date_to`, the block's prefixed query fields; the only filter is the date range,
@@ -4070,9 +4100,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `core/partials/confirm_modal.html` driven by the `confirmModal` Alpine component and the `copyText`
     component, both shared with Short URLs and so in `apps/core/static/core/js/components.js`
     (loaded *deferred* by `core/base.html`, ahead of Alpine; the modal also posts the trigger's
-    `data-cost` as `confirm_cost`, empty when there is none). Receipts' own
-    `static/receipts/js/common.js` keeps `fragmentModal` and is loaded as a *classic* script (not
-    `defer`) so its `alpine:init` listener exists before Alpine starts. Multi-line template comments
+    `data-cost` as `confirm_cost`, empty when there is none). `fragmentModal` (the dialog fetched into a host element: Receipts' vendor dialogs and the
+    "Download files" dialogs of the account page) is in `apps/core/static/core/js/fragment_modal.js` (issue #326: it was Receipts'
+    `common.js`), loaded as a *classic* script (not `defer`) so its `alpine:init` listener exists before Alpine
+    starts: by Receipts' layout and by the account page's App actions blocks (`AppActions.scripts`). Multi-line template comments
     use `{% comment %}`: `{# #}` is single-line only.
   - **Tests**: `tests/test_views_*.py`, `test_ui.py` (every page, 404s, 422 paths, rate limits via the
     `settings` fixture, frozen account, CSV, the body headers, the `sandbox` attribute, the upload flow
@@ -4735,7 +4766,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation), plus `TODO_COMMENT_USER` (60 per
   minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`) and
   `TODO_BLOCKER_SUGGEST_USER` (120 per minute: the "Blocked by" box's suggestions; over it the box offers
-  nothing, never an error; issue #273).
+  nothing, never an error; issue #273); the four `TODO_EXPORT_*` rules are under "Exports" below.
   A form is validated first and the limit charged after, so a refused form spends nothing; over the
   limit `ratelimit.web_response` (retargeted to the control's message slot).
 - **Admin**: `TodoSettingsAdmin` (singleton, superusers), and read-only `TaskAdmin` (search title,
@@ -5757,6 +5788,122 @@ long reasoning.
   `credits_added` wiring), `tests/test_attachment_views.py` (the JSON views, 422/429/404, `whole_number`, the
   banner, the settings line), `tests/test_storage_and_config.py` (keys, the SigV4 client, `todo.W002`,
   prod refusing to start) and `apps/core/tests/test_sniff.py`.
+
+#### Exports
+
+Issue #326 (migration `0019_exports`). **Download files** packs the files attached to the user's tasks *and to their comments* into
+independent zip files (about 100 MB each, no compression), with `tasks.xlsx` -- a workbook of the tasks and their
+comments -- in the first one, kept in S3 for 30 days; **Export XLSX** is that workbook on its own, free. The twin of
+Receipts' export (issue #315, see "Receipts" > "Exports" and its *Shared engine* bullet): the lifecycle is
+`apps.core.services.exports`, the models subclass `apps.core.models.exports`, the names and packing are
+`apps.core.services.export_names`. Read those for the long reasoning (leases, attempts, the two refunds, ending);
+this section is what is To-do's own.
+
+- **Settings** (`TodoSettings`, all `db_default`ed): `export_price_per_file` (verbose name **"Export per file"**, default
+  **3** credits, 0 = free; nothing hard-codes the number, the dialog, the Costs page and the emails read it),
+  `export_retention_days` (30) and `export_part_bytes` (100 MB, between 10 MB and 1 GB).
+- **What is exported**: the user's **live tasks created in a date range** (`services/export_range.py`: the account page's
+  **Task created** select, the same ranges as Receipts' "Receipt date" -- `apps.core.date_ranges` -- including Custom;
+  presets are resolved against the **user's** today and a day is the user's own, from its local midnight, so a task made
+  at 23:30 their time on 31 October is October's whatever the server's clock says) and every uploaded file on them: the
+  task's own and those of comments that are **not deleted**. **All states and subtasks** are included; **never** the Trash
+  (a task with `deleted_at`), a deleted comment (its files stay stored and billed, but are left out), a draft comment
+  upload (`for_comment` with no comment), an upload that never completed, or comment revisions. One file = one price,
+  **3 credits per attached file** whatever it hangs on. `exports.select_rows` reads them; `task_scope()`
+  (`export_workbook.py`) is the one definition of "the user's live tasks created in the range", used by the files, the
+  workbook and the quick XLSX.
+- **Models** (`models/export.py`): `TodoExport` (the shared columns plus `filters` JSON = `{summary, params, start, end}`:
+  lines for display, the account-page query, and the two instants), `TodoExportPart` (key
+  `todo/users/<user>/exports/<export>/part-NN.zip`, under the user's prefix so deleting the account deletes them, inside
+  the IAM user's `todo/*` scope, so **no infra change**) and `TodoExportItem` (the plan: `attachment_id`, `task_id` and
+  `comment_id` are **plain UUIDs, no foreign keys**, plus `file_key`, `path`, `part_number`, `skipped`). Parts and items are
+  deleted when the export ends. The partial unique constraint `todo_export_one_building_per_user` is "one export being
+  prepared per user". Exports are **not part of `stored_bytes`**.
+- **Zip layout** (`export_plan.plan_export`, pure): `<Project>/<number> - <title>/<file>`, `No project` for a task in none,
+  and a comment's files under `<number> - <title>/comments/`. A task with no files gets no folder (it is still a row of the
+  workbook); a task's own file called `comments` is numbered so it can't take that folder's name. Names are cleaned and
+  de-duplicated exactly as Receipts does it (case-insensitive, across every part, the first spelling of a folder wins;
+  rows ordered by task number, the task's own files before its comments', then when attached, then id; the number comes
+  first in the folder name so a long title is what is cut). Zip files are called `task-files-2026-11-16-part-01-of-05.zip` (`export_plan.DOWNLOAD_PREFIX`, the one place the
+  prefix is written; `KIND` reads it), **dated in the owner's time zone** like the XLSX name: the engine's
+  `part_name` goes through the optional `ExportKind.timezone_of` hook (`user_tz`, passed by Receipts and To-do, as `core`
+  can't import `accounts`), so an evening export in UTC-8 is not named for tomorrow.
+- **The workbook** (`export_workbook.write_workbook`, openpyxl **write-only** mode into a temp file, copied into the zip
+  entry): sheet **Tasks** (number, title, description, state, resolution, priority, due date, due time, project, section,
+  labels (comma-separated, by position), parent (number), created, closed -- the issue's `closed_at` is `completed_at` --,
+  comments (not deleted), files) and sheet **Comments** (task number, task title, created, edited, comment as Markdown,
+  files). A closed task says state `Closed` and its resolution (`Done` when an old row has none). Dates and times are real
+  spreadsheet dates **in the user's time zone** (created/closed are the wall clock; due date/time are the local values the
+  task keeps); the header is bold and frozen and the columns have widths. **Never a formula**: every text cell is written as an
+  inline string (never a formula), after the characters a spreadsheet can't hold (control characters) are **dropped
+  first** -- so a `\x01=HYPERLINK(...)` can't hide from the guard and then lose its mask -- and a text that
+  `export_names.looks_like_formula` calls formula-like (a leading `=`, `+`, `-` or `@`, even after whitespace, also a
+  Markdown bullet `- item`; the same predicate `cell_text` uses, so the CSV and the XLSX can't drift) gets the
+  **`quotePrefix` cell style**: the text is exactly as typed, with **no visible apostrophe**. (The CSVs, which have no
+  styles, still prefix an apostrophe.) A text over 32,767 characters is cut. The
+  files column is one line per file: **its path in the zip plus ` (part N)` when there is more than one zip** in the export
+  (built from the items, so a skipped file is not claimed); the quick XLSX lists file names. The workbook in part 1 is built
+  last, from the database **as of then**, for the instants the export kept and **only tasks created, and comments written,
+  up to the moment it was asked for**. **It says what is in the zips**: the items were fixed when the export was asked for,
+  so the tasks and comments they refer to are written whatever happened to them since (a task moved to the Trash or a comment
+  deleted in between keeps its row; `deleted_at` is ignored for those ids), and the rare file whose task or comment row is gone
+  altogether (hard-deleted) goes into a last sheet **"Files not listed above"** (kind, id, files), which exists only then.
+  So no file in the zips is unlisted.
+- **Creating** (`services/exports.py`: `prepare_export`, `quote_export`, `check_export`, `create_export`) is Receipts' flow
+  with `ExportRange` for the filters and no layout: a `Prepared` read once and re-checked in the transaction (frozen,
+  the number of files, the price and part size), the `expected_cost` / `ExportCostChangedError` contract, one building export
+  per user (an `IntegrityError` becomes `ExportInProgressError`), **no lock on the `TodoAccount`**, the charge last
+  (`spend_credits(source='todo', description='To-do export: N files')`). **Nothing to export is refused**
+  (`NOTHING_TO_EXPORT`, "No files in this range; use Export XLSX for the task list."): there is no zip that only holds
+  the workbook. Frozen storage refuses creating an export and downloading a part (`AccountFrozenError`, the To-do one, a
+  `ValidationError` -- caught before the generic one); the XLSX still works, it holds no files.
+- **Building and ending** are the engine's: `build_part` is a `@task(queue_name='default')` (To-do has no queue of its own, so
+  no worker or compose change; the zip builds of file transfer run there too), parts are built 2, 3, ... then 1, a vanished
+  object is `skipped` and refunded at the end (`To-do export: N file(s) no longer there`), a failed build is refunded in
+  full (`To-do export could not be prepared`), and every refund is the compare-and-swap of its status change. Jobs
+  (`jobs.py`, registered in `apps.py`): **`todo.purge_exports`** (daily, lease 1 h: expire past `expires_at`, finish ended
+  exports whose files are still there) and **`todo.retry_exports`** (every 5 minutes, lease 10 min: `resume_stalled`;
+  no existing 5-minute To-do job could host it).
+- **Notices**: in-app `Your to-do export is ready` / `could not be prepared` (key `todo_export:<id>`, source `todo`, url the
+  export's page, "N files in P zip files. Available until ...") and the email `emails.send_export_ready_email`
+  (`default` queue, `todo/emails/export_ready.{txt,html}`, fixed subject, autoescaped HTML, **confirmed address of an
+  active account only**, a link to the page, never to a file). Neither goes to an account that can't sign in.
+- **Web** (`views/exports.py`, `forms/export.py`, `services/account_actions.py`): To-do's block of the account page's **App
+  actions** (`apps.core.app_actions`, see "Auth" > "Apps"; registered on `ProductApp(actions=...)`, shown for a user who
+  switched To-do off too, creating no `TodoAccount`): "Download your task files as zip files, or your tasks as a
+  spreadsheet.", a **Task created** select with Custom date pickers (a GET form `#todo-export-form` to `todo:export-xlsx`;
+  fields `date_range`/`date_from`/`date_to`, prefixed `todo_` in the account page's query string so a refused confirm
+  without htmx sends the user back with the range, ids `todo-export-*`), and the buttons **Download files**
+  (`#todo-export-files`, `hx-include="closest form"`, fetches `GET /todo/exports/new/` into **`#todo-export-modal`**, so it
+  can't collide with Receipts' `#export-modal`) and **Export XLSX** (`#todo-export-xlsx`, submits the form:
+  `GET /todo/export.xlsx?date_range=...`, **free**, `tasks-2026-11-16.xlsx`, `private, no-store`, rate-limited, charged
+  after the range is parsed), and the link **Your exports**. The dialog (`partials/export_modal.html` + `export_form.html`,
+  the `fragmentModal` of `core/js/fragment_modal.js`) says "N files (size) in P zip files of about 100 MB", the range in
+  words, "This costs C credits (3 per file). Your balance is B.", a Top up link when short, `Download for C credits` and
+  `confirm_cost` posted back; a refusal is a **422 that re-renders the form in place** (a changed cost shows the new total
+  and charges nothing), success is `HX-Redirect` to the export's page with a flash. `/todo/exports/` lists them (not the
+  deleted); `/todo/exports/<id>/` polls `exports/<id>/panel/` every 3 s while building (capped at 40), then a Download
+  button per zip (size, file count, `with tasks.xlsx` on the first), the expiry, what was skipped, the charge and Delete;
+  `exports/<id>/parts/<n>/download/` redirects to a presigned URL; another user's export is a 404, a deleted one too. The
+  pages are To-do pages (`nav='settings'`, the settings page links "Your exports"). The shared
+  `export_status_pill` tag is in `core_ui`.
+- **Rate limits**: `TODO_EXPORT_FILES_USER` (5/hour, charged after validation and `check_export`),
+  `TODO_EXPORT_DIALOG_USER` (30/min, the dialog's GET, charged before the scan; the confirm peeks it before reading and
+  spends one hit when `check_export` refuses after reading), `TODO_EXPORT_DOWNLOAD_USER` (60/min) and
+  `TODO_EXPORT_XLSX_USER` (10/min). A refused request spends no export budget; over a limit the usual 429, retargeted to
+  `#todo-export-msg` for htmx.
+- **Also**: the Costs page line **"Download all files as zip"** (`services/costs.py`, read live from the setting; the free
+  line now also names the spreadsheet), read-only `TodoExportAdmin` (parts inline, filter by status) and the three settings on
+  the singleton, the Privacy Policy retention line (`TERMS_VERSION` **not** bumped; the owner decides), and the
+  `openpyxl` dependency.
+- **Not included**: a project filter, a layout choice, exporting the Trash or comment revisions, a public share link,
+  re-building an expired export for free, and (PR 2 of #326) the JWT API and the `inv todo` commands.
+- **Tests**: `tests/test_export_plan.py`, `test_export_workbook.py` (opened with openpyxl: every column, time zones,
+  the range's bounds, comments, the formula guard also read from the raw XML), `test_exports.py` (selection, the range,
+  quote, create and every refusal, building against the fake storage, skipped files, both refunds, resuming, download,
+  ending, the jobs, notice and email), `test_views_exports.py` (the account block next to Receipts', the dialog, confirm,
+  rate limits, the quick XLSX, pages, other users' 404s, costs, admin), the Playwright `tests_e2e/test_todo_exports.py`
+  and the AI plan cases in `tests_e2e/ai/todo.md` (TODO-70 to TODO-73) plus ACC, MAIL, NOTIF, ADM and BILL ones.
 
 #### Reminders
 

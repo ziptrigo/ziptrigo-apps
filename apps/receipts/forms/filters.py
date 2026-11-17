@@ -6,15 +6,20 @@ hand-edited URL) is dropped and the default applies, rather than showing an erro
 """
 
 import re
-from calendar import monthrange
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date, timedelta
 from urllib.parse import urlencode
 
 from django import forms
 from django.http import HttpRequest
 from django.utils import timezone
+
+from apps.core.date_ranges import (
+    DATE_RANGE_ANY,
+    DATE_RANGE_CUSTOM,
+    DATE_RANGES,
+    resolve_date_range,
+)
 
 from ..services.filters import DEFAULT_SORT, SORTS, UNCATEGORIZED, ReceiptFilters
 
@@ -30,23 +35,6 @@ TABS = (
     ('processing', 'Processing'),
     ('failed', 'Failed'),
     ('duplicates', 'Duplicates'),
-)
-
-#: The receipt-date dropdown. A preset is resolved against today on every request, so a link to
-#: "This month" stays this month; `custom` uses `date_from`/`date_to`, which are otherwise ignored.
-#: "Any date" has a value of its own: picking it fires the list request before Alpine disables the
-#: date inputs, so the dates still arrive, and only an explicit `any` can win over them (no
-#: `date_range` at all with dates is an old link, read as Custom).
-DATE_RANGE_ANY = 'any'
-DATE_RANGE_CUSTOM = 'custom'
-DATE_RANGES = (
-    (DATE_RANGE_ANY, 'Any date'),
-    ('last_15_days', 'Last 15 days'),
-    ('last_30_days', 'Last 30 days'),
-    ('this_month', 'This month'),
-    ('this_quarter', 'This quarter'),
-    ('this_year', 'This year'),
-    (DATE_RANGE_CUSTOM, 'Custom'),
 )
 
 _TAB_STATUSES = {
@@ -73,29 +61,6 @@ class ReceiptFilterForm(forms.Form):
     def clean_vendor(self) -> str:
         value = self.cleaned_data['vendor'].strip()
         return value if re.fullmatch(r'\d{1,10}', value) else ''
-
-
-def resolve_date_range(key: str, today: date) -> tuple[date, date]:
-    """The inclusive `(first, last)` receipt dates of the preset `key`. "Last N days" ends today
-    and includes it; the calendar ones cover the whole month, quarter or year."""
-    match key:
-        case 'last_15_days':
-            return today - timedelta(days=14), today
-        case 'last_30_days':
-            return today - timedelta(days=29), today
-        case 'this_month':
-            first = today.replace(day=1)
-            return first, today.replace(day=monthrange(today.year, today.month)[1])
-        case 'this_quarter':
-            first_month = (today.month - 1) // 3 * 3 + 1
-            last_month = first_month + 2
-            return (
-                date(today.year, first_month, 1),
-                date(today.year, last_month, monthrange(today.year, last_month)[1]),
-            )
-        case 'this_year':
-            return date(today.year, 1, 1), date(today.year, 12, 31)
-    raise ValueError(f'Unknown date range: {key}')
 
 
 @dataclass(slots=True)

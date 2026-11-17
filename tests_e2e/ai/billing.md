@@ -656,6 +656,19 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 | 4 | Put the price back to `3` and the retention to `30`. Make an export of N files (RCPT-64) and open `/billing/credits/`. | One Spend row "Receipts export: N files" for exactly `3N` credits, source Receipts; no other charge (the dialog's total was the charge). After RCPT-68 a Refund row of 3 per vanished file. |
 | 5 | The Credits history page's descriptions. | The Spend description is `Receipts export: N files`; a Refund is `Receipts export: M file(s) no longer there`, or `Receipts export could not be prepared` for a failed build (RCPT-69). |
 
+### BILL-39 To-do: the export price
+
+**Purpose:** "Download all files as zip" is listed at the price of the admin setting **Export per file** (issue #326) and is charged as shown; the spreadsheet is free.
+**Preconditions:** BILL-35; `qa.user@example.com` with files on tasks.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/billing/costs/`, To-do section. | A row "Download all files as zip" **3 credits** / per file, "Files on tasks and on comments. You confirm the cost first. Kept for 30 days."; the free row names "exporting your tasks to a spreadsheet". |
+| 2 | As `qa.admin`, `/admin/todo/todosettings/`: **Export per file** `5`, **Export retention days** `14`, **Save**; reload the Costs page. | The row reads **5 credits** / per file, "... Kept for 14 days." |
+| 3 | Set **Export per file** to `0`. | The row reads **Free** (grey). |
+| 4 | Put the price back to `3` and the retention to `30`. Make an export of N files (TODO-71) and open `/billing/credits/`. | One Spend row "To-do export: N files" for exactly `3N` credits, source To-do; no other charge. After TODO-73 step 2 a Refund row of 3 per vanished file. **Export XLSX** (TODO-72) adds no row. |
+| 5 | The Credits history descriptions. | The Spend is `To-do export: N files`; a Refund is `To-do export: M file(s) no longer there`, or `To-do export could not be prepared` for a failed build. |
+
 ## Out of scope
 
 - The redeem form without JavaScript (a refusal then becomes an error flash on the page the form

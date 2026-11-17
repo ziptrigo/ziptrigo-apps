@@ -1,0 +1,7 @@
+<div style="font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: #2c3432; line-height: 1.5;">
+  <p>Your to-do export is ready: {{ file_count }} file{{ file_count|pluralize }} in {{ part_count }} zip file{{ part_count|pluralize }}, with the spreadsheet of your tasks in the first one.</p>
+  {% if skipped_count %}<p>{{ skipped_count }} file{{ skipped_count|pluralize }} {{ skipped_count|pluralize:"was,were" }} no longer there and left out{% if refunded %}; the {{ refunded }} credit{{ refunded|pluralize }} for {{ skipped_count|pluralize:"it,them" }} {{ refunded|pluralize:"was,were" }} refunded{% endif %}.</p>{% endif %}
+  <p>The zip files are available to download until {{ expires }} UTC. Then they are deleted.</p>
+  <p><a href="{{ export_url }}" style="color: #3b4a47;">Open your exports page</a> (you need to be signed in).</p>
+  <p>--<br>The ZipTrigo Team</p>
+</div>

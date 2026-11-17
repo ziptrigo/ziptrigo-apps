@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
 from apps.billing.services import get_balance, spend_credits
+from apps.core.services import exports as engine
 
 from ..models import ExportStatus, ReceiptExport, ReceiptStatus
 from ..services import exports as svc
@@ -19,6 +20,12 @@ from ..services.costs import cost_section
 from .factories import create_receipt
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
+
+
+def receipts_block(content: str) -> str:
+    """Receipts' block of the account page's App actions: up to the next app's block."""
+    return content.split('data-app-actions="receipts"')[1].split('data-app-actions="')[0]
+
 
 HTMX = {'HTTP_HX_REQUEST': 'true'}
 NEW = 'receipts:export-new'
@@ -108,12 +115,14 @@ class TestAccountActions:
 
     def test_the_block_loads_its_dialog_script_once(self, web):
         content = web.get(reverse('accounts:account')).content.decode()
-        assert content.count('receipts/js/common.js') == 1
-        assert content.index('receipts/js/common.js') < content.index('data-app-actions="receipts"')
+        assert content.count('core/js/fragment_modal.js') == 1
+        assert content.index('core/js/fragment_modal.js') < content.index(
+            'data-app-actions="receipts"'
+        )
 
     def test_any_date_is_preselected_and_the_custom_dates_are_disabled(self, web):
         content = web.get(reverse('accounts:account')).content.decode()
-        block = content.split('data-app-actions="receipts"')[1]
+        block = receipts_block(content)
         assert '<option value="any" selected>' in block
         assert re.search(r'name="date_from"[^>]*\sdisabled(?=[\s>])', block, re.S)
 
@@ -122,7 +131,7 @@ class TestAccountActions:
             reverse('accounts:account'),
             {'receipts_date_from': '2026-01-01', 'receipts_date_to': '2026-02-28'},
         ).content.decode()
-        block = content.split('data-app-actions="receipts"')[1]
+        block = receipts_block(content)
         assert '<option value="custom" selected>' in block
         assert 'value="2026-01-01"' in block and 'value="2026-02-28"' in block
         assert not re.search(r'name="date_from"[^>]*\sdisabled(?=[\s>])', block, re.S)
@@ -130,15 +139,13 @@ class TestAccountActions:
         preset = web.get(
             reverse('accounts:account'), {'receipts_date_range': 'this_month'}
         ).content.decode()
-        assert (
-            '<option value="this_month" selected>' in preset.split('data-app-actions="receipts"')[1]
-        )
+        assert '<option value="this_month" selected>' in receipts_block(preset)
 
     def test_unprefixed_or_bad_values_are_ignored(self, web):
         content = web.get(
             reverse('accounts:account'), {'date_range': 'this_month', 'receipts_date_range': 'nope'}
         ).content.decode()
-        assert '<option value="any" selected>' in content.split('data-app-actions="receipts"')[1]
+        assert '<option value="any" selected>' in receipts_block(content)
 
     def test_viewing_the_account_page_creates_no_receipts_account(self, web, user):
         from ..models import ReceiptsAccount
@@ -527,7 +534,7 @@ class TestPages:
         assert 'The 9 credits you paid were refunded.' in content and 'Failed' in content
 
     def test_an_expired_export_stays_listed_with_its_state(self, web, ready):
-        svc._end(ready, to=ExportStatus.EXPIRED)
+        engine.end(svc.KIND, ready, to=ExportStatus.EXPIRED)
         content = web.get(reverse('receipts:export-detail', args=[ready.pk])).content.decode()
         assert 'Expired' in content and 'were deleted' in content
         assert reverse('receipts:export-part-download', args=[ready.pk, 1]) not in content

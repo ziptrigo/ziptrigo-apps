@@ -66,6 +66,13 @@ class FakeTodoStorage:
     fail_read_after: int | None = None
     #: The sizes of the `read(n)` calls made on streams, to show the read-back is chunked.
     read_sizes: list[int | None] = field(default_factory=list)
+    #: Multipart uploads in progress (the exports' zip writer): upload id -> key, and the parts
+    #: written so far (upload id -> part number -> bytes).
+    uploads: dict[str, str] = field(default_factory=dict)
+    upload_parts: dict[str, dict[int, bytes]] = field(default_factory=dict)
+    aborted_uploads: list[str] = field(default_factory=list)
+    #: Keys whose `get_object_stream` should fail with a server error (not "missing").
+    failing_reads: set[str] = field(default_factory=set)
 
     def put_object(self, key: str, body: bytes, *, content_type: str | None = None) -> None:
         if key in self.failing_puts:
@@ -100,9 +107,40 @@ class FakeTodoStorage:
         )
 
     def get_object_stream(self, key: str):
+        if key in self.failing_reads:
+            raise ClientError({'Error': {'Code': 'InternalError', 'Message': 'x'}}, 'GetObject')
         if key not in self.objects:
             raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'missing'}}, 'GetObject')
         return _Body(self, io.BytesIO(self.objects[key]))
+
+    def create_multipart_upload(
+        self, key: str, *, checksum_algorithm: str | None = 'SHA256'
+    ) -> str:
+        upload_id = f'upload-{len(self.uploads)}'
+        self.uploads[upload_id] = key
+        self.upload_parts[upload_id] = {}
+        return upload_id
+
+    def upload_part(self, key: str, upload_id: str, part_number: int, body: bytes) -> str:
+        self.upload_parts[upload_id][part_number] = bytes(body)
+        return f'etag-{upload_id}-{part_number}'
+
+    def complete_multipart_upload(self, key: str, upload_id: str, parts: list[dict]) -> None:
+        recorded = self.upload_parts.pop(upload_id)
+        self.uploads.pop(upload_id, None)
+        numbers = sorted(recorded)
+        for number in numbers[:-1]:  # real S3: every part but the last is at least 5 MB
+            if len(recorded[number]) < 5 * 1024 * 1024:
+                raise ClientError(
+                    {'Error': {'Code': 'EntityTooSmall', 'Message': 'too small'}},
+                    'CompleteMultipartUpload',
+                )
+        self.objects[key] = b''.join(recorded[number] for number in numbers)
+
+    def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        self.uploads.pop(upload_id, None)
+        self.upload_parts.pop(upload_id, None)
+        self.aborted_uploads.append(upload_id)
 
     def object_exists(self, key: str) -> bool:
         return key in self.objects

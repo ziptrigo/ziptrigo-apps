@@ -1,4 +1,5 @@
 from .comment import CommentForm
+from .export import ExportForm, ExportRangeForm, parse_range
 from .label import LabelForm
 from .project import MoveForm, ProjectForm, SectionForm
 from .reminder import ReminderForm
@@ -21,6 +22,8 @@ __all__ = [
     'ChecklistForm',
     'CloseForm',
     'CommentForm',
+    'ExportForm',
+    'ExportRangeForm',
     'InboxSettingsForm',
     'LabelForm',
     'MoveForm',
@@ -33,4 +36,5 @@ __all__ = [
     'StateForm',
     'SubtaskForm',
     'TaskForm',
+    'parse_range',
 ]

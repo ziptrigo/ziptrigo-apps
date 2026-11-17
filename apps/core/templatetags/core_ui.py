@@ -14,6 +14,8 @@ from django import template
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 
+from apps.core.models.exports import ExportStatus
+
 register = template.Library()
 
 #: tone -> the fill and text classes, each with its dark twin.
@@ -68,3 +70,22 @@ def pill(tone: str, label: str, icon: str = '', title: str = '', extra: str = ''
 def pill_class(tone: str, extra: str = '') -> str:
     """`class="{% pill_class 'amber' %}"` for markup a template writes itself."""
     return pill_classes(tone, extra)
+
+
+_EXPORT_PILLS = {
+    ExportStatus.BUILDING: ('Preparing', 'fas fa-spinner fa-spin', 'blue'),
+    ExportStatus.READY: ('Ready', 'fas fa-check', 'green'),
+    ExportStatus.FAILED: ('Failed', 'fas fa-circle-xmark', 'red'),
+    ExportStatus.EXPIRED: ('Expired', 'fas fa-clock', 'gray'),
+    ExportStatus.DELETED: ('Deleted', 'fas fa-trash', 'gray'),
+}
+
+
+@register.simple_tag
+def export_status_pill(status: str) -> SafeString:
+    """The pill for an export's status (`export.status`), the same on every product's exports
+    pages (issue #326 moved it here from Receipts)."""
+    label, icon, tone = _EXPORT_PILLS.get(
+        status, (str(status).replace('_', ' ').capitalize(), '', 'gray')
+    )
+    return pill_html(tone, label, icon=icon)

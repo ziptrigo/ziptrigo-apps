@@ -1212,7 +1212,7 @@ export is ready when its page opens.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open the dialog, choose **Vendor / Year**, click **Download for 3N credits**. | The button shows a spinner ("Starting..."), then the page `/receipts/exports/<id>/` opens with a flash "We're preparing your zip files. We'll tell you here and by email when they are ready." **Record** the id as `X1`. |
-| 2 | Look at the page. | Heading **Export**; a green **Ready** pill, "N files, <size>, in 1 zip file . asked for <date, time>"; "Available to download until **<date in 30 days>**, then it is deleted."; one row `receipts-<YYYY-MM-DD>.zip` (no "part" suffix for one zip) with its size, "N files, with receipts.csv" and a **Download** button; "Each zip opens on its own..."; "Charged 3N credits."; **Delete**. |
+| 2 | Look at the page. | Heading **Export**; a green **Ready** pill, "N files, <size>, in 1 zip file . asked for <date, time>"; "Available to download until **<date in 30 days>**, then it is deleted."; one row `receipts-<YYYY-MM-DD>.zip` (the date is the day the export was asked for in the account's time zone; no "part" suffix for one zip) with its size, "N files, with receipts.csv" and a **Download** button; "Each zip opens on its own..."; "Charged 3N credits."; **Delete**. |
 | 3 | `/billing/credits/`. | Balance `B0 - 3N`; the newest row is a Spend "Receipts export: N files" for 3N. |
 | 4 | Click **Download**. | The browser downloads `receipts-<date>.zip` (a short-lived link on the S3 host; the page itself serves no file). |
 | 5 | Open the zip (unzip it, or `python -m zipfile -l`). | One folder per vendor (`Staples/`, `No vendor/` ...), each with one folder per year (`2026/` or `No date`), the files inside under the names they were uploaded with (an email body is `email.html`/`email.txt`; a duplicate name is `name (1).ext`), plus `receipts.csv` at the root. Every file's bytes equal the receipt's original. No Trash receipt is in it. |
@@ -1292,16 +1292,17 @@ the build raise three times, like a storage outage, then starts an export for `F
 python tests_e2e/ai/manage.py shell -c "
 from apps.accounts.models import User
 from apps.receipts.models import ReceiptExport
+from apps.core.services import exports as engine
 from apps.receipts.services import exports as e
 user = User.objects.get(email='<F>')
-def boom(export, part): raise RuntimeError('S3 is down')
-real = e._write_part
-e._write_part = boom
+def boom(kind, export, part): raise RuntimeError('S3 is down')
+real = engine.write_part
+engine.write_part = boom
 ex = e.create_export(user, None, 'year_vendor')
 for _ in range(e.MAX_ATTEMPTS):
     ReceiptExport.objects.filter(pk=ex.pk).update(lease_until=None)
     e.build_part.call(str(ex.pk), 1)
-e._write_part = real
+engine.write_part = real
 ex.refresh_from_db(); print(ex.pk, ex.status, ex.charged_credits, ex.refunded_credits)
 "
 ```
