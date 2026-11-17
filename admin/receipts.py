@@ -61,9 +61,11 @@ MAX_RETRY_AFTER_SECONDS = 60
 MAX_TOTAL_RETRY_WAIT_SECONDS = 120
 # Read a file for hashing in chunks rather than all at once.
 HASH_CHUNK_BYTES = 1024 * 1024
-# Exports (issue #315): how often to ask whether it is ready, how long to wait for it by default
-# (minutes), and the chunks a zip file is written in. A zip file is about 100 MB.
+# Exports (issue #315): how often to ask whether it is ready (3 s at first, backing off by half
+# again each time to at most 15 s: a zip file takes far longer to build than 3 s), how long to wait
+# for it by default (minutes), and the chunks a zip file is written in. A zip file is about 100 MB.
 EXPORT_POLL_SECONDS = 3
+EXPORT_POLL_MAX_SECONDS = 15
 EXPORT_WAIT_MINUTES = 30
 DOWNLOAD_CHUNK_BYTES = 256 * 1024
 #: What `--layout` accepts -> what the API calls it.
@@ -967,34 +969,48 @@ def _fetch_hint(export_id: str, out: Path) -> str:
 
 
 def _wait_for_export(export_id: str, headers: dict, minutes: float, hint: str) -> dict:
-    """Poll the export until it is no longer being prepared; returns it. Ctrl-C and running out
-    of time leave it building (it carries on in the background) and say how to fetch it later."""
+    """Poll the export until it is no longer being prepared; returns it. Ctrl-C, running out of
+    time and an error that ends the wait all leave it building (it carries on in the background)
+    and say how to fetch it later. A dropped connection, a 5xx and a 429 that `_request` gave up
+    on are not errors: they are tried again until the time is up."""
     limit = minutes * 60
     waited = 0.0
+    delay = float(EXPORT_POLL_SECONDS)
     shown: int | None = None
     _say('Preparing your zip files (Ctrl-C stops waiting; the export carries on without you)...')
     try:
         while True:
+            problem: str | None = None
             try:
                 response = _request(
                     'get', _export_url(export_id), headers=headers, exit_on_error=False
                 )
             except NetworkError as e:
-                logger.warning(escape(f'Could not reach the site ({e}); trying again...'))
+                problem = f'Could not reach the site ({e})'
             else:
-                _raise_for_api_error(response)
-                export = response.json()
-                if export['status'] != 'building':
-                    return export
-                built = sum(1 for part in export['parts'] if part['built'])
-                if built != shown:
-                    shown = built
-                    _say(f'Written so far: {built} of {export["part_count"]} zip files.')
+                if response.status_code >= 500 or response.status_code == 429:
+                    problem = f'The site answered {response.status_code}'
+                else:
+                    try:
+                        _raise_for_api_error(response)
+                    except typer.Exit:
+                        _say(hint)
+                        raise
+                    export = response.json()
+                    if export['status'] != 'building':
+                        return export
+                    built = sum(1 for part in export['parts'] if part['built'])
+                    if built != shown:
+                        shown = built
+                        _say(f'Written so far: {built} of {export["part_count"]} zip files.')
+            if problem:
+                logger.warning(escape(f'{problem}; trying again...'))
             if waited >= limit:
                 _say(f'Still not ready after {_format_wait(limit)}. {hint}')
                 raise typer.Exit(1)
-            time.sleep(EXPORT_POLL_SECONDS)
-            waited += EXPORT_POLL_SECONDS
+            time.sleep(delay)
+            waited += delay
+            delay = min(delay * 1.5, float(EXPORT_POLL_MAX_SECONDS))
     except KeyboardInterrupt:
         _say(f'Stopped waiting. The export is still being prepared. {hint}')
         raise typer.Exit(130) from None
@@ -1055,15 +1071,24 @@ def _download_part(export_id: str, part: dict, target: Path, headers: dict) -> N
 
 
 def _download_export(
-    export: dict, out: Path, headers: dict, *, force: bool, resume: bool = False
+    export: dict,
+    out: Path,
+    headers: dict,
+    *,
+    force: bool,
+    resume: bool = False,
+    paid: bool = False,
 ) -> None:
     """Download every zip file of a ready export into the folder `out` (created if needed).
 
     Before anything is downloaded, a file of the same name is refused unless `force` is set
     (`--force` replaces it). With `resume` (`export-download`, for finishing an interrupted run) a
     file that is already complete (the size the export says) is skipped instead of refused, and
-    only one of a different size is. Exits 1 if any file failed (the others are still
-    downloaded).
+    only one of a different size is. `paid` says the export was just created and charged (a clash
+    then points at `export-download`, not at making another). Exits 1 if any file failed (the
+    others are still downloaded).
+
+    Resuming compares sizes only (the API has no checksum per file), so use a folder per export.
     """
     parts = [part for part in export['parts'] if part['built']]
     if not parts:
@@ -1083,6 +1108,13 @@ def _download_export(
     ]
     if clashes:
         listing = ', '.join(str(target) for target in clashes)
+        if paid:
+            raise _fail(
+                f'{listing} already exists. The export is paid for and ready: run `receipts '
+                f'export-download {current_environment()} {export["id"]} --out <a folder for this '
+                'export>` (add --force to replace the existing file) rather than exporting '
+                'again, which would charge a second time.'
+            )
         raise _fail(f'{listing} already exists. Use --force to replace it.')
     try:
         out.mkdir(parents=True, exist_ok=True)
@@ -1143,7 +1175,8 @@ def receipts_export_files(
     each of about 100 MB, independent, the first with a receipts.csv of their data. It costs
     credits per file, so the cost is shown and you are asked to confirm it first. The zip files are
     prepared in the background; this command waits for them and downloads them. Ctrl-C stops
-    waiting without cancelling the export.
+    waiting without cancelling the export. Use a folder of its own for each export: files are told
+    apart by name and size only.
 
     Example:
         receipts export-files local --out ./my-receipts
@@ -1155,6 +1188,14 @@ def receipts_export_files(
     body = _export_selection(layout, status, category, vendor, q, date_from, date_to, duplicates)
     if out.exists() and not out.is_dir():
         raise _fail(f'Not a folder: {out}')
+    # Before anything is quoted or charged: a folder that already holds zip files of an export
+    # would clash with the new ones (their names are receipts-<date>[-part-NN-of-MM].zip).
+    existing = sorted(out.glob('receipts-*.zip')) if out.is_dir() else []
+    if existing and not force:
+        raise _fail(
+            f'{out} already holds {", ".join(p.name for p in existing)}. Use an empty folder '
+            '(--out), or --force to replace files of the same name. Nothing was charged.'
+        )
 
     quote_response = _request(
         'post', api_url('/receipts/exports/quote'), json=body, headers=headers
@@ -1208,7 +1249,7 @@ def receipts_export_files(
             f'{export["skipped_count"]} file(s) had vanished and were left out '
             f'({_credits(export["refunded_credits"])} refunded).'
         )
-    _download_export(export, out, headers, force=force)
+    _download_export(export, out, headers, force=force, paid=True)
 
 
 @app.command(name='exports')
@@ -1334,7 +1375,9 @@ def receipts_export_download(
     Download the zip files of an export (waits for it if it is still being prepared). Each is
     written to a temporary file and renamed when complete. A file that is already there with the
     right size is skipped, so an interrupted download can be finished by running this again; one
-    with different contents is refused unless you pass --force. No credits are charged.
+    with a different size is refused unless you pass --force. Use a folder of its own for each
+    export: files are told apart by name and size only (there is no checksum), so a zip file of
+    another export with the same name and size would be taken for this one. No credits are charged.
 
     Example:
         receipts export-download local 1b6e2f4a-... --out ./my-receipts

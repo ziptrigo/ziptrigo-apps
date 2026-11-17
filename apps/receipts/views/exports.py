@@ -163,6 +163,12 @@ def _confirm(request: AuthenticatedHttpRequest) -> HttpResponse:
     if confirmed is None:
         return _refused(request, parsed, layout, ['Confirm the cost to continue.'])
 
+    # Reading the whole list is bounded like the dialog's quote: over its budget nothing is read,
+    # and a refusal below (which did read it) spends one hit of it.
+    limited = ratelimit.peek_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
+    if not limited.allowed:
+        return ratelimit.web_response(request, limited, retarget='#export-msg')
+
     # The list is read and planned once, here: every refusal below shows the dialog from it and
     # `create_export` is handed the same plan (and checks again what could have changed).
     prepared = prepare_export(request.user, parsed.filters, layout)
@@ -177,8 +183,10 @@ def _confirm(request: AuthenticatedHttpRequest) -> HttpResponse:
             prepared=prepared,
         )
     except ExportCostChangedError as exc:
+        ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
         return _refused(request, parsed, layout, [f'{exc.MESSAGE}'], prepared=prepared)
     except InsufficientCreditsError:
+        ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
         return _refused(
             request,
             parsed,
@@ -188,8 +196,10 @@ def _confirm(request: AuthenticatedHttpRequest) -> HttpResponse:
             top_up=True,
         )
     except AccountFrozenError as exc:
+        ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
         return _refused(request, parsed, layout, [exc.message], prepared=prepared, top_up=True)
     except ValidationError as exc:
+        ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
         return _refused(request, parsed, layout, list(exc.messages), prepared=prepared)
 
     limited = ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_FILES_USER')

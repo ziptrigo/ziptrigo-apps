@@ -324,6 +324,26 @@ class TestCreate:
         add_credits(funded_user, 100, description='top up', source='test')
         assert post(client, '/exports', auth).status_code == 201
 
+    def test_refusals_that_read_the_list_spend_the_dialog_budget(
+        self, client, auth, three, funded_user, settings
+    ):
+        limit_rule(settings, 'RECEIPTS_EXPORT_DIALOG_USER', limit=2, window=60)
+
+        # A wrong expected_cost is a 409 that read the whole list: it counts against the budget.
+        assert post(client, '/exports', auth, {'expected_cost': 1}).status_code == 409
+        assert post(client, '/exports', auth, {'expected_cost': 1}).status_code == 409
+        limited = post(client, '/exports', auth, {'expected_cost': 1})
+
+        assert limited.status_code == 429 and limited['Retry-After']
+        assert not ReceiptExport.objects.exists()
+
+    def test_a_successful_create_spends_none_of_the_dialog_budget(
+        self, client, auth, three, funded_user, settings
+    ):
+        limit_rule(settings, 'RECEIPTS_EXPORT_DIALOG_USER', limit=1, window=60)
+        assert post(client, '/exports', auth).status_code == 201
+        assert post(client, '/exports/quote', auth).status_code == 200
+
     def test_it_needs_a_token(self, client):
         assert client.post(f'{BASE}/exports', {}).status_code == 401
 

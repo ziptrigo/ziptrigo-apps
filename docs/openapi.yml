@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.15.0
+  version: 2.15.1
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -1496,7 +1496,9 @@ paths:
 
         balance can''t pay; 409 while another export is being prepared (one at a time) or the cost
 
-        changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend.'
+        changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend, or over
+
+        `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list read of a refused request spends.'
       tags:
       - Receipts
       requestBody:

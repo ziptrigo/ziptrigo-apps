@@ -35,3 +35,12 @@ class ExportInProgressError(ValidationError):
 
     def __init__(self) -> None:
         super().__init__(self.MESSAGE)
+
+
+class ExportPartMissingError(ValidationError):
+    """The ready export has no such (built) zip file. (The API answers 404.)"""
+
+    MESSAGE = 'There is no such file in this export.'
+
+    def __init__(self) -> None:
+        super().__init__(self.MESSAGE)

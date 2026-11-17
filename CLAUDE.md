@@ -1945,8 +1945,12 @@ a changed cost (`ExportCostChangedError`) and deleting one still being built (al
 `common.mapped_errors`, before the generic 400); **429** the shared rules. **A refused request spends none of its
 budget**: `POST /exports` runs `check_export` (the frozen account, one at a time, an empty selection, a changed
 cost, the balance) *before* charging `RECEIPTS_EXPORT_FILES_USER` and hands its `Prepared` to `create_export`
-(the list is read once); a part's URL is made before `RECEIPTS_EXPORT_DOWNLOAD_USER` is charged and the
-export is looked up first. `GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
+(the list is read once). **That read is bounded too**: `RECEIPTS_EXPORT_DIALOG_USER` is *peeked* first (429
+over it, nothing read) and *hit* when `check_export` refuses (the refusal read the whole list), so a client
+can't loop a wrong `expected_cost` for free reads; the website's confirm (`views/exports.py::_confirm`) does
+the same. A part's URL is made by `services.part_download` (which returns the part too; a part the export
+doesn't have is `ExportPartMissingError`, mapped to 404 in `mapped_errors`, the frozen 402 coming first)
+before `RECEIPTS_EXPORT_DOWNLOAD_USER` is charged, and the export is looked up first. `GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
 `PATCH|DELETE /categories/{id}`, the **vendor endpoints** (issue #123, `api/vendors.py`; the same
 `services.vendors` the Vendors page calls, with no new rate-limit rule, like categories):
 `GET /vendors` (`status=all|to_vet|vetted`, `q` over names and alias names, `limit`/`offset`,
@@ -3664,7 +3668,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     Vendors and Trash.
   - *Rate limits*: `RECEIPTS_EXPORT_FILES_USER` (5/hour, charged after validation and `check_export`),
     `RECEIPTS_EXPORT_DIALOG_USER` (30/min, the dialog's GET, charged before the scan; over it the usual htmx
-    429 message), `RECEIPTS_EXPORT_DOWNLOAD_USER` (60/min).
+    429 message; the confirm POST and `POST /api/receipts/exports` peek it before reading the list and spend
+    one hit when `check_export` refuses after reading it), `RECEIPTS_EXPORT_DOWNLOAD_USER` (60/min).
   - *Notices*: in-app `Your receipts export is ready` / `could not be prepared` (key `receipts_export:<id>`,
     one per export, url the export's page, written in the transaction of the change in its own savepoint);
     email `send_export_ready_email` (`receipts` queue, fixed subject, autoescaped HTML, confirmed address of an
@@ -3681,7 +3686,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   - *API* (PR 2): the endpoints, statuses and budgets are described under "API" above (`api/exports.py`);
     `common.export_data` builds an export's JSON from the model with its parts prefetched, `owned_export` is
     the 404 lookup, and the API's `quote` is `services.quote_export`'s dataclass read as the schema
-    (`affordable` is the property). OpenAPI 2.15.0. Tests: `tests/test_api_exports.py` (every endpoint and
+    (`affordable` is the property). OpenAPI 2.15.1. Tests: `tests/test_api_exports.py` (every endpoint and
     status, another user's 404s, refusals that spend no budget, the 409s, the one-query list).
   - *CLI* (`admin/receipts.py`, PR 2): `export-files <env> [--layout year-vendor|vendor-year --status
     --category --vendor --q --from --to --duplicates --out DIR --yes --force --wait MIN]` quotes
@@ -3689,17 +3694,20 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     a frozen account or a balance that can't pay, **asks `This costs N credits. Continue?`** (no question for a
     free export) and sends the confirmed amount as `expected_cost` (with `--yes`: no question and no
     `expected_cost`, whatever it costs), creates the export (a 409 -- another one being prepared, or a changed
-    cost -- is shown and nothing downloaded), then **polls `GET /exports/{id}` every 3 s** (printing "Written so
-    far: N of P zip files" when it changes; a dropped poll is tried again) until it is no longer `building`,
-    for at most `--wait` minutes (default 30). **Ctrl-C (exit 130) and running out of time leave the export
+    cost -- is shown and nothing downloaded), then **polls `GET /exports/{id}`** (every 3 s at first, backing off by half
+    again to 15 s; printing "Written so far: N of P zip files" when it changes; a dropped connection, a 5xx or
+    a 429 `_request` gave up on is warned about and tried again within the time limit) until it is no longer `building`,
+    for at most `--wait` minutes (default 30). **Ctrl-C (exit 130), running out of time and any other error that ends the wait leave the export
     building** and print `receipts export-download <env> <id> --out <dir>`. A `failed` export is reported with
     its refund (exit 1). Then every built part is downloaded: its URL from `.../parts/N/url`, streamed **with no
     API token** (it is a storage URL) to `.<name>.part` in `--out` (created if needed), checked against the
     size the API gave and renamed into place, so a dropped connection leaves nothing cut off; one failing part
     doesn't stop the rest (exit 1, says to run `export-download`). Before downloading, **a file of the same name is refused
-    without `--force`** (`export-files` always: it is a new export); `export-download` instead **skips one that
+    without `--force`** (`export-files` also refuses an `--out` folder that already holds any `receipts-*.zip`
+    **before quoting**, so nothing is charged; a clash that still appears after creation says the export is
+    paid for and ready and points at `export-download`); `export-download` instead **skips one that
     is already complete (the size the API gave)** and refuses only one of another size, which is what lets it
-    finish an interrupted run. `exports` lists them,
+    finish an interrupted run (sizes only: no checksum exists, so use a folder per export; both helps say so). `exports` lists them,
     `export-get` shows one (the selection in words, escaped, the charge and refund, the zip files),
     `export-download <env> <id>` waits for a building one and downloads (no charge), `export-delete <env> <id>`
     asks first (`--yes`) and answers the API's 409 for one still being prepared. Tests:

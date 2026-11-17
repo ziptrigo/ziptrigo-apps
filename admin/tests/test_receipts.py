@@ -1877,33 +1877,106 @@ class TestExportFiles:
         assert result.exit_code == 0, result.output
         assert 'trying again' in result.output
 
-    def test_an_existing_zip_is_refused_without_force_even_if_it_looks_complete(
-        self, token_file, tmp_path, monkeypatch
+    @pytest.mark.parametrize('status', [502, 503, 429])
+    def test_a_transient_answer_while_waiting_is_tried_again(
+        self, token_file, tmp_path, monkeypatch, status
     ):
-        site = site_for_a_ready_export(monkeypatch)
-        existing = tmp_path / 'receipts-2026-11-17-part-1.zip'
-        existing.write_bytes(ZIP_BYTES)  # the very size: a new export is not "resumed"
+        answers = [
+            FakeResponse(status, {'detail': 'busy'}, headers={'Retry-After': '3600'}),
+            ok(make_export()),
+        ]
+        site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): answers})
 
         result = runner.invoke(
             receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
         )
 
-        assert result.exit_code == 1 and 'Use --force' in result.output
-        assert site.made('get', STORAGE_URL) == []
+        assert result.exit_code == 0, result.output
+        assert f'The site answered {status}' in result.output and 'trying again' in result.output
 
-    def test_an_existing_zip_with_other_contents_is_refused_without_force(
+    def test_a_site_that_keeps_failing_ends_with_the_fetch_hint(
         self, token_file, tmp_path, monkeypatch
     ):
-        site = site_for_a_ready_export(monkeypatch)
-        existing = tmp_path / 'receipts-2026-11-17-part-1.zip'
-        existing.write_bytes(b'something else entirely')
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): FakeResponse(503, {'detail': 'down'})},
+        )
+
+        result = runner.invoke(
+            receipts.app,
+            ['export-files', 'local', '--out', str(tmp_path), '--yes', '--wait', '0.05'],
+        )
+
+        assert result.exit_code == 1
+        assert f'receipts export-download local {EXPORT_ID}' in result.output
+
+    def test_another_error_while_waiting_prints_the_fetch_hint(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): FakeResponse(401, {'detail': 'Invalid token'})},
+        )
 
         result = runner.invoke(
             receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
         )
 
         assert result.exit_code == 1
-        assert 'Use --force' in result.output and 'export-download' not in result.output
+        assert f'receipts export-download local {EXPORT_ID}' in result.output
+
+    def test_the_wait_backs_off(self, token_file, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(receipts.time, 'sleep', lambda s: slept.append(s))
+        building = ok(make_export('building', built=False))
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): [building] * 12 + [ok(make_export())]},
+        )
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 0, result.output
+        assert slept[0] == 3 and slept == sorted(slept) and max(slept) == 15
+
+    def test_a_folder_with_zip_files_is_refused_before_anything_is_quoted_or_charged(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+        existing = tmp_path / 'receipts-2026-11-17-part-1.zip'
+        existing.write_bytes(ZIP_BYTES)
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 1
+        assert 'Nothing was charged' in result.output and '--force' in result.output
+        assert site.made('post', '/exports/quote') == [] and site.made('post', '/exports') == []
+        assert existing.read_bytes() == ZIP_BYTES
+
+    def test_a_clash_that_appears_after_creation_says_the_export_is_paid_for(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        calls = {'n': 0}
+        existing = tmp_path / 'receipts-2026-11-17-part-1.zip'
+
+        def poll(**kwargs):
+            calls['n'] += 1
+            existing.write_bytes(b'something else entirely')  # made while waiting
+            return ok(make_export())
+
+        site = site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): poll})
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 1
+        assert 'paid for and ready' in result.output
+        assert f'export-download local {EXPORT_ID}' in result.output
         assert existing.read_bytes() == b'something else entirely'
         assert site.made('get', STORAGE_URL) == []
 

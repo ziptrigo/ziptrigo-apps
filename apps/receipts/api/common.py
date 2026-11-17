@@ -39,7 +39,12 @@ from ninja.errors import HttpError
 from apps.billing.services import InsufficientCreditsError
 
 from ..models import IN_PROGRESS_STATUSES, ExportStatus, Receipt, ReceiptExport
-from ..services import AccountFrozenError, ExportCostChangedError, ExportInProgressError
+from ..services import (
+    AccountFrozenError,
+    ExportCostChangedError,
+    ExportInProgressError,
+    ExportPartMissingError,
+)
 from ..services.exports import part_name
 from ..services.filters import DEFAULT_SORT, ReceiptFilters
 
@@ -82,6 +87,8 @@ def mapped_errors() -> Generator[None]:
         ) from exc
     except ExportInProgressError as exc:
         raise HttpError(409, exc.messages[0]) from exc
+    except ExportPartMissingError as exc:
+        raise HttpError(404, exc.messages[0]) from exc
     except ValidationError as exc:
         raise HttpError(400, validation_detail(exc)) from exc
 

@@ -93,12 +93,21 @@ def create_export(request, payload: ReceiptExportCreateSchema):
 
     400 for a bad layout or filter or when no file matches; 402 while the account is frozen or the
     balance can't pay; 409 while another export is being prepared (one at a time) or the cost
-    changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend."""
+    changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend, or over
+    `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list read of a refused request spends."""
     filters, layout = _selection(request, payload)
-    with mapped_errors():
-        prepared = services.check_export(
-            request.auth, filters, layout, expected_cost=payload.expected_cost
-        )
+    # `check_export` reads and plans the whole list, so it is bounded like the quote is: over the
+    # dialog budget nothing is read; a refusal (which still read the list) spends one hit of it.
+    # A refusal spends none of `RECEIPTS_EXPORT_FILES_USER`.
+    ratelimit.enforce(ratelimit.peek_user(request.auth, 'RECEIPTS_EXPORT_DIALOG_USER'))
+    try:
+        with mapped_errors():
+            prepared = services.check_export(
+                request.auth, filters, layout, expected_cost=payload.expected_cost
+            )
+    except HttpError:
+        ratelimit.hit_user(request.auth, 'RECEIPTS_EXPORT_DIALOG_USER')
+        raise
     ratelimit.enforce(ratelimit.hit_user(request.auth, 'RECEIPTS_EXPORT_FILES_USER'))
     with mapped_errors():
         export = services.create_export(
@@ -145,16 +154,13 @@ def export_part_url(request, export_id: UUID, number: int):
     doesn't have; limited per user (`RECEIPTS_EXPORT_DOWNLOAD_USER`, the website's budget), which
     a refused request does not spend."""
     export = owned_export(request, export_id)
-    part = next((p for p in export.parts.all() if p.number == number), None)
-    if export.status == ExportStatus.READY and (part is None or part.built_at is None):
-        raise HttpError(404, 'There is no such file in this export.')
     with mapped_errors():
-        url = services.part_download_url(export, number)
+        url, part = services.part_download(export, number)
     ratelimit.enforce(ratelimit.hit_user(request.auth, 'RECEIPTS_EXPORT_DOWNLOAD_USER'))
     return {
         'url': url,
         'filename': part_name(export, number),
-        'size_bytes': part.size_bytes if part else 0,
+        'size_bytes': part.size_bytes,
         'expires_in': GET_URL_EXPIRES_SECONDS,
     }
 

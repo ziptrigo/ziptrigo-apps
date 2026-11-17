@@ -27,6 +27,7 @@ from .errors import (
     DailyLimitExceededError,
     ExportCostChangedError,
     ExportInProgressError,
+    ExportPartMissingError,
 )
 from .exports import (
     Prepared,
@@ -34,6 +35,7 @@ from .exports import (
     create_export,
     delete_export,
     expire_exports,
+    part_download,
     part_download_url,
     prepare_export,
     quote_export,
@@ -72,6 +74,7 @@ __all__ = [
     'DailyLimitExceededError',
     'ExportCostChangedError',
     'ExportInProgressError',
+    'ExportPartMissingError',
     'ForwardingConfirmation',
     'ReceiptFilters',
     'UploadTicket',
@@ -114,6 +117,7 @@ __all__ = [
     'merge_vendors',
     'meter_account',
     'normalize_key',
+    'part_download',
     'part_download_url',
     'preview_url',
     'process_receipt',

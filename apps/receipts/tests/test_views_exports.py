@@ -315,10 +315,23 @@ class TestRateLimit:
         assert second['HX-Retarget'] == '#export-msg'
         assert ReceiptExport.objects.count() == 1
 
-    def test_a_refused_request_spends_none_of_it(self, web, funded_user, three):
+    def test_a_refused_request_spends_none_of_the_export_budget(
+        self, web, funded_user, three, settings
+    ):
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'RECEIPTS_EXPORT_DIALOG_USER': (100, 60),
+        }
         for _ in range(3):
             assert post_new(web, confirm_cost='1').status_code == 422  # the cost changed
         assert post_new(web).status_code == 200
+
+    def test_a_refusal_that_read_the_list_spends_the_dialog_budget(self, web, funded_user, three):
+        assert post_new(web, confirm_cost='1').status_code == 422  # reads the list: one hit
+        second = post_new(web, confirm_cost='1')
+
+        assert second.status_code == 429 and second['HX-Retarget'] == '#export-msg'
+        assert not ReceiptExport.objects.exists()
 
     def test_opening_the_dialog_is_limited(self, web, three):
         first = web.get(reverse(NEW), **HTMX)
