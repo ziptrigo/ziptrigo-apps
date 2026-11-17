@@ -2,11 +2,16 @@
 (about `ReceiptsSettings.export_part_bytes` each, no compression) with one CSV of their data, kept
 in S3 for `export_retention_days` and then deleted.
 
-**Flow.** `quote_export` says what an export would cost (no writes). `create_export` runs in one
-transaction under the account row lock: it reads what the filters list, plans it
-(`export_plan.plan_export`), recomputes the cost and raises `ExportCostChangedError` (nothing
-charged) when it is not the `expected_cost` the user confirmed, spends the credits, writes the
-export, its parts and its items, and queues the first part. **One part is built per task**
+**Flow.** `prepare_export` reads what the filters list and plans it (`export_plan.plan_export`),
+which can be a lot of rows, so it never runs under a lock; `quote_export` is its `Quote` (no
+writes). `create_export` takes a `Prepared` (or makes one), refuses what it can with no writes, then
+in one transaction re-checks only what can have changed since (frozen, the number of files and
+the settings: a different list is planned again), raises `ExportCostChangedError` (nothing
+charged) when the cost is not the `expected_cost` the user confirmed, writes the export, its parts
+and its items, and only then spends the credits (so the billing row is locked for the shortest
+time) and queues the first part. It takes no lock on the receipts account: "one export at a time"
+is a partial unique constraint (`receipts_export_one_building_per_user`), so a race is an
+`IntegrityError` turned into `ExportInProgressError`. **One part is built per task**
 (`build_part`, the `receipts` queue), each queueing the next, so a long export never holds a worker
 in one piece and a restart resumes at the unfinished part. Part 1 is built **last**: it carries
 `receipts.csv`, which lists every part's files and must say what really went in. After the last
@@ -19,12 +24,18 @@ the end. A build that fails for good refunds everything. Both refunds happen in 
 transaction of the status change that is their compare-and-swap (`building` -> `ready` /
 `failed`), so each happens once. Deleting an export, or letting it expire, refunds nothing.
 
-**Resilience.** A part is claimed with a lease (`lease_until`); a part that raises counts an
-attempt on the export (reset by the next success) and waits `RETRY_BACKOFF`; `MAX_ATTEMPTS`
-consecutive failures fail the export. `receipts.retry_due` calls `resume_stalled`, which queues the
-next unbuilt part of a build that is neither leased nor progressing (a dead worker, a task that was
-never queued). Every step is idempotent: a part is written under a deterministic key and marked
-built with one conditional update.
+**Resilience.** A part is claimed with a lease (`lease_until`), and **every claim counts an attempt
+on the export** (`attempts`, reset by the next part that is built), so a worker that dies without
+ever raising (the OOM killer, a deploy) is counted too. A part that raises keeps the lease for
+`RETRY_BACKOFF`; `MAX_ATTEMPTS` claims without progress fail the export (and refund it), found by the
+claim itself or by `resume_stalled`. `receipts.retry_due` calls `resume_stalled`, which queues the
+next unbuilt part of a build that is neither leased nor progressing (a dead worker, a failed part
+whose backoff has passed, a task that was never queued): a failure does not move `progress_at`, so
+the retry comes at the first run after the backoff, once `STALL_AFTER` has passed since the last
+progress (the run is every 5 minutes). Every step is idempotent: a part is written under a
+deterministic key and marked built with one conditional update; a duplicate task that finds the
+part already built after it claimed it lets go, and a part is never deleted from S3 unless its
+export has ended.
 
 **Ending.** `expire` (the daily `receipts.purge_exports` job), `delete_export` (the user) and a
 failure all end an export the same way: status first (the compare-and-swap), then the objects
@@ -35,6 +46,7 @@ Exports are not part of the account's `stored_bytes`: their price covers them.
 
 import logging
 import zipfile
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -42,8 +54,9 @@ from uuid import UUID
 
 from botocore.exceptions import ClientError
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, F, OuterRef, Q
+from django.db.models.functions import Greatest
 from django.tasks import task
 from django.urls import reverse
 from django.utils import timezone
@@ -68,12 +81,11 @@ from ..models import (
     ReceiptExport,
     ReceiptExportItem,
     ReceiptExportPart,
-    ReceiptsAccount,
     ReceiptsSettings,
     ReceiptStatus,
     Vendor,
 )
-from .accounts import get_account, is_frozen
+from .accounts import is_frozen
 from .emails import send_export_ready_email
 from .errors import AccountFrozenError, ExportCostChangedError, ExportInProgressError
 from .export_plan import (
@@ -91,14 +103,15 @@ from .storage import export_key, export_prefix, get_storage
 
 logger = logging.getLogger(__name__)
 
-#: Consecutive failed tries of a part before the export fails (and is refunded).
+#: Times a worker may take a part without any part being built before the export fails (and is
+#: refunded): counted at the claim, so a worker that dies without raising counts too.
 MAX_ATTEMPTS = 3
 
 #: How long a worker may hold a part. A part is at most about `export_part_bytes` read from S3 and
 #: written back, a few minutes; this is the time after which a dead worker's part is taken over.
 LEASE = timedelta(minutes=15)
 
-#: How long a part that raised waits before it is tried again.
+#: How long a part that raised waits before it is tried again (it keeps the lease that long).
 RETRY_BACKOFF = timedelta(minutes=2)
 
 #: `resume_stalled` re-queues a build with no lease that has not progressed for this long.
@@ -199,14 +212,30 @@ class Quote:
         return self.balance >= self.cost
 
 
-def quote_export(
+@dataclass(frozen=True, slots=True)
+class Prepared:
+    """What reading and planning the list came to: the plan, the settings it was made with and the
+    quote. Made once per request, outside any lock, and handed from `check_export` to
+    `create_export` so a confirm scans the list once."""
+
+    layout: str
+    plan: Plan
+    config: ReceiptsSettings
+    quote: Quote
+
+    @property
+    def cost(self) -> int:
+        return self.quote.cost
+
+
+def prepare_export(
     user: User, filters: ReceiptFilters | None = None, layout: str = ExportLayout.YEAR_VENDOR
-) -> Quote:
-    """The number of files, their size, the number of zip files and the cost. No writes."""
+) -> Prepared:
+    """Read what `filters` list and plan it. No writes, no locks (it can be a lot of rows)."""
     layout = clean_layout(layout)
     config = ReceiptsSettings.load()
     plan = plan_export(select_rows(user, filters), layout, config.export_part_bytes)
-    return Quote(
+    quote = Quote(
         file_count=len(plan.items),
         total_bytes=plan.total_bytes,
         part_count=plan.part_count,
@@ -217,6 +246,14 @@ def quote_export(
         retention_days=config.export_retention_days,
         part_bytes=config.export_part_bytes,
     )
+    return Prepared(layout=layout, plan=plan, config=config, quote=quote)
+
+
+def quote_export(
+    user: User, filters: ReceiptFilters | None = None, layout: str = ExportLayout.YEAR_VENDOR
+) -> Quote:
+    """The number of files, their size, the number of zip files and the cost. No writes."""
+    return prepare_export(user, filters, layout).quote
 
 
 def filters_params(filters: ReceiptFilters | None) -> dict:
@@ -285,23 +322,19 @@ def describe_filters(user: User, filters: ReceiptFilters | None) -> list[str]:
 # -- Creating -----------------------------------------------------------------------------------
 
 
-def _judge(
-    user: User, filters: ReceiptFilters | None, layout: str, expected_cost: int | None
-) -> tuple[Plan, ReceiptsSettings, int]:
-    """Every refusal an export can meet, with no writes: the plan, the settings and the cost."""
-    layout = clean_layout(layout)
+def _refuse_early(user: User) -> None:
+    """The refusals that need no reading of the list."""
     if is_frozen(user):
         raise AccountFrozenError()
     if ReceiptExport.objects.filter(user=user, status=ExportStatus.BUILDING).exists():
         raise ExportInProgressError()
-    config = ReceiptsSettings.load()
-    plan = plan_export(select_rows(user, filters), layout, config.export_part_bytes)
-    if not plan.items:
+
+
+def _refuse_for(prepared: Prepared, expected_cost: int | None) -> None:
+    if not prepared.plan.items:
         raise ValidationError('There are no files to download with these filters.')
-    cost = len(plan.items) * config.export_price_per_file
-    if expected_cost is not None and expected_cost != cost:
-        raise ExportCostChangedError(cost)
-    return plan, config, cost
+    if expected_cost is not None and expected_cost != prepared.cost:
+        raise ExportCostChangedError(prepared.cost)
 
 
 def check_export(
@@ -310,12 +343,46 @@ def check_export(
     layout: str,
     *,
     expected_cost: int | None = None,
-) -> None:
+    prepared: Prepared | None = None,
+) -> Prepared:
     """`create_export`'s refusals, told without locks or writes, so a view can refuse before it
-    spends a rate-limit hit. The same exceptions; `create_export` decides again under its lock."""
-    _, _, cost = _judge(user, filters, layout, expected_cost)
-    if cost and get_balance(user) < cost:
+    spends a rate-limit hit. The same exceptions; `create_export` decides again before it writes.
+    Returns what it read, to pass on as `prepared` (a caller that already has one passes it in and
+    nothing is read again)."""
+    layout = clean_layout(layout)
+    _refuse_early(user)
+    prepared = prepared or prepare_export(user, filters, layout)
+    _refuse_for(prepared, expected_cost)
+    if prepared.cost and get_balance(user) < prepared.cost:
         raise InsufficientCreditsError()
+    return prepared
+
+
+def _count_files(user: User, filters: ReceiptFilters | None) -> int:
+    return filter_receipts(user, filters).exclude(file_key='').order_by().count()
+
+
+def _recheck(
+    user: User,
+    filters: ReceiptFilters | None,
+    layout: str,
+    prepared: Prepared,
+    expected_cost: int | None,
+) -> Prepared:
+    """Inside the transaction, right before anything is written: only what can have changed since
+    the list was planned -- the frozen state, the number of files and the settings. If any differs
+    the list is planned again (rare), so what is charged is always what is written."""
+    if is_frozen(user):
+        raise AccountFrozenError()
+    config = ReceiptsSettings.load()
+    if (
+        _count_files(user, filters) != len(prepared.plan.items)
+        or config.export_part_bytes != prepared.config.export_part_bytes
+        or config.export_price_per_file != prepared.config.export_price_per_file
+    ):
+        prepared = prepare_export(user, filters, layout)
+    _refuse_for(prepared, expected_cost)
+    return prepared
 
 
 def create_export(
@@ -324,39 +391,48 @@ def create_export(
     layout: str,
     *,
     expected_cost: int | None = None,
+    prepared: Prepared | None = None,
 ) -> ReceiptExport:
     """Charge for and start an export of what `filters` list.
 
     Raises `AccountFrozenError` (storage unpaid), `ExportInProgressError` (one at a time),
     `ValidationError` (an unknown layout, nothing to export), `ExportCostChangedError` (the cost
     is not `expected_cost`; `None` accepts whatever it is, for a client with no one to ask) and
-    `InsufficientCreditsError`. A refusal changes and charges nothing.
+    `InsufficientCreditsError`. A refusal changes and charges nothing. `prepared` is what
+    `check_export` returned; it is re-checked, not trusted.
+
+    The export, its parts and its items are written in one transaction with the charge, which is
+    the last write (it locks the billing row, so it is held for as short a time as possible). No
+    lock on the receipts account is taken.
     """
     layout = clean_layout(layout)
-    account = get_account(user)
-    with transaction.atomic():
-        ReceiptsAccount.objects.select_for_update().get(pk=account.pk)
-        plan, config, cost = _judge(user, filters, layout, expected_cost)
-        if cost:
-            spend_credits(
-                user,
-                cost,
-                description=f'Receipts export: {len(plan.items)} files',
-                source='receipts',
-            )
-        export = _write_export(user, filters, layout, plan, config.export_price_per_file, cost)
-        enqueue_after_commit(build_part, str(export.pk), first_part_to_build(export.part_count))
+    _refuse_early(user)
+    prepared = prepared or prepare_export(user, filters, layout)
+    _refuse_for(prepared, expected_cost)
+    try:
+        with transaction.atomic():
+            prepared = _recheck(user, filters, layout, prepared, expected_cost)
+            export = _write_export(user, filters, layout, prepared)
+            if prepared.cost:
+                spend_credits(
+                    user,
+                    prepared.cost,
+                    description=f'Receipts export: {len(prepared.plan.items)} files',
+                    source='receipts',
+                )
+            enqueue_after_commit(build_part, str(export.pk), first_part_to_build(export.part_count))
+    except IntegrityError:
+        # Two requests passed the early check together: the constraint lets one through.
+        if ReceiptExport.objects.filter(user=user, status=ExportStatus.BUILDING).exists():
+            raise ExportInProgressError() from None
+        raise
     return export
 
 
 def _write_export(
-    user: User,
-    filters: ReceiptFilters | None,
-    layout: str,
-    plan: Plan,
-    price: int,
-    cost: int,
+    user: User, filters: ReceiptFilters | None, layout: str, prepared: Prepared
 ) -> ReceiptExport:
+    plan = prepared.plan
     export = ReceiptExport.objects.create(
         user=user,
         layout=layout,
@@ -367,15 +443,16 @@ def _write_export(
         file_count=len(plan.items),
         total_bytes=plan.total_bytes,
         part_count=plan.part_count,
-        price_per_file=price,
-        charged_credits=cost,
+        price_per_file=prepared.config.export_price_per_file,
+        charged_credits=prepared.cost,
     )
+    per_part = Counter(item.part_number for item in plan.items)
     ReceiptExportPart.objects.bulk_create(
         ReceiptExportPart(
             export=export,
             number=number,
             key=export_key(user.pk, export.pk, number),
-            file_count=sum(1 for item in plan.items if item.part_number == number),
+            file_count=per_part[number],
         )
         for number in range(1, plan.part_count + 1)
     )
@@ -490,19 +567,45 @@ def _write_part(export: ReceiptExport, part: ReceiptExportPart) -> tuple[int, in
 
 
 def _claim(export_id: UUID) -> bool:
-    """Take the lease on the export's part build (compare-and-swap)."""
+    """Take the lease on the export's part build (compare-and-swap) and count the claim as an
+    attempt: it is reset when a part is built, so a worker that keeps dying without raising runs
+    the export out of attempts. False while someone holds the lease or the attempts are spent."""
     now = timezone.now()
     return bool(
-        ReceiptExport.objects.filter(pk=export_id, status=ExportStatus.BUILDING)
+        ReceiptExport.objects.filter(
+            pk=export_id, status=ExportStatus.BUILDING, attempts__lt=MAX_ATTEMPTS
+        )
         .filter(Q(lease_until__isnull=True) | Q(lease_until__lt=now))
-        .update(lease_until=now + LEASE)
+        .update(lease_until=now + LEASE, attempts=F('attempts') + 1)
     )
+
+
+def _release(export_id: UUID) -> None:
+    """Let go of a lease that was claimed for nothing (the part was already built): the claim does
+    not count as an attempt."""
+    ReceiptExport.objects.filter(pk=export_id, status=ExportStatus.BUILDING).update(
+        lease_until=None, attempts=Greatest(F('attempts') - 1, 0)
+    )
+
+
+def _give_up_if_exhausted(export_id: UUID) -> bool:
+    """Fail (and refund) a build that was claimed `MAX_ATTEMPTS` times without any part being built
+    and that nobody holds now. Returns whether it did."""
+    now = timezone.now()
+    exhausted = (
+        ReceiptExport.objects.filter(
+            pk=export_id, status=ExportStatus.BUILDING, attempts__gte=MAX_ATTEMPTS
+        )
+        .filter(Q(lease_until__isnull=True) | Q(lease_until__lt=now))
+        .exists()
+    )
+    return exhausted and fail_export(export_id, 'The build was interrupted too many times.')
 
 
 @task(queue_name='receipts')
 def build_part(export_id: str, number: int) -> None:
     """Build one zip file of an export, then queue the next, or finish the export. Never raises:
-    a failure is counted on the export and retried (`resume_stalled`), then fails it."""
+    a failure is retried (`resume_stalled`) until the attempts run out, then fails the export."""
     try:
         export = ReceiptExport.objects.filter(pk=UUID(export_id)).first()
     except ValueError:
@@ -519,6 +622,13 @@ def build_part(export_id: str, number: int) -> None:
             enqueue_after_commit(build_part, export_id, target)
         return
     if not _claim(export.pk):
+        _give_up_if_exhausted(export.pk)
+        return
+    # The part may have been built between the read above and the claim (a duplicate task: the
+    # other worker's lease ended when it finished). Look again, now that the lease is ours.
+    part.refresh_from_db()
+    if part.built_at is not None:
+        _release(export.pk)
         return
     try:
         size, written = _write_part(export, part)
@@ -532,18 +642,26 @@ def build_part(export_id: str, number: int) -> None:
 def _part_done(export: ReceiptExport, part: ReceiptExportPart, size: int, written: int) -> None:
     now = timezone.now()
     with transaction.atomic():
-        ReceiptExportPart.objects.filter(pk=part.pk, built_at__isnull=True).update(
+        won = ReceiptExportPart.objects.filter(pk=part.pk, built_at__isnull=True).update(
             built_at=now, size_bytes=size, file_count=written
         )
-        still_building = ReceiptExport.objects.filter(
-            pk=export.pk, status=ExportStatus.BUILDING
-        ).update(attempts=0, progress_at=now, lease_until=None)
-    if not still_building:
-        # The export ended (failed by another run) while this part was being written.
-        try:
-            get_storage().delete_object(part.key)
-        except Exception:
-            logger.exception('Could not delete %s', part.key)
+        building = ReceiptExport.objects.filter(pk=export.pk, status=ExportStatus.BUILDING)
+        if won:
+            still_building = building.update(attempts=0, progress_at=now, lease_until=None)
+        else:
+            # Another run built it first (it wrote the same object under the same key): not
+            # progress of ours, and the winner carries on the chain.
+            building.update(lease_until=None)
+            still_building = 0
+    if not won or not still_building:
+        ended = ReceiptExport.objects.filter(pk=export.pk, status__in=ENDED_STATUSES).exists()
+        if ended:
+            # The export ended (failed by another run, deleted) while this part was being
+            # written. Never when it is ready or still building: then the object is the part.
+            try:
+                get_storage().delete_object(part.key)
+            except Exception:
+                logger.exception('Could not delete %s', part.key)
         return
     export.refresh_from_db()
     following = next_part_to_build(export)
@@ -554,13 +672,13 @@ def _part_done(export: ReceiptExport, part: ReceiptExportPart, size: int, writte
 
 
 def _part_failed(export_id: UUID, exc: Exception) -> None:
+    """The claim already counted this try. The lease is kept for `RETRY_BACKOFF` (the retry waits
+    for it) and `progress_at` is left alone: a failure is not progress, so the backoff is the only
+    wait `resume_stalled` adds."""
     now = timezone.now()
     message = f'{type(exc).__name__}: {exc}'[:255]
     ReceiptExport.objects.filter(pk=export_id, status=ExportStatus.BUILDING).update(
-        attempts=F('attempts') + 1,
-        last_error=message,
-        progress_at=now,
-        lease_until=now + RETRY_BACKOFF,
+        last_error=message, lease_until=now + RETRY_BACKOFF
     )
     attempts = ReceiptExport.objects.filter(pk=export_id).values_list('attempts', flat=True).first()
     if attempts is not None and attempts >= MAX_ATTEMPTS:
@@ -569,25 +687,29 @@ def _part_failed(export_id: UUID, exc: Exception) -> None:
 
 def resume_stalled(now: datetime | None = None) -> int:
     """Queue the next part of every build that is not being worked on and has not progressed for
-    `STALL_AFTER`: a worker that died (its lease ran out), a retry that is due, a task that was
-    never queued. Returns how many were queued. Part tasks are idempotent, so a duplicate is
-    harmless."""
+    `STALL_AFTER`: a worker that died (its lease ran out), a retry whose backoff has passed, a task
+    that was never queued. A build whose attempts are spent (a part claimed `MAX_ATTEMPTS` times
+    with no progress) is failed and refunded instead. Returns how many were handled. Part tasks are
+    idempotent, so a duplicate is harmless."""
     now = now or timezone.now()
-    queued = 0
+    handled = 0
     stalled = ReceiptExport.objects.filter(
         status=ExportStatus.BUILDING, progress_at__lt=now - STALL_AFTER
     ).filter(Q(lease_until__isnull=True) | Q(lease_until__lt=now))
     for export in stalled:
         try:
-            number = next_part_to_build(export)
-            if number is None:
-                finish_export(export.pk)
+            if export.attempts >= MAX_ATTEMPTS:
+                fail_export(export.pk, 'The build was interrupted too many times.')
             else:
-                build_part.enqueue(str(export.pk), number)
-            queued += 1
+                number = next_part_to_build(export)
+                if number is None:
+                    finish_export(export.pk)
+                else:
+                    build_part.enqueue(str(export.pk), number)
+            handled += 1
         except Exception:
             logger.exception('Could not resume export %s', export.pk)
-    return queued
+    return handled
 
 
 def finish_export(export_id: UUID) -> bool:
@@ -670,7 +792,10 @@ def _plural(count: int, word: str) -> str:
 
 def _notify(export: ReceiptExport, title: str, body: str) -> None:
     """In the caller's transaction, in a savepoint of its own: a notice must never undo or fail the
-    change it reports. One notice per export (`delete_for_key`, then the new one)."""
+    change it reports. One notice per export (`delete_for_key`, then the new one). None for an
+    account that can't sign in."""
+    if not export.user.is_active or export.user.status != User.STATUS_ACTIVE:
+        return
     try:
         with transaction.atomic():
             notifications.delete_for_key(export.user_id, notice_key(export.pk), source='receipts')

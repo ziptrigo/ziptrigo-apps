@@ -153,10 +153,11 @@ class ReceiptsSettings(models.Model):
         models.PositiveBigIntegerField(
             default=100 * _MB,
             db_default=100 * _MB,
-            validators=[MinValueValidator(10 * _MB)],
+            validators=[MinValueValidator(10 * _MB), MaxValueValidator(1024 * _MB)],
             verbose_name='Export part size (bytes)',
             help_text='About how big each zip file of an export gets. A receipt file is never '
-            'split: a zip is closed when the next file would take it over this size.',
+            'split: a zip is closed when the next file would take it over this size. At most 1 GB: '
+            'a part is built within one 15-minute lease.',
         ),
     )
 

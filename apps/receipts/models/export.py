@@ -111,7 +111,10 @@ class ReceiptExport(models.Model):
     attempts = cast(
         int,
         models.PositiveSmallIntegerField(
-            default=0, db_default=0, help_text='Failed tries of the part being built.'
+            default=0,
+            db_default=0,
+            help_text='Times a worker took the part being built without it finishing (reset '
+            'by every part that is built); the export fails at `MAX_ATTEMPTS`.',
         ),
     )
     progress_at = cast(
@@ -139,6 +142,15 @@ class ReceiptExport(models.Model):
         indexes = [
             models.Index(fields=['user', 'status']),
             models.Index(fields=['status', 'expires_at']),
+        ]
+        constraints = [
+            # One export being prepared per user, whatever races: what lets `create_export` take no
+            # lock on the account while it writes the (possibly huge) plan.
+            models.UniqueConstraint(
+                fields=['user'],
+                condition=models.Q(status='building'),
+                name='receipts_export_one_building_per_user',
+            )
         ]
         ordering = ['-created_at']
 

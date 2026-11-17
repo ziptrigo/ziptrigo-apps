@@ -3543,7 +3543,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     per receipt"**, default **3** credits, 0 = free; nothing hard-codes the number, the dialog, the
     Costs page and the emails read it), `export_retention_days` (30) and `export_part_bytes` (100 MB, "about":
     a file is never cut, a zip is closed when the next file would take it over; flexible, the goal is no
-    huge downloads and a failed download repeating one part only).
+    huge downloads and a failed download repeating one part only; **between 10 MB and 1 GB**, so a part
+    is built within one lease).
   - *What is exported*: **what the dashboard lists** (`filter_receipts`, same filters as the list and the
     CSV: the dialog's URL and hidden fields carry `parsed.params`), every live receipt with a stored file
     whatever its status (an email body is `email.html` / `email.txt`), one receipt = one file = one price.
@@ -3569,30 +3570,49 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     currency, file, part` (`file` is the path inside the zip, `part` the zip number; `currency` and `part`
     are additions to the issue's list), every cell through the formula guard `filters._cell`, `\r\n`
     endings like the dashboard's CSV. Skipped files are not in it.
-  - *Creating* (`create_export`, `check_export`, `quote_export`): `quote_export` is no writes. `create_export`
-    runs in one transaction under the `ReceiptsAccount` row lock (`_judge`: frozen -> `AccountFrozenError`,
-    one `building` export at a time -> `ExportInProgressError`, unknown layout / nothing to export ->
-    `ValidationError`, then the plan and the cost; `expected_cost` differing -> `ExportCostChangedError`
-    with `.quote`, **nothing charged or created**; `None` accepts any cost), then `spend_credits(source=
-    'receipts')`, the rows, and the first part queued on commit. `InsufficientCreditsError` rolls everything
-    back. `check_export` is the same refusals with no lock and no writes, which the view runs **before**
-    it spends `RECEIPTS_EXPORT_FILES_USER`, so a refused request spends no budget.
+  - *Creating* (`prepare_export`, `check_export`, `create_export`, `quote_export`): `prepare_export` reads what the
+    filters list and plans it (`Prepared`: plan, the settings used, the `Quote`), **outside any lock** (it can
+    be tens of thousands of rows); `quote_export` is its quote, no writes. `check_export` is the refusals with
+    no lock and no writes (frozen -> `AccountFrozenError`, one `building` export at a time ->
+    `ExportInProgressError`, unknown layout / nothing to export -> `ValidationError`, `expected_cost`
+    differing -> `ExportCostChangedError` with `.quote`, **nothing charged or created**, `None` accepts any
+    cost, too few credits -> `InsufficientCreditsError`), which the view runs **before** it spends
+    `RECEIPTS_EXPORT_FILES_USER`, so a refused request spends no budget; it returns the `Prepared`, which the
+    view hands to `create_export(prepared=)`, so **a confirm reads the list once** and every refusal draws the
+    dialog from the same plan. `create_export` then, in one transaction, re-checks only what can have changed
+    (`_recheck`: frozen, the number of files, the price and part size; a different list is **planned again**,
+    rare, and the cost is judged on the new plan), writes the export, its parts and its items and **only then**
+    `spend_credits(source='receipts')` (the billing row is locked as briefly as possible), and queues the first
+    part on commit. **It takes no lock on the `ReceiptsAccount`** (uploads, intake and metering never wait for
+    a plan): "one export at a time" is the partial unique constraint `receipts_export_one_building_per_user`,
+    whose `IntegrityError` is turned into `ExportInProgressError` (nothing charged). `InsufficientCreditsError`
+    rolls everything back.
   - *Building*: **one task per part** (`build_part(export_id, number)`, `receipts` queue), each queueing the
     next. **Part 1 is built last** (`build_order`: 2, 3, ... then 1), because its CSV must say what really
     went in. `_write_part` streams every file from S3 into a zip written through `S3MultipartWriter`
     (16 MB buffer, never a whole file or zip in memory); an object that is gone (`NoSuchKey`) marks its item
     `skipped` and is left out. A part is claimed with a **lease** (`lease_until`, 15 min, conditional
     `UPDATE`) and marked built by one conditional update; a task for the wrong part hands over to the right
-    one, a duplicate does nothing. After the last part `finish_export` runs: one transaction whose
+    one. **A duplicate task** (`resume_stalled`, an out-of-order hand-over) that claims a part another worker
+    has just finished looks the part up again after its claim and lets go (`_release`: the claim is not an
+    attempt); and `_part_done` deletes the object it wrote **only when the export has ended** (failed, expired,
+    deleted), never for a `ready` or still `building` one: a late duplicate writes the same bytes under the same
+    key, so the object is the part. After the last part `finish_export` runs: one transaction whose
     compare-and-swap is `building` -> `ready` (`expires_at = now + retention`, `skipped_count` recounted from
     the items, the **refund of the skipped files** at the stored price, notification, email queued).
-  - *Failure*: a part that raises counts an attempt on the export (reset by the next success) and waits
-    `RETRY_BACKOFF` (2 min, as its lease); `MAX_ATTEMPTS` (3) consecutive failures call `fail_export`: the
+  - *Failure*: **every claim of a part counts an attempt** on the export (`attempts`, incremented in the claim's
+    own `UPDATE`, reset to 0 by each part that is built), so a worker that dies without raising (the OOM killer,
+    a deploy) is counted too. A part that raises keeps the lease for `RETRY_BACKOFF` (2 min) and does **not**
+    move `progress_at` (a failure is not progress, so that is the only wait added); once `MAX_ATTEMPTS` (3)
+    claims have passed without a part being built, `fail_export` runs -- from `_part_failed`, from the next
+    `build_part` that cannot claim, or from `resume_stalled`. `fail_export`: the
     compare-and-swap `building` -> `failed` in one transaction with the **full refund** (`add_credits(
     tx_type=REFUND, source='receipts')`), a notification, then the objects and rows are deleted. Both
-    refunds are therefore once-only. `receipts.retry_due` calls `resume_stalled`: a build with no lease
-    (or an expired one: a dead worker) and no progress for 5 minutes gets its next part queued (the plan
-    suggested 30 minutes; the lease is the real guard, so 5 is enough and a failed part retries sooner).
+    refunds are therefore once-only. `receipts.retry_due` (every 5 minutes) calls `resume_stalled`: a build with
+    no lease (or an expired one: a dead worker, a failed part whose backoff has passed) and no progress for 5
+    minutes gets its next part queued, or is failed when its attempts are spent (the plan suggested 30
+    minutes; the lease is the real guard, so 5 is enough). A failed part is therefore retried at the first run
+    after its 2-minute backoff, never before the build has been 5 minutes without progress.
   - *Ending*: `delete_export` (the user; not while building; no refund), `expire_exports` (the daily job:
     `ready` past `expires_at`) and a failure all do **status first (the compare-and-swap), then
     `delete_prefix` of `exports/<id>/`, then the parts and items rows** (`discard`); the job also finishes any
@@ -3605,7 +3625,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   - *Web*: the dashboard button (`#export-files-link`, re-sent out of band with every list refresh like the
     CSV link, so it always carries the filters) fetches `GET /receipts/exports/new/?<filters>` into
     `#export-modal` (`fragmentModal`, like the vendor rename dialog; a non-htmx GET redirects to the
-    dashboard): "N files (size) in P zip files of about 100 MB", the filters in words, the layout radios
+    dashboard, spending nothing; the dialog scans the list to quote it, so it spends `RECEIPTS_EXPORT_DIALOG_USER`): "N files (size) in P zip files of about 100 MB", the filters in words, the layout radios
     (Year / Vendor default, with an example path each), "This costs C credits (3 per file). Your balance is
     B.", a Top up link when short, `Download for C credits`, and `confirm_cost` posted back. A refusal is a
     **422 that re-renders the form in place** (`partials/export_form.html`); a changed cost shows the new
@@ -3616,11 +3636,13 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     (`RECEIPTS_EXPORT_DOWNLOAD_USER`, 60/min). Another user's export is a 404. A link "Exports" sits next to
     Vendors and Trash.
   - *Rate limits*: `RECEIPTS_EXPORT_FILES_USER` (5/hour, charged after validation and `check_export`),
-    `RECEIPTS_EXPORT_DOWNLOAD_USER` (60/min).
+    `RECEIPTS_EXPORT_DIALOG_USER` (30/min, the dialog's GET, charged before the scan; over it the usual htmx
+    429 message), `RECEIPTS_EXPORT_DOWNLOAD_USER` (60/min).
   - *Notices*: in-app `Your receipts export is ready` / `could not be prepared` (key `receipts_export:<id>`,
     one per export, url the export's page, written in the transaction of the change in its own savepoint);
-    email `send_export_ready_email` (`receipts` queue, fixed subject, autoescaped HTML, confirmed address
-    only, link to the page); a failed build gets the notice only.
+    email `send_export_ready_email` (`receipts` queue, fixed subject, autoescaped HTML, confirmed address of an
+    active account only, link to the page); a failed build gets the notice only. **Neither goes to an account
+    that can't sign in** (`is_active` and `status == ACTIVE`).
   - *Also*: the Costs page line **"Download all files as zip"** (`services/costs.py`, read live from the
     setting); `ReceiptExportAdmin` (read-only, parts inline, filter by status); the Privacy Policy retention
     line (`TERMS_VERSION` **not** bumped; the owner decides).

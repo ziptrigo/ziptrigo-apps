@@ -37,11 +37,11 @@ from ..services import (
     create_export,
     delete_export,
     part_download_url,
-    quote_export,
+    prepare_export,
 )
-from ..services.exports import describe_filters, part_name
+from ..services.exports import Prepared, describe_filters, part_name
 from .common import render_page
-from .dashboard import _resolve_vendor_filter
+from .dashboard import resolve_vendor_filter
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +75,13 @@ def _dialog_context(
     parsed,
     layout: str,
     *,
+    prepared: Prepared | None = None,
     errors: list[str] | None = None,
     extra_top_up: bool = False,
 ) -> dict:
-    quote = quote_export(request.user, parsed.filters, layout)
+    """The dialog's context. `prepared` is what the request already read (every refusal of a
+    confirm has it, so the list is not read again); without it the list is read here."""
+    quote = (prepared or prepare_export(request.user, parsed.filters, layout)).quote
     return {
         'quote': quote,
         'layout': layout,
@@ -105,12 +108,16 @@ def export_new(request: AuthenticatedHttpRequest) -> HttpResponse:
     and start the export."""
     if request.method == 'GET':
         parsed = parse_filters(request)
-        _resolve_vendor_filter(request, parsed)
+        resolve_vendor_filter(request, parsed)
         if not is_htmx(request):
             query = parsed.query()
             return redirect(
                 f'{reverse("receipts:dashboard")}?{query}' if query else 'receipts:dashboard'
             )
+        # The dialog reads the whole filtered list to quote it: bounded, loosely.
+        limited = ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
+        if not limited.allowed:
+            return ratelimit.web_response(request, limited)
         context = _dialog_context(request, parsed, _layout_of(request.GET.get('layout')))
         return render(request, 'receipts/partials/export_modal.html', context)
     return _confirm(request)
@@ -122,13 +129,19 @@ def _refused(
     layout: str,
     messages_list: list[str],
     *,
+    prepared: Prepared | None = None,
     top_up: bool = False,
 ) -> HttpResponse:
     """The form again with what was wrong (htmx swaps it in place); without htmx, flash messages
     and back to the dashboard."""
     if is_htmx(request):
         context = _dialog_context(
-            request, parsed, layout, errors=messages_list, extra_top_up=top_up
+            request,
+            parsed,
+            layout,
+            prepared=prepared,
+            errors=messages_list,
+            extra_top_up=top_up,
         )
         return render(request, 'receipts/partials/export_form.html', context, status=422)
     for line in messages_list:
@@ -139,7 +152,7 @@ def _refused(
 
 def _confirm(request: AuthenticatedHttpRequest) -> HttpResponse:
     parsed = parse_filters(request, request.POST)
-    _resolve_vendor_filter(request, parsed)
+    resolve_vendor_filter(request, parsed)
     form = ExportForm(request.POST)
     layout = _layout_of(request.POST.get('layout'))
     if not form.is_valid():
@@ -150,26 +163,49 @@ def _confirm(request: AuthenticatedHttpRequest) -> HttpResponse:
     if confirmed is None:
         return _refused(request, parsed, layout, ['Confirm the cost to continue.'])
 
+    # The list is read and planned once, here: every refusal below shows the dialog from it and
+    # `create_export` is handed the same plan (and checks again what could have changed).
+    prepared = prepare_export(request.user, parsed.filters, layout)
+
     # Every refusal that needs no write is told before the rate limit is spent.
     try:
-        check_export(request.user, parsed.filters, layout, expected_cost=confirmed)
+        check_export(
+            request.user,
+            parsed.filters,
+            layout,
+            expected_cost=confirmed,
+            prepared=prepared,
+        )
     except ExportCostChangedError as exc:
-        return _refused(request, parsed, layout, [f'{exc.MESSAGE}'])
+        return _refused(request, parsed, layout, [f'{exc.MESSAGE}'], prepared=prepared)
     except InsufficientCreditsError:
         return _refused(
-            request, parsed, layout, ["You don't have enough credits for this."], top_up=True
+            request,
+            parsed,
+            layout,
+            ["You don't have enough credits for this."],
+            prepared=prepared,
+            top_up=True,
         )
     except AccountFrozenError as exc:
-        return _refused(request, parsed, layout, [exc.message], top_up=True)
+        return _refused(request, parsed, layout, [exc.message], prepared=prepared, top_up=True)
     except ValidationError as exc:
-        return _refused(request, parsed, layout, list(exc.messages))
+        return _refused(request, parsed, layout, list(exc.messages), prepared=prepared)
 
     limited = ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_FILES_USER')
     if not limited.allowed:
         return ratelimit.web_response(request, limited, retarget='#export-msg')
 
+    # A refusal from here on means something changed since the list was read, so the dialog reads
+    # it again (no `prepared`).
     try:
-        export = create_export(request.user, parsed.filters, layout, expected_cost=confirmed)
+        export = create_export(
+            request.user,
+            parsed.filters,
+            layout,
+            expected_cost=confirmed,
+            prepared=prepared,
+        )
     except ExportCostChangedError as exc:
         return _refused(request, parsed, layout, [exc.MESSAGE])
     except InsufficientCreditsError:

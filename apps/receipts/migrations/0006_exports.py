@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='receiptssettings',
             name='export_part_bytes',
-            field=models.PositiveBigIntegerField(db_default=104857600, default=104857600, help_text='About how big each zip file of an export gets. A receipt file is never split: a zip is closed when the next file would take it over this size.', validators=[django.core.validators.MinValueValidator(10485760)], verbose_name='Export part size (bytes)'),
+            field=models.PositiveBigIntegerField(db_default=104857600, default=104857600, help_text='About how big each zip file of an export gets. A receipt file is never split: a zip is closed when the next file would take it over this size. At most 1 GB: a part is built within one 15-minute lease.', validators=[django.core.validators.MinValueValidator(10485760), django.core.validators.MaxValueValidator(1073741824)], verbose_name='Export part size (bytes)'),
         ),
         migrations.AddField(
             model_name='receiptssettings',
@@ -44,7 +44,7 @@ class Migration(migrations.Migration):
                 ('charged_credits', models.PositiveIntegerField(db_default=0, default=0)),
                 ('refunded_credits', models.PositiveIntegerField(db_default=0, default=0)),
                 ('skipped_count', models.PositiveIntegerField(db_default=0, default=0, help_text='Files that were gone when they were zipped (left out and refunded).')),
-                ('attempts', models.PositiveSmallIntegerField(db_default=0, default=0, help_text='Failed tries of the part being built.')),
+                ('attempts', models.PositiveSmallIntegerField(db_default=0, default=0, help_text='Times a worker took the part being built without it finishing (reset by every part that is built); the export fails at `MAX_ATTEMPTS`.')),
                 ('progress_at', models.DateTimeField(auto_now_add=True, help_text='When the build last made progress; `receipts.retry_due` re-queues one that has not for a while.')),
                 ('lease_until', models.DateTimeField(blank=True, help_text='A worker is building a part until this time (or a retry waits for it).', null=True)),
                 ('ready_at', models.DateTimeField(blank=True, null=True)),
@@ -104,6 +104,10 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name='receiptexportitem',
             index=models.Index(fields=['export', 'part_number'], name='receipts_re_export__88e9db_idx'),
+        ),
+        migrations.AddConstraint(
+            model_name='receiptexport',
+            constraint=models.UniqueConstraint(condition=models.Q(('status', 'building')), fields=('user',), name='receipts_export_one_building_per_user'),
         ),
         migrations.AddConstraint(
             model_name='receiptexportpart',

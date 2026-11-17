@@ -67,7 +67,7 @@ def _sort_links(parsed: ParsedFilters) -> dict:
     return links
 
 
-def _resolve_vendor_filter(
+def resolve_vendor_filter(
     request: AuthenticatedHttpRequest, parsed: ParsedFilters
 ) -> Vendor | None:
     """The vendor `?vendor=<id>` names, if it is one of the user's. Any other id (a vendor that
@@ -83,7 +83,7 @@ def _resolve_vendor_filter(
 
 
 def _list_context(request: AuthenticatedHttpRequest, parsed: ParsedFilters) -> dict:
-    vendor_filter = _resolve_vendor_filter(request, parsed)
+    vendor_filter = resolve_vendor_filter(request, parsed)
     queryset = filter_receipts(request.user, parsed.filters).select_related(
         'category', 'possible_duplicate_of'
     )
@@ -191,7 +191,7 @@ def export_csv(request: AuthenticatedHttpRequest) -> HttpResponse | StreamingHtt
     # must not spend the budget); this form's are lenient (a bad value falls back to the default),
     # but the order is kept so the two can't drift apart.
     parsed = parse_filters(request)
-    _resolve_vendor_filter(request, parsed)
+    resolve_vendor_filter(request, parsed)
     limited = ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_USER')
     if not limited.allowed:
         return ratelimit.page_response(request, limited)

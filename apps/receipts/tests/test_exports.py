@@ -11,8 +11,10 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.accounts.models import User
 from apps.billing.models import CreditTransaction, CreditTransactionType
 from apps.billing.services import InsufficientCreditsError, get_balance
 from apps.core.models import Notification
@@ -295,6 +297,89 @@ class TestCreate:
         with pytest.raises(InsufficientCreditsError):
             svc.check_export(funded_user, None, 'year_vendor')
 
+    def test_a_stale_plan_is_planned_again_inside_the_transaction(
+        self, funded_user, three, make_receipt
+    ):
+        prepared = svc.prepare_export(funded_user)
+        make_receipt()  # appeared after the plan was made
+        with pytest.raises(ExportCostChangedError) as caught:
+            svc.create_export(funded_user, None, 'year_vendor', expected_cost=9, prepared=prepared)
+        assert caught.value.quote == 12
+        assert get_balance(funded_user) == 100 and not ReceiptExport.objects.exists()
+
+    def test_a_stale_plan_with_no_expected_cost_exports_what_is_there_now(
+        self, funded_user, three, make_receipt
+    ):
+        prepared = svc.prepare_export(funded_user)
+        make_receipt()
+        export = svc.create_export(funded_user, None, 'year_vendor', prepared=prepared)
+        assert export.file_count == 4 and export.charged_credits == 12
+        assert export.items.count() == 4 and get_balance(funded_user) == 88
+
+    def test_a_price_change_after_the_plan_is_charged_at_the_new_price_only_if_confirmed(
+        self, funded_user, three, price
+    ):
+        prepared = svc.prepare_export(funded_user)
+        price.export_price_per_file = 5
+        price.save()
+        with pytest.raises(ExportCostChangedError) as caught:
+            svc.create_export(funded_user, None, 'year_vendor', expected_cost=9, prepared=prepared)
+        assert caught.value.quote == 15
+
+    def test_a_prepared_plan_is_not_read_again_when_nothing_changed(
+        self, funded_user, three, monkeypatch
+    ):
+        prepared = svc.prepare_export(funded_user)
+        calls = []
+        real = svc.select_rows
+        monkeypatch.setattr(svc, 'select_rows', lambda *a, **k: calls.append(1) or real(*a, **k))
+        svc.check_export(funded_user, None, 'year_vendor', expected_cost=9, prepared=prepared)
+        svc.create_export(funded_user, None, 'year_vendor', expected_cost=9, prepared=prepared)
+        assert calls == []
+
+    def test_a_frozen_account_is_noticed_inside_the_transaction_too(
+        self, funded_user, three, freeze, monkeypatch
+    ):
+        monkeypatch.setattr(svc, '_refuse_early', lambda user: None)
+        with pytest.raises(AccountFrozenError):
+            make_export(funded_user)
+        assert get_balance(funded_user) == 100 and not ReceiptExport.objects.exists()
+
+    def test_two_requests_racing_for_the_one_slot_leave_one_export_and_one_charge(
+        self, funded_user, three, monkeypatch
+    ):
+        make_export(funded_user)
+        monkeypatch.setattr(svc, '_refuse_early', lambda user: None)  # both passed the early check
+        with pytest.raises(ExportInProgressError):
+            make_export(funded_user)
+        assert ReceiptExport.objects.count() == 1 and get_balance(funded_user) == 91
+        assert ReceiptExportItem.objects.count() == 3
+
+    def test_the_database_allows_one_building_export_per_user(self, funded_user, three):
+        make_export(funded_user)
+        with pytest.raises(IntegrityError), transaction.atomic():
+            ReceiptExport.objects.create(user=funded_user)
+
+    def test_the_account_row_is_not_locked_while_planning(self, funded_user, three, monkeypatch):
+        from ..models import ReceiptsAccount
+
+        locked = []
+        real = ReceiptsAccount.objects.__class__.select_for_update
+        monkeypatch.setattr(
+            ReceiptsAccount.objects.__class__,
+            'select_for_update',
+            lambda self, *a, **k: locked.append(self.model) or real(self, *a, **k),
+        )
+        make_export(funded_user)
+        assert ReceiptsAccount not in locked
+
+    def test_the_part_size_is_bounded(self, price):
+        price.export_part_bytes = 2 * 1024**3
+        with pytest.raises(ValidationError):
+            price.full_clean()
+        price.export_part_bytes = 1024**3
+        price.full_clean()
+
 
 # -- Building -----------------------------------------------------------------------------------
 
@@ -449,6 +534,57 @@ class TestBuild:
             k.endswith('.zip') for k in fake_storage.objects
         )
 
+    def test_a_duplicate_that_finds_the_part_built_after_its_claim_changes_nothing(
+        self, funded_user, three, price, fake_storage, monkeypatch
+    ):
+        price.export_part_bytes = 25
+        price.save()
+        export = make_export(funded_user)
+        number = svc.next_part_to_build(export)
+        real_claim = svc._claim
+
+        def other_worker_builds_first(export_id):
+            # Worker A builds and finishes the part between B's read of it and B's claim.
+            monkeypatch.setattr(svc, '_claim', real_claim)
+            svc.build_part.call(str(export.pk), number)
+            return real_claim(export_id)
+
+        writes = []
+        real_write = svc._write_part
+        monkeypatch.setattr(
+            svc, '_write_part', lambda *a, **k: writes.append(1) or real_write(*a, **k)
+        )
+        monkeypatch.setattr(svc, '_claim', other_worker_builds_first)
+        svc.build_part.call(str(export.pk), number)  # worker B
+
+        part = export.parts.get(number=number)
+        assert part.built_at is not None and part.key in fake_storage.objects
+        assert len(writes) == 1 and not fake_storage.deleted  # only worker A wrote
+        export.refresh_from_db()
+        assert export.status == ExportStatus.BUILDING
+        assert export.lease_until is None and export.attempts == 0
+
+    def test_a_late_duplicate_never_deletes_the_object_of_a_ready_export(
+        self, funded_user, three, fake_storage, monkeypatch
+    ):
+        export = make_export(funded_user)
+        real = svc._write_part
+
+        def other_worker_finishes_meanwhile(exp, part):
+            result = real(exp, part)
+            ReceiptExportPart.objects.filter(pk=part.pk).update(built_at=timezone.now())
+            assert svc.finish_export(exp.pk)
+            return result
+
+        monkeypatch.setattr(svc, '_write_part', other_worker_finishes_meanwhile)
+        svc.build_part.call(str(export.pk), 1)
+
+        export.refresh_from_db()
+        part = export.parts.get()
+        assert export.status == ExportStatus.READY
+        assert part.key in fake_storage.objects and part.key not in fake_storage.deleted
+        assert zip_of(fake_storage, export, 1).namelist()
+
     def test_a_deleted_receipt_between_the_dialog_and_the_build_is_just_skipped(
         self, funded_user, three, fake_storage
     ):
@@ -577,6 +713,67 @@ class TestFailure:
         svc.build_part.call(str(export.pk), 1)
         assert not any(k.endswith('.zip') for k in fake_storage.objects)
 
+    def test_a_failure_does_not_count_as_progress(self, funded_user, three, fake_storage):
+        export = make_export(funded_user)
+        before = export.progress_at
+        fake_storage.failing_reads.add(three[0].file_key)
+        svc.build_part.call(str(export.pk), 1)
+        export.refresh_from_db()
+        assert export.progress_at == before
+
+    def test_a_worker_that_keeps_dying_fails_the_export_and_refunds_it(
+        self, funded_user, three, django_capture_on_commit_callbacks
+    ):
+        export = make_export(funded_user)
+        assert get_balance(funded_user) == 91
+        for _ in range(svc.MAX_ATTEMPTS):
+            assert svc._claim(export.pk)  # a worker takes the part ... and is killed
+            ReceiptExport.objects.filter(pk=export.pk).update(
+                lease_until=timezone.now() - timedelta(minutes=1),
+                progress_at=timezone.now() - timedelta(minutes=30),
+            )
+        assert not svc._claim(export.pk)  # the attempts are spent
+
+        assert svc.resume_stalled() == 1
+
+        export.refresh_from_db()
+        assert export.status == ExportStatus.FAILED
+        assert export.refunded_credits == 9 and get_balance(funded_user) == 100
+        assert not export.items.exists() and not export.parts.exists()
+
+    def test_a_task_that_finds_the_attempts_spent_fails_the_export(self, funded_user, three):
+        export = make_export(funded_user)
+        ReceiptExport.objects.filter(pk=export.pk).update(
+            attempts=svc.MAX_ATTEMPTS, lease_until=timezone.now() - timedelta(minutes=1)
+        )
+        svc.build_part.call(str(export.pk), 1)
+        export.refresh_from_db()
+        assert export.status == ExportStatus.FAILED and get_balance(funded_user) == 100
+
+    def test_dying_workers_are_counted_even_when_a_part_is_rebuilt_in_between(
+        self, funded_user, three, price, fake_storage
+    ):
+        price.export_part_bytes = 25
+        price.save()
+        export = make_export(funded_user)
+        # two interrupted claims, then the parts are built: progress resets the count
+        for _ in range(svc.MAX_ATTEMPTS - 1):
+            assert svc._claim(export.pk)
+            ReceiptExport.objects.filter(pk=export.pk).update(lease_until=None)
+        build_all(export)
+        export.refresh_from_db()
+        assert export.status == ExportStatus.READY and export.attempts == 0
+
+    def test_a_claim_released_for_nothing_is_not_an_attempt(self, funded_user, three):
+        export = make_export(funded_user)
+        assert svc._claim(export.pk)
+        svc._release(export.pk)
+        export.refresh_from_db()
+        assert export.attempts == 0 and export.lease_until is None
+        svc._release(export.pk)  # never below zero
+        export.refresh_from_db()
+        assert export.attempts == 0
+
 
 # -- Resuming ------------------------------------------------------------------------------------
 
@@ -640,6 +837,19 @@ class TestResume:
         export.refresh_from_db()
         assert export.status == ExportStatus.READY
 
+    def test_a_failed_part_waits_out_its_backoff_before_it_is_retried(
+        self, funded_user, three, fake_storage
+    ):
+        export = make_export(funded_user)
+        fake_storage.failing_reads.add(three[0].file_key)
+        svc.build_part.call(str(export.pk), 1)
+        ReceiptExport.objects.filter(pk=export.pk).update(
+            progress_at=timezone.now() - timedelta(hours=1)
+        )
+        now = timezone.now()
+        assert svc.resume_stalled(now + svc.RETRY_BACKOFF - timedelta(seconds=30)) == 0
+        assert svc.resume_stalled(now + svc.RETRY_BACKOFF + timedelta(seconds=30)) == 1
+
 
 # -- Notifications and email ---------------------------------------------------------------------
 
@@ -683,6 +893,24 @@ class TestReady:
         funded_user.save()
         emails.send_export_ready_email.call(str(export.pk))
         assert sent_emails == []
+
+    def test_no_email_to_an_inactive_account(self, funded_user, three, sent_emails):
+        export = make_export(funded_user)
+        build_all(export)
+        User.objects.filter(pk=funded_user.pk).update(status=User.STATUS_INACTIVE)
+        emails.send_export_ready_email.call(str(export.pk))
+        assert sent_emails == []
+        User.objects.filter(pk=funded_user.pk).update(status=User.STATUS_ACTIVE, is_active=False)
+        emails.send_export_ready_email.call(str(export.pk))
+        assert sent_emails == []
+
+    def test_no_in_app_notice_for_an_inactive_account(self, funded_user, three):
+        User.objects.filter(pk=funded_user.pk).update(status=User.STATUS_INACTIVE)
+        export = make_export(funded_user)
+        build_all(export)
+        export.refresh_from_db()
+        assert export.status == ExportStatus.READY
+        assert not Notification.objects.filter(user=funded_user).exists()
 
     def test_no_email_for_an_export_that_is_not_ready(self, funded_user, three, sent_emails):
         export = make_export(funded_user)

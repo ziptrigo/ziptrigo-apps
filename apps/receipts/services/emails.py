@@ -201,7 +201,7 @@ EXPORT_READY_SUBJECT = 'Your receipts export is ready'
 @task(queue_name='receipts')
 def send_export_ready_email(export_id: str) -> None:
     """ "Your receipts export is ready" -- to the owner, with a link to the export's page (never a
-    link to a file: the page is behind sign-in), to a confirmed address only. Rendered from
+    link to a file: the page is behind sign-in), to a confirmed address of an active account only. Rendered from
     `receipts/emails/export_ready.{txt,html}`; the HTML is autoescaped. Nothing in the subject."""
     try:
         export = ReceiptExport.objects.select_related('user').get(pk=export_id)
@@ -209,6 +209,8 @@ def send_export_ready_email(export_id: str) -> None:
         return
     user = export.user
     if export.status != ExportStatus.READY or not user.email or not user.email_confirmed:
+        return
+    if not user.is_active or user.status != User.STATUS_ACTIVE:
         return
     context = {
         'file_count': export.file_count - export.skipped_count,

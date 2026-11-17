@@ -302,6 +302,7 @@ class TestRateLimit:
         settings.RATELIMIT_RULES = {
             **settings.RATELIMIT_RULES,
             'RECEIPTS_EXPORT_FILES_USER': (1, 3600),
+            'RECEIPTS_EXPORT_DIALOG_USER': (1, 60),
         }
 
     def test_the_second_export_in_the_window_is_limited(self, web, three):
@@ -319,9 +320,48 @@ class TestRateLimit:
             assert post_new(web, confirm_cost='1').status_code == 422  # the cost changed
         assert post_new(web).status_code == 200
 
+    def test_opening_the_dialog_is_limited(self, web, three):
+        first = web.get(reverse(NEW), **HTMX)
+        second = web.get(reverse(NEW), **HTMX)
+        assert first.status_code == 200
+        assert second.status_code == 429 and second['Retry-After']
+        assert 'Quote' not in second.content.decode()
+
+    def test_a_dialog_redirected_to_the_dashboard_spends_none_of_it(self, web, three):
+        assert web.get(reverse(NEW)).status_code == 302
+        assert web.get(reverse(NEW)).status_code == 302
+        assert web.get(reverse(NEW), **HTMX).status_code == 200
+
     def test_an_invalid_form_spends_none_of_it(self, web, three):
         assert post_new(web, layout='x').status_code == 422
         assert post_new(web).status_code == 200
+
+
+class TestReadsTheListOnce:
+    @pytest.fixture
+    def reads(self, monkeypatch):
+        calls = []
+        real = svc.select_rows
+        monkeypatch.setattr(svc, 'select_rows', lambda *a, **k: calls.append(1) or real(*a, **k))
+        return calls
+
+    def test_the_dialog(self, web, three, reads):
+        web.get(reverse(NEW), **HTMX)
+        assert len(reads) == 1
+
+    def test_a_confirm(self, web, three, reads):
+        assert post_new(web).status_code == 200
+        assert len(reads) == 1
+
+    def test_a_refusal_with_a_changed_cost(self, web, three, reads, make_receipt):
+        make_receipt()
+        assert post_new(web).status_code == 422
+        assert len(reads) == 1
+
+    def test_a_refusal_for_too_few_credits(self, web, funded_user, three, reads):
+        spend_credits(funded_user, 95, description='x', source='test')
+        assert post_new(web).status_code == 422
+        assert len(reads) == 1
 
 
 # -- The pages ----------------------------------------------------------------------------------
