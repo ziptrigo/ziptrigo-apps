@@ -22,7 +22,23 @@ from .actions import (
     update_inbox_settings,
     update_receipt,
 )
-from .errors import AccountFrozenError, DailyLimitExceededError
+from .errors import (
+    AccountFrozenError,
+    DailyLimitExceededError,
+    ExportCostChangedError,
+    ExportInProgressError,
+)
+from .exports import (
+    Prepared,
+    check_export,
+    create_export,
+    delete_export,
+    expire_exports,
+    part_download_url,
+    prepare_export,
+    quote_export,
+    resume_stalled,
+)
 from .files import download_url, file_name, get_body_bytes, preview_url
 from .filters import ReceiptFilters, dashboard_counts, export_csv, filter_receipts, iter_csv
 from .forwarding import ForwardingConfirmation, forwarding_confirmation
@@ -54,6 +70,8 @@ from .vendors import (
 __all__ = [
     'AccountFrozenError',
     'DailyLimitExceededError',
+    'ExportCostChangedError',
+    'ExportInProgressError',
     'ForwardingConfirmation',
     'ReceiptFilters',
     'UploadTicket',
@@ -61,18 +79,23 @@ __all__ = [
     'active_inbox_code',
     'add_stored_bytes',
     'assign_vendor',
+    'Prepared',
+    'check_export',
     'clean_changes',
     'dashboard_counts',
     'complete_upload',
     'count_receipts',
     'create_category',
+    'create_export',
     'delete_category',
+    'delete_export',
     'delete_forever',
     'delete_vendor',
     'dismiss_duplicate',
     'download_url',
     'drop_if_orphan',
     'enqueue_processing',
+    'expire_exports',
     'export_csv',
     'file_name',
     'filter_receipts',
@@ -91,9 +114,12 @@ __all__ = [
     'merge_vendors',
     'meter_account',
     'normalize_key',
+    'part_download_url',
     'preview_url',
     'process_receipt',
     'purge_receipt',
+    'prepare_export',
+    'quote_export',
     'regenerate_inbox_code',
     'rename_category',
     'rename_vendor',
@@ -101,6 +127,7 @@ __all__ = [
     'reprocess',
     'restore',
     'resume_account',
+    'resume_stalled',
     'set_vetted',
     'start_upload',
     'suggest_vendors',

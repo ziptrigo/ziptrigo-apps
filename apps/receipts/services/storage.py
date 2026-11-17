@@ -15,6 +15,9 @@ One private bucket per environment, shared with file transfer; everything Receip
   and goes into `Content-Disposition`.
 - `receipts/users/<user_id>/previews/<receipt_id>.jpg`: a JPEG rendering of a HEIC original.
 - `receipts/users/<user_id>/emails/<email_id>.eml`: the attachment-stripped raw email.
+- `receipts/users/<user_id>/exports/<export_id>/part-NN.zip`: the zip files of an export (issue
+  #315), kept for the retention days and then deleted. Not part of the account's `stored_bytes`
+  (the export's price covers them).
 
 Putting the user id in the path is what lets deleting an account delete all of its objects with
 one `delete_prefix` (`user_prefix`).
@@ -47,6 +50,8 @@ __all__ = [
     'ObjectInfo',
     'S3Storage',
     'email_key',
+    'export_key',
+    'export_prefix',
     'failed_key_for',
     'file_key',
     'get_storage',
@@ -87,6 +92,15 @@ def preview_key(user_id: object, receipt_id: object) -> str:
 
 def email_key(user_id: object, email_id: object) -> str:
     return f'{user_prefix(user_id)}emails/{email_id}.eml'
+
+
+def export_prefix(user_id: object, export_id: object) -> str:
+    """Every object of one export (with the trailing slash that keeps ids apart)."""
+    return f'{user_prefix(user_id)}exports/{export_id}/'
+
+
+def export_key(user_id: object, export_id: object, number: int) -> str:
+    return f'{export_prefix(user_id, export_id)}part-{number:02d}.zip'
 
 
 _storage: S3Storage | None = None

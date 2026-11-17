@@ -31,6 +31,9 @@
 
 {% include 'receipts/partials/tabs.html' %}
 
+{# Where the "Download files" dialog is loaded. #}
+<div id="export-modal"></div>
+
 <form id="receipt-filters" method="get" action="{% url 'receipts:dashboard' %}"
       hx-get="{% url 'receipts:list' %}" hx-target="#receipt-list" hx-swap="innerHTML"
       hx-sync="this:replace"

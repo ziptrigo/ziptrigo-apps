@@ -642,6 +642,16 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'RECEIPTS_REPROCESS_USER': (30, 60 * 60),
     # A CSV export walks every matching row; a handful an hour is plenty for a human.
     'RECEIPTS_EXPORT_USER': (10, 60 * 60),
+    # "Download files" (issue #315) charges credits and builds zip files of everything, so a
+    # handful an hour is plenty (a refused or failed request spends none: it is charged only once
+    # the form is valid, right before the export is created). Downloading a part is a redirect to
+    # a presigned URL: cheap, but each click makes a fresh URL, so a loose per-minute cap.
+    'RECEIPTS_EXPORT_FILES_USER': (5, 60 * 60),
+    'RECEIPTS_EXPORT_DOWNLOAD_USER': (60, 60),
+    # Opening the "Download files" dialog reads the whole filtered list to quote it (count, size,
+    # parts, cost), so it is bounded too, loosely: a person opens it a few times a minute at most,
+    # and over the limit the dialog says to wait instead of scanning again.
+    'RECEIPTS_EXPORT_DIALOG_USER': (30, 60),
     # Regenerating retires the address and mints a new one; there is no legitimate reason to do it
     # more than a few times, and doing it in a loop only churns rows.
     'RECEIPTS_REGENERATE_USER': (5, 60 * 60),

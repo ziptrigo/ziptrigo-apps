@@ -558,6 +558,31 @@ owner's session in another context; the bell empty of `Shared note` notices.
 | 5 | Run the NOTIF-31 job command while the request is Done. | Nothing is sent for it (a done request is skipped). |
 | 6 | Escaping: a request titled `<b>x</b>` marked done. | The notification title shows `"<b>x</b>" is done` as text. |
 
+### NOTIF-33 Receipts: a finished export is one notice, replaced, never a direct file link
+
+**Purpose:** a ready export notifies the owner once and links to its page (issue #315).
+**Preconditions:** `qa.user@example.com` with receipts, signed in.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Make an export (RCPT-64 step 1). | The page opens **Ready**; the bell badge counts a new notification. |
+| 2 | Open the dropdown. | "Your receipts export is ready", body "N receipt files in 1 zip file. Available until <date>." (the public wording, e.g. `Dec 16, 2026`). Click it: it opens `/receipts/exports/<id>/` (not a file). |
+| 3 | `/notifications/`. | The notice is listed, read. |
+| 4 | Make a second export. | A second notice (one per export, each linking to its own page). |
+| 5 | Run RCPT-68 (a file is gone). | The notice counts only the files that went in ("N-1 receipt files"). |
+| 6 | Escaping: nothing the owner typed is in the notice. | The title and body are fixed text and numbers. |
+
+### NOTIF-34 Receipts: a failed export notifies that the credits were refunded
+
+**Purpose:** a failed build says so and says the credits came back (issue #315).
+**Preconditions:** RCPT-69 done (a failed export).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | The bell. | "Your receipts export could not be prepared", body "Something went wrong, so we couldn't make your zip files. The 3N credits you paid were refunded." It opens the failed export's page. |
+| 2 | Delete the failed export from its page, then reopen the notice. | The notice stays (a record); its link is now a 404 page. |
+| 3 | A free export (price 0) that fails. | The body has no refund sentence. |
+
 ## Out of scope
 
 - Real inbound email to `todo+` addresses through SES (NOTIF-18 runs the same ingest on a local

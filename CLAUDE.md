@@ -47,7 +47,9 @@ apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/do
                       #306: a link for other people to upload files to you, see "File requests").
 apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted fields out. Models,
                       uploads, email intake, AI extraction, billing, jobs, admin, the web pages, the
-                      JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (see "Receipts").
+                      JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (see "Receipts"),
+                      and "Download files": zip files of everything, built in the background and
+                      kept 30 days (issue #315, see "Receipts" > "Exports").
 apps/short_url/       Short URLs (issue #162): links with editable destinations, the public `/s/<code>`
                       redirect (root-mounted), click analytics, password and preview pages, abuse
                       tooling, one-off billing of its extras, dashboard/stats pages, the JWT API
@@ -2453,11 +2455,15 @@ Zip entries de-duplicate a repeated `TransferFile.name` (`a (1).txt`), flatten `
 name (a "zip slip" guard against a naive/vulnerable extractor -- `services.limits.validate_filename`
 only strips control characters, so a raw path stays in the stored name otherwise), and carry the
 file's own `created_at` instead of zipfile's default 1980-01-01. The build streams both ends --
-`S3Storage.get_object_stream` reads each source file a chunk at a time, and `_S3MultipartWriter`
+`S3Storage.get_object_stream` reads each source file a chunk at a time, and `S3MultipartWriter`
 turns `zipfile`'s output into an S3 multipart upload `PART_SIZE_BYTES` (64 MB) at a time -- so
 neither a whole source file nor the whole zip is ever held in memory; this only works because
-`_S3MultipartWriter` deliberately has no `.tell()`, which makes `zipfile.ZipFile` fall back to its
-own non-seekable-stream support instead of assuming it can seek. A "download all" click counts as
+`S3MultipartWriter` deliberately has no `.tell()`, which makes `zipfile.ZipFile` fall back to its
+own non-seekable-stream support instead of assuming it can seek. **The streaming helpers live in
+`apps.core.services.zip_stream`** (issue #315: `S3MultipartWriter` with a `size` counter and a
+`part_size` argument, `safe_entry_name`, `dedupe_entry_name`, `copy_stream`), since Receipts' exports
+need them too and products may not import each other; `services/zip.py` imports them under their old
+underscore names, its behaviour and tests unchanged (tests of the helpers: `apps/core/tests/test_zip_stream.py`). A "download all" click counts as
 one `DownloadEvent` (`file=None`) toward the same `max_downloads` limit as any other download.
 
 **File previews** (issue #311; mock `docs/ui-design/mocks/file-preview.html`; `services/preview.py`, `services/renditions.py`,
@@ -3525,7 +3531,126 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   rows that went `done` more than 30 days ago and have no `InboundEmail`, i.e. mail for
   unknown/retired codes; `pending`/`failed` and ones with emails stay; see "Email intake"),
   `receipts.link_vendors` (hourly; links receipts with a vendor text and no
-  vendor, see "Vendors"). Idempotent, per-row `try/except` + `logger.exception`.
+  vendor, see "Vendors"), `receipts.purge_exports` (daily; expires exports past their retention
+  and finishes deleting ended ones, see "Exports"); `receipts.retry_due` also resumes stalled export
+  builds. Idempotent, per-row `try/except` + `logger.exception`.
+- **Exports** (issue #315, PR 1 of 2: backend and web; the JWT API and CLI are PR 2. `models/export.py`,
+  `services/export_plan.py`, `services/exports.py`, `views/exports.py`, `forms/export.py`, migration
+  `0006_exports`; templates `exports.html`, `export.html`, `partials/export_{modal,form,panel}.html`,
+  `emails/export_ready.{txt,html}`). **Download files** (dashboard button next to Export CSV) packs the
+  user's receipt files into independent zip files and one CSV, kept in S3 for 30 days.
+  - *Settings* (`ReceiptsSettings`, all `db_default`ed): `export_price_per_file` (verbose name **"Export
+    per receipt"**, default **3** credits, 0 = free; nothing hard-codes the number, the dialog, the
+    Costs page and the emails read it), `export_retention_days` (30) and `export_part_bytes` (100 MB, "about":
+    a file is never cut, a zip is closed when the next file would take it over; flexible, the goal is no
+    huge downloads and a failed download repeating one part only; **between 10 MB and 1 GB**, so a part
+    is built within one lease).
+  - *What is exported*: **what the dashboard lists** (`filter_receipts`, same filters as the list and the
+    CSV: the dialog's URL and hidden fields carry `parsed.params`), every live receipt with a stored file
+    whatever its status (an email body is `email.html` / `email.txt`), one receipt = one file = one price.
+    Never the Trash, unfinished uploads, HEIC previews or stored `.eml`s. **No compression** (`ZIP_STORED`).
+  - *Models*: `ReceiptExport` (status `building` / `ready` / `failed` / `expired` / `deleted`, layout
+    `year_vendor` / `vendor_year`, `filters` JSON = `{summary, params}`, counts, `price_per_file`,
+    `charged_credits`, `refunded_credits`, `skipped_count`, `attempts`, `progress_at`, `lease_until`,
+    `ready_at`, `expires_at`, `last_error`), `ReceiptExportPart` (one zip: key
+    `receipts/users/<user>/exports/<export>/part-NN.zip`, under the user's prefix so deleting the account
+    deletes them, within the IAM scope; `built_at` null until written) and `ReceiptExportItem` (the plan:
+    `receipt_id` a **plain UUID, no foreign key**, `file_key`, `path`, `part_number`, `skipped`, and a copy of
+    the CSV data, so a later edit or delete of the receipt changes nothing). Parts and items are **deleted
+    when the export ends**. Exports are **not part of `stored_bytes`**: the price covers them.
+  - *Planning* (`export_plan.plan_export`, pure): paths are `Year/Vendor/file` or `Vendor/Year/file`
+    (`No date` / `No vendor`; the year is the receipt's own date). A name becomes one path component every
+    platform takes (`/ \ : * ? " < > |`, control and format characters (zero-width, bidi), leading dots,
+    trailing dots and spaces, Windows reserved names, cut to 80 / 120 characters); folders and files are
+    unique **ignoring case across every part** (`name (1).pdf`; the first spelling of a folder wins), so
+    extracting all the zips into one folder merges cleanly; the order of rows is deterministic (receipt
+    date, `created_at`, id) so the older receipt keeps the plain name; then items are sorted by path and
+    packed in order.
+  - *CSV*: `receipts.csv` at the root of **part 1**, covering every part: `date, vendor, type, amount,
+    currency, file, part` (`file` is the path inside the zip, `part` the zip number; `currency` and `part`
+    are additions to the issue's list), every cell through the formula guard `filters._cell`, `\r\n`
+    endings like the dashboard's CSV. Skipped files are not in it.
+  - *Creating* (`prepare_export`, `check_export`, `create_export`, `quote_export`): `prepare_export` reads what the
+    filters list and plans it (`Prepared`: plan, the settings used, the `Quote`), **outside any lock** (it can
+    be tens of thousands of rows); `quote_export` is its quote, no writes. `check_export` is the refusals with
+    no lock and no writes (frozen -> `AccountFrozenError`, one `building` export at a time ->
+    `ExportInProgressError`, unknown layout / nothing to export -> `ValidationError`, `expected_cost`
+    differing -> `ExportCostChangedError` with `.quote`, **nothing charged or created**, `None` accepts any
+    cost, too few credits -> `InsufficientCreditsError`), which the view runs **before** it spends
+    `RECEIPTS_EXPORT_FILES_USER`, so a refused request spends no budget; it returns the `Prepared`, which the
+    view hands to `create_export(prepared=)`, so **a confirm reads the list once** and every refusal draws the
+    dialog from the same plan. `create_export` then, in one transaction, re-checks only what can have changed
+    (`_recheck`: frozen, the number of files, the price and part size; a different list is **planned again**,
+    rare, and the cost is judged on the new plan), writes the export, its parts and its items and **only then**
+    `spend_credits(source='receipts')` (the billing row is locked as briefly as possible), and queues the first
+    part on commit. **It takes no lock on the `ReceiptsAccount`** (uploads, intake and metering never wait for
+    a plan): "one export at a time" is the partial unique constraint `receipts_export_one_building_per_user`,
+    whose `IntegrityError` is turned into `ExportInProgressError` (nothing charged). `InsufficientCreditsError`
+    rolls everything back.
+  - *Building*: **one task per part** (`build_part(export_id, number)`, `receipts` queue), each queueing the
+    next. **Part 1 is built last** (`build_order`: 2, 3, ... then 1), because its CSV must say what really
+    went in. `_write_part` streams every file from S3 into a zip written through `S3MultipartWriter`
+    (16 MB buffer, never a whole file or zip in memory); an object that is gone (`NoSuchKey`) marks its item
+    `skipped` and is left out. A part is claimed with a **lease** (`lease_until`, 15 min, conditional
+    `UPDATE`) and marked built by one conditional update; a task for the wrong part hands over to the right
+    one. **A duplicate task** (`resume_stalled`, an out-of-order hand-over) that claims a part another worker
+    has just finished looks the part up again after its claim and lets go (`_release`: the claim is not an
+    attempt); and `_part_done` deletes the object it wrote **only when the export has ended** (failed, expired,
+    deleted), never for a `ready` or still `building` one: a late duplicate writes the same bytes under the same
+    key, so the object is the part. After the last part `finish_export` runs: one transaction whose
+    compare-and-swap is `building` -> `ready` (`expires_at = now + retention`, `skipped_count` recounted from
+    the items, the **refund of the skipped files** at the stored price, notification, email queued).
+  - *Failure*: **every claim of a part counts an attempt** on the export (`attempts`, incremented in the claim's
+    own `UPDATE`, reset to 0 by each part that is built), so a worker that dies without raising (the OOM killer,
+    a deploy) is counted too. A part that raises keeps the lease for `RETRY_BACKOFF` (2 min) and does **not**
+    move `progress_at` (a failure is not progress, so that is the only wait added); once `MAX_ATTEMPTS` (3)
+    claims have passed without a part being built, `fail_export` runs -- from `_part_failed`, from the next
+    `build_part` that cannot claim, or from `resume_stalled`. `fail_export`: the
+    compare-and-swap `building` -> `failed` in one transaction with the **full refund** (`add_credits(
+    tx_type=REFUND, source='receipts')`), a notification, then the objects and rows are deleted. Both
+    refunds are therefore once-only. `receipts.retry_due` (every 5 minutes) calls `resume_stalled`: a build with
+    no lease (or an expired one: a dead worker, a failed part whose backoff has passed) and no progress for 5
+    minutes gets its next part queued, or is failed when its attempts are spent (the plan suggested 30
+    minutes; the lease is the real guard, so 5 is enough). A failed part is therefore retried at the first run
+    after its 2-minute backoff, never before the build has been 5 minutes without progress.
+  - *Ending*: `delete_export` (the user; not while building; no refund), `expire_exports` (the daily job:
+    `ready` past `expires_at`) and a failure all do **status first (the compare-and-swap), then
+    `delete_prefix` of `exports/<id>/`, then the parts and items rows** (`discard`); the job also finishes any
+    ended export whose objects or rows are still there (a storage error), so nothing leaks. A deleted export
+    is a 404; an expired or failed one stays listed with its state and what was charged or refunded.
+  - *Download*: `part_download_url` (`AccountFrozenError` while storage is paused, `ValidationError` unless
+    `ready` and the part is built) presigns an attachment URL named `receipts-2026-11-16-part-01-of-05.zip`
+    (no suffix for one part). **No public link**: the page is behind sign-in; the email links to the page,
+    never to a file.
+  - *Web*: the dashboard button (`#export-files-link`, re-sent out of band with every list refresh like the
+    CSV link, so it always carries the filters) fetches `GET /receipts/exports/new/?<filters>` into
+    `#export-modal` (`fragmentModal`, like the vendor rename dialog; a non-htmx GET redirects to the
+    dashboard, spending nothing; the dialog scans the list to quote it, so it spends `RECEIPTS_EXPORT_DIALOG_USER`): "N files (size) in P zip files of about 100 MB", the filters in words, the layout radios
+    (Year / Vendor default, with an example path each), "This costs C credits (3 per file). Your balance is
+    B.", a Top up link when short, `Download for C credits`, and `confirm_cost` posted back. A refusal is a
+    **422 that re-renders the form in place** (`partials/export_form.html`); a changed cost shows the new
+    total and charges nothing; success is `HX-Redirect` to `/receipts/exports/<id>/` with a flash.
+    `/receipts/exports/` lists exports (not the deleted); the page polls `exports/<id>/panel/` every 3 s
+    while building (capped at 40), then shows a Download button per zip (size, file count), the expiry, what
+    was skipped, the charge and Delete (confirmation modal). `exports/<id>/parts/<n>/download/` redirects
+    (`RECEIPTS_EXPORT_DOWNLOAD_USER`, 60/min). Another user's export is a 404. A link "Exports" sits next to
+    Vendors and Trash.
+  - *Rate limits*: `RECEIPTS_EXPORT_FILES_USER` (5/hour, charged after validation and `check_export`),
+    `RECEIPTS_EXPORT_DIALOG_USER` (30/min, the dialog's GET, charged before the scan; over it the usual htmx
+    429 message), `RECEIPTS_EXPORT_DOWNLOAD_USER` (60/min).
+  - *Notices*: in-app `Your receipts export is ready` / `could not be prepared` (key `receipts_export:<id>`,
+    one per export, url the export's page, written in the transaction of the change in its own savepoint);
+    email `send_export_ready_email` (`receipts` queue, fixed subject, autoescaped HTML, confirmed address of an
+    active account only, link to the page); a failed build gets the notice only. **Neither goes to an account
+    that can't sign in** (`is_active` and `status == ACTIVE`).
+  - *Also*: the Costs page line **"Download all files as zip"** (`services/costs.py`, read live from the
+    setting); `ReceiptExportAdmin` (read-only, parts inline, filter by status); the Privacy Policy retention
+    line (`TERMS_VERSION` **not** bumped; the owner decides).
+  - *Tests*: `tests/test_export_plan.py` (names, collisions, packing, CSV), `test_exports.py` (quote, create,
+    every refusal, building against the fake storage, skipped files, both refunds, resuming, download,
+    ending, the job, email and notice), `test_views_exports.py`, `apps/core/tests/test_zip_stream.py`, the
+    Playwright `tests_e2e/test_receipt_exports.py` (filter, dialog, confirm, download the zip and open it,
+    delete) and the AI plan cases RCPT-63 to RCPT-70 (+ MAIL-29, NOTIF-33/34, ADM-66, BILL-38).
 - **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is
   `@task(queue_name='receipts')`, served by its own `db_worker --queue-name receipts` process (see
   "Queue and scheduler" and "Docker"). Tests: `ImmediateBackend` runs a task inline at

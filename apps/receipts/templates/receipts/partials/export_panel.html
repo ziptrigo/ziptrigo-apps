@@ -1,0 +1,66 @@
+{% load datetime_format receipts_ui %}
+{% comment %} One export's status and its zip files. While it is being prepared this panel re-fetches itself every 3 s
+   (up to `_MAX_AUTO_POLLS` times) and the response replaces it, including the buttons once it is ready. {% endcomment %}
+<div id="export-panel" {% if poll_url %}hx-get="{{ poll_url }}" hx-trigger="every 3s" hx-target="#export-panel" hx-swap="outerHTML"{% endif %}
+     class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-5 sm:px-6">
+    <div class="flex flex-wrap items-center gap-3">
+        {% export_status_pill export.status %}
+        <span class="text-sm text-gray-600 dark:text-gray-400">
+            {{ export.file_count }} file{{ export.file_count|pluralize }}, {{ export.total_bytes|filesizeformat }}, in {{ export.part_count }} zip file{{ export.part_count|pluralize }}
+            &middot; asked for {{ export.created_at|fdatetime }}
+        </span>
+    </div>
+    {% if filter_lines %}
+    <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Only: {{ filter_lines|join:'; ' }}.</p>
+    {% endif %}
+
+    {% if export.status == 'building' %}
+    <p class="mt-4 text-sm text-gray-700 dark:text-gray-300">
+        <i class="fas fa-spinner fa-spin mr-2 text-blue-600 dark:text-blue-400" aria-hidden="true"></i>Preparing your zip files: {{ built_count }} of {{ export.part_count }} done.
+        {% if poll_url %}This page updates by itself. You can leave it: we'll tell you when it is ready.{% else %}Reload the page to check again. We'll tell you when it is ready.{% endif %}
+    </p>
+    {% elif export.status == 'ready' %}
+    <p class="mt-4 text-sm text-gray-700 dark:text-gray-300">
+        Available to download until <strong class="font-semibold">{{ export.expires_at|fdatetime }}</strong>, then it is deleted.
+        {% if export.skipped_count %}{{ export.skipped_count }} file{{ export.skipped_count|pluralize }} {{ export.skipped_count|pluralize:"was,were" }} no longer there and left out{% if export.refunded_credits %}; {{ export.refunded_credits }} credit{{ export.refunded_credits|pluralize }} refunded{% endif %}.{% endif %}
+    </p>
+    <ul class="mt-4 divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700">
+        {% for part in parts %}
+        <li class="flex flex-wrap items-center gap-3 px-4 py-3">
+            <div class="min-w-0 flex-1">
+                <p class="truncate font-mono text-sm text-gray-900 dark:text-gray-100">{{ part.name }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ part.size_bytes|filesizeformat }}, {{ part.file_count }} file{{ part.file_count|pluralize }}{% if part.number == 1 %}, with receipts.csv{% endif %}</p>
+            </div>
+            <a href="{% url 'receipts:export-part-download' export.pk part.number %}"
+               class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                <i class="fas fa-download mr-2" aria-hidden="true"></i>Download<span class="sr-only"> {{ part.name }}</span>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">Each zip opens on its own. Extract them all into the same folder to get everything together.</p>
+    {% elif export.status == 'failed' %}
+    <p class="mt-4 text-sm text-gray-700 dark:text-gray-300">
+        We couldn't prepare the zip files.{% if export.refunded_credits %} The {{ export.refunded_credits }} credit{{ export.refunded_credits|pluralize }} you paid {{ export.refunded_credits|pluralize:"was,were" }} refunded.{% endif %} You can try again from the dashboard.
+    </p>
+    {% elif export.status == 'expired' %}
+    <p class="mt-4 text-sm text-gray-700 dark:text-gray-300">These zip files were deleted {{ export.expires_at|fdatetime }}. To get your files again, start a new export from the dashboard.</p>
+    {% endif %}
+
+    {% if export.charged_credits %}
+    <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">Charged {{ export.charged_credits }} credit{{ export.charged_credits|pluralize }}{% if export.status != 'failed' and export.refunded_credits %}, {{ export.refunded_credits }} refunded{% endif %}.</p>
+    {% endif %}
+
+    {% if export.status != 'building' %}
+    <div class="mt-5 flex justify-end">
+        <button type="button" @click="show($el)"
+                data-url="{% url 'receipts:export-delete' export.pk %}"
+                data-title="Delete this export"
+                data-body="Delete this export? {% if export.status == 'ready' %}The zip files are deleted now and you will not get the credits back.{% else %}It is removed from your list.{% endif %}"
+                data-label="Delete"
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <i class="fas fa-trash mr-2" aria-hidden="true"></i>Delete
+        </button>
+    </div>
+    {% endif %}
+</div>

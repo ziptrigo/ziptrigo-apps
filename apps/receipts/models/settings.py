@@ -128,6 +128,39 @@ class ReceiptsSettings(models.Model):
         ),
     )
 
+    export_price_per_file = cast(
+        int,
+        models.PositiveIntegerField(
+            default=3,
+            db_default=3,
+            verbose_name='Export per receipt',
+            help_text='Credits charged per receipt file when a user downloads their files as zip '
+            'files (Receipts > Download files), charged when they confirm. 0 makes it free.',
+        ),
+    )
+    export_retention_days = cast(
+        int,
+        models.PositiveIntegerField(
+            default=30,
+            db_default=30,
+            validators=[MinValueValidator(1)],
+            help_text='Days the zip files of an export stay available to download before they '
+            'are deleted.',
+        ),
+    )
+    export_part_bytes = cast(
+        int,
+        models.PositiveBigIntegerField(
+            default=100 * _MB,
+            db_default=100 * _MB,
+            validators=[MinValueValidator(10 * _MB), MaxValueValidator(1024 * _MB)],
+            verbose_name='Export part size (bytes)',
+            help_text='About how big each zip file of an export gets. A receipt file is never '
+            'split: a zip is closed when the next file would take it over this size. At most 1 GB: '
+            'a part is built within one 15-minute lease.',
+        ),
+    )
+
     class Meta:
         verbose_name = 'Receipts settings'
         verbose_name_plural = 'Receipts settings'

@@ -614,7 +614,7 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 | 2 | Look at **Shared by every app**. | A **File storage** card: "Files you keep in File Transfer, Receipts and To-do. Charged once a day ...", "Example: 2 GB kept for 30 days costs 6 credits.", and on the right **0.1 credits** / per GB per day. Under it **New accounts** "1,000 credits once the email address is confirmed." and **When credits run out**. |
 | 3 | Look at **QR Codes**. | One row, "Create, edit and download QR codes", **Free**. |
 | 4 | Look at **File Transfer**. | "Send a transfer" **Free** ("You need at least 1 credit to start one. ..."); "Keep the files available" **Storage** / per day ("Each transfer, for its size, while it is active.") with a **Storage price** link that jumps to the Shared section; `"Download all" as a zip` **Free**. Above the rows "You have no active transfers, so nothing is charged for them." or, with transfers, "You have N active transfers (size): ... a day." at the real rate: a few MB reads "less than 0.01 credits a day", never a 1-credit minimum. Under them "Out of credits: a transfer is suspended and its files are kept 7 days. Topping up turns it back on once your balance covers a day of its storage (at least 1 credit)." |
-| 5 | Look at **Receipts**. | "Read a receipt with AI" **1 credit** / per file ("Charged when a file is uploaded or emailed in. ..."); "Re-run a receipt" **1 credit** / per run ("You confirm the cost first."); "Store receipts" **Storage**; "Edit, search, export to CSV, vendors and categories" **Free**. With receipts uploaded (BILL-05) a line "You store X: less than 0.01 credits a day." |
+| 5 | Look at **Receipts**. | "Read a receipt with AI" **1 credit** / per file ("Charged when a file is uploaded or emailed in. ..."); "Re-run a receipt" **1 credit** / per run ("You confirm the cost first."); "Download all files as zip" **3 credits** / per file ("You confirm the cost first. Kept for 30 days."); "Store receipts" **Storage**; "Edit, search, export to CSV, vendors and categories" **Free**. With receipts uploaded (BILL-05) a line "You store X: less than 0.01 credits a day." |
 | 6 | Look at **Short URLs**. | "N of your 25 free active links are in use." Rows: "Create and follow links" **Free**; "Each active link beyond 25", "Custom alias", "Password", "Detailed statistics", each **1 credit** / once per link. Footnote "You confirm the cost of a paid extra first. No recurring charges: ...". |
 | 7 | Look at **To-do**. | "This month: N of 10 free tasks used. The allowance starts again on <the 1st of next month, in the account's date format>." Rows: "Add a task" **Free** ("The first 10 each month. ..."); "Each task beyond 10 in a month" **10 credits** / per task ("Charged when the task is added."); "Attach files" **Storage**; a **Free** row for dates, reminders, comments and search. |
 | 8 | Look at **Notes**. | "You have N of 5 free notes." Rows: "Your first 5 notes" **Free**; "Each note beyond 5" **1 credit** / to create ("You confirm the cost first. ..."); "Renewal of a paid note" **5 credits** / every 365 days ("Taken automatically on the renewal date."); "Tags, history, sharing, search and saved filters" **Free**. With a paid note (NOTES cases), a line "1 paid note renews every 365 days; the next renewal is on <date> for 5 credits." |
@@ -642,6 +642,19 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 | 1 | On `/account/#apps` drag **Notes** to the top and untick **Receipts**. | Saved (the header menu loses Receipts). |
 | 2 | Open `/billing/costs/`. | The chips and sections run Shared, **Notes**, then the others in the saved order; **Receipts** is still there. |
 | 3 | Put the Apps section back as it was. | - |
+
+### BILL-38 Receipts: the export price
+
+**Purpose:** "Download all files as zip" is listed at the price of the admin setting **Export per receipt** (issue #315) and is charged as shown.
+**Preconditions:** BILL-35; `qa.user@example.com` with at least two receipts.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/billing/costs/`, Receipts section. | A row "Download all files as zip" **3 credits** / per file, "You confirm the cost first. Kept for 30 days." |
+| 2 | As `qa.admin`, `/admin/receipts/receiptssettings/`: **Export per receipt** `5`, **Export retention days** `14`, **Save**; reload the Costs page. | The row reads **5 credits** / per file, "You confirm the cost first. Kept for 14 days." |
+| 3 | Set **Export per receipt** to `0`. | The row reads **Free** (grey). |
+| 4 | Put the price back to `3` and the retention to `30`. Make an export of N files (RCPT-64) and open `/billing/credits/`. | One Spend row "Receipts export: N files" for exactly `3N` credits, source Receipts; no other charge (the dialog's total was the charge). After RCPT-68 a Refund row of 3 per vanished file. |
+| 5 | The Credits history page's descriptions. | The Spend description is `Receipts export: N files`; a Refund is `Receipts export: M file(s) no longer there`, or `Receipts export could not be prepared` for a failed build (RCPT-69). |
 
 ## Out of scope
 

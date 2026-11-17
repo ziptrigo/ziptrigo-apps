@@ -16,7 +16,10 @@ a receipt's page, the date presets against today, the CSV formula guard, email r
 a text body in the sandboxed frame, the "needs your attention" email, the Recent emails list and its
 outcomes, the Gmail forwarding confirmation; these use a **shell step**), the "storage paused" email
 and in-app notification, the effect of the Receipts settings (price 0, the daily file limit), a
-re-run without enough credits, phone width, dark mode and keyboard use.
+re-run without enough credits, phone width, dark mode and keyboard use. RCPT-63 to RCPT-70: **Download files**
+(issue #315): the dialog and its cost, confirming and opening the zip, a cost that changed, several zip files, folder
+and file names, a file that has gone, a failed build and its refund (these use **shell steps**), and the rules around
+an export's life (one at a time, paused storage, delete, expiry, other users' exports).
 
 Out of scope: inbound email through real SES (the shell steps feed `.eml` files to the real intake
 instead), the JWT API and the CLI, rate limits (off on this server), real AI extraction, and anything
@@ -1174,6 +1177,160 @@ Receipt date column and filters, the receipt page, the trash and the vendors pag
 | 5 | Paste a screenshot with the account **frozen** (RCPT-44: storage paused). | The hint is not shown and the paste does nothing, like a drop. |
 | 5b | Copy a real `.png` file in the file manager and paste; then a real `.gif` file. | The PNG is added as `<time>.png` (the original); the GIF, which Receipts cannot read, becomes `<time>.webp`. |
 | 6 | Paste an image with a balance too low to read it (RCPT-42). | Same as an uploaded file: stored, "waiting for credits". |
+
+### RCPT-63 Download files: the dialog
+
+**Purpose:** the dashboard's **Download files** button opens a dialog that says what would be downloaded and
+what it costs, for what the list shows now (issue #315).
+**Preconditions:** signed in as `F` with several live receipts (RCPT-47 onward; at least one in the Trash is fine:
+it is never included). **Record** `N` = the number of live receipts on `/receipts/` (the **All** tab has no count,
+so count the list) and the balance on `/billing/credits/` as `B0`. The export price is the default **3 credits per
+file** (admin > Receipts settings > **Export per receipt**).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/receipts/`. | The header has **Download files** (zip icon), **Export CSV** and **Upload**; next to Vendors and Trash there is an **Exports** link. |
+| 2 | Click **Download files**. | A dialog "Download files" opens over the page with focus on a button: "**N files** (size) in **1 zip file** of about 100.0 MB each. Each zip opens on its own, and the first one also holds `receipts.csv`, a list of every file with its date, vendor, type and amount." then "All your receipts. To download only some, filter the list first. Receipts in the Trash are not included."; **Organize the folders as** with two cards, **Year / Vendor** (checked, `2026/Acme/invoice.pdf`) and **Vendor / Year** (`Acme/2026/invoice.pdf`); "This costs **3N credits** (3 per file). Your balance is `B0`. You are charged now; if we can't make the files, you get the credits back." and "We prepare the files in the background and tell you here and by email when they are ready. You can download them for 30 days, then they are deleted."; **Cancel** and **Download for 3N credits**. Nothing was charged yet. |
+| 3 | Press Escape; open it again and click **Cancel**; open it and click the backdrop. | The dialog closes each time and focus returns to **Download files**. Balance still `B0`. |
+| 4 | Type `staples` in the search box (the list narrows, the URL gets `?q=staples`), then open the dialog. | It counts only the matching receipts ("**M files**" and "This costs **3M credits**"), says "Only what the list shows now: Search: "staples"." |
+| 5 | Choose the **Failed** tab (or any tab with fewer receipts) and open the dialog; then clear the filters. | The count and the price follow the list each time ("Status: Failed"); the button always carries the current filters (also after the list refreshed by htmx, without a reload). |
+| 6 | Filter to something that matches nothing (`q=zzzz`) and open the dialog. | "There are no receipt files to download with the current filters."; the download button is disabled. |
+| 7 | Open `/receipts/exports/new/` directly (not from the button). | You land on the dashboard (the dialog is a fragment). |
+| 8 | As `qa.admin` set **Export per receipt** to `5` (admin > Receipts > Receipts settings); as `F` open the dialog. | "This costs **5N credits** (5 per file)": the price is read live. Set it back to `3`. |
+| 9 | Set **Export per receipt** to `0`; open the dialog. | "This is free." and the button reads **Download files**. Set it back to `3`. |
+| 10 | As a user with fewer credits than `3N` (`qa.broke@example.com` after RCPT-43/44 has 5; give them one receipt first or use any user with a few receipts), open the dialog. | "Your balance is ..." and, in the message line under it, a **Top up your credits** link to `/billing/credits/`. |
+
+### RCPT-64 Download files: confirm, wait, download and open the zip
+
+**Purpose:** confirming charges the cost once, builds the zip, and the export's page offers it; the zip has the files in
+the chosen folders and `receipts.csv`.
+**Preconditions:** RCPT-63; `F` with `N` live receipts and balance `B0`; no other export. The test server runs tasks inline, so the
+export is ready when its page opens.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the dialog, choose **Vendor / Year**, click **Download for 3N credits**. | The button shows a spinner ("Starting..."), then the page `/receipts/exports/<id>/` opens with a flash "We're preparing your zip files. We'll tell you here and by email when they are ready." **Record** the id as `X1`. |
+| 2 | Look at the page. | Heading **Export**; a green **Ready** pill, "N files, <size>, in 1 zip file . asked for <date, time>"; "Available to download until **<date in 30 days>**, then it is deleted."; one row `receipts-<YYYY-MM-DD>.zip` (no "part" suffix for one zip) with its size, "N files, with receipts.csv" and a **Download** button; "Each zip opens on its own..."; "Charged 3N credits."; **Delete**. |
+| 3 | `/billing/credits/`. | Balance `B0 - 3N`; the newest row is a Spend "Receipts export: N files" for 3N. |
+| 4 | Click **Download**. | The browser downloads `receipts-<date>.zip` (a short-lived link on the S3 host; the page itself serves no file). |
+| 5 | Open the zip (unzip it, or `python -m zipfile -l`). | One folder per vendor (`Staples/`, `No vendor/` ...), each with one folder per year (`2026/` or `No date`), the files inside under the names they were uploaded with (an email body is `email.html`/`email.txt`; a duplicate name is `name (1).ext`), plus `receipts.csv` at the root. Every file's bytes equal the receipt's original. No Trash receipt is in it. |
+| 6 | Open `receipts.csv`. | Header `date,vendor,type,amount,currency,file,part`; one line per file: the date as `YYYY-MM-DD` (empty when none), the vendor, `receipt`/`invoice` (empty when unknown), the amount with two decimals, the currency, the path **inside the zip** exactly as in step 5, and `1`. A vendor or note starting with `=`/`@` would start with an apostrophe (RCPT-53). |
+| 7 | Open the bell. | "Your receipts export is ready": "N receipt files in 1 zip file. Available until <date>."; clicking it opens the export's page. |
+| 8 | Open `/receipts/exports/`. | The export is listed with its date, "N files . size . 1 zip file . until <date>", a **Ready** pill and **Open**. The Receipts dashboard still lists everything; storage was not billed for the zip (the account's stored size is unchanged). |
+| 9 | Try to start a second export while one is **preparing**. | See RCPT-70 (an export is only "preparing" for a moment on this server). |
+| 10 | Repeat step 1 with **Year / Vendor** and unzip. | The folders are `<year>/<vendor>/file` this time. (Skip if the rate limit were on: it is off here.) |
+
+### RCPT-65 Download files: the cost changed after the dialog was shown
+
+**Purpose:** credits are never spent unseen: a total that is no longer true charges nothing and is shown again.
+**Preconditions:** RCPT-64; `F` with `N` live receipts; two browser tabs signed in as `F` (A and B).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In tab A open `/receipts/` and the **Download files** dialog (it says `3N credits`). | As in RCPT-63. |
+| 2 | In tab B upload one more receipt (`/receipts/upload/`, any image). | "Uploaded". |
+| 3 | In tab A click **Download for 3N credits**. | The dialog stays open and shows the red line "The cost changed. Please confirm the new total."; the text now says "**N+1 files**" and "**3(N+1) credits**" and the button "Download for 3(N+1) credits". The balance is unchanged (`/billing/credits/`) and `/receipts/exports/` has no new export. |
+| 4 | Click the button again. | Charged 3(N+1) once; the export's page opens (RCPT-64 step 2 with N+1 files). |
+| 5 | In the dialog, with the form open, change the price as admin to `4`, then confirm in the dialog. | Again "The cost changed...", with 4 per file; nothing charged. Set the price back to `3`. |
+
+### RCPT-66 Download files: several zip files -- shell step
+
+**Purpose:** a big export is cut into independent zip files of about the part size; part 1 holds the CSV of all.
+**Preconditions:** `F` with at least 4 receipts whose files are different. The part size is an admin setting with a 10 MB
+minimum, so a shell step sets a tiny one to cut a small export (without a shell mark **BLOCKED (needs-shell)**). From
+the repo root:
+
+```bash
+python tests_e2e/ai/manage.py shell -c "from apps.receipts.models import ReceiptsSettings; ReceiptsSettings.objects.update(export_part_bytes=1500); print('ok')"
+```
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the dialog on `/receipts/`. | "N files (size) in **P zip files** of about 1.5 KB each" with P at least 2 (the tiny size is the test setting). |
+| 2 | Confirm. | The export's page lists P rows `receipts-<date>-part-01-of-0P.zip`, `...-part-02-of-0P.zip` ... each with its own size and file count; only the first says "with receipts.csv". |
+| 3 | Download every part and open each. | Each opens on its own and holds whole files only (no file is cut); a file never appears in two parts; extracting all of them into one folder gives every receipt file exactly once with no overwritten name. |
+| 4 | Open part 1's `receipts.csv`. | It lists **every** file of every part, and the `part` column is the number of the zip that holds the file. |
+| 5 | Put the part size back (shell): `python tests_e2e/ai/manage.py shell -c "from apps.receipts.models import ReceiptsSettings; ReceiptsSettings.objects.update(export_part_bytes=100*1024*1024)"`. | - |
+
+### RCPT-67 Download files: folder and file names
+
+**Purpose:** vendor and file names become safe folder and file names; missing dates and vendors have fixed names.
+**Preconditions:** `F` with receipts; use **Year / Vendor**.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open a receipt, set **Vendor** to `AC/DC: "Live"?` and **Save**; open another, set **Vendor** to `CON` and **Save**; open a third, clear **Vendor** and **Receipt date** (the page says it needs review), **Save**. | "Saved." each. |
+| 2 | Download an export of everything (RCPT-64) and list the zip. | The first vendor's folder is `AC_DC_ _Live__` (separators and characters Windows refuses become `_`; nothing creates a nested folder); the second is `_CON` (a reserved Windows name); the third file is under `No date/No vendor/`. Nothing starts with a dot or ends with a dot or space, and no entry has `..` in its path. |
+| 3 | Two receipts with the same vendor and year, both uploaded as `scan.png`. | Their entries are `.../scan.png` and `.../scan (1).png` (also in `receipts.csv`); the older receipt keeps the plain name. |
+| 4 | Rename a vendor so it differs from another only by case (`ACME` vs `Acme`) -- via two receipts typed that way, or the Vendors page. | Both vendors' files share one folder (the first spelling) in the zip. |
+
+### RCPT-68 Download files: a file that is gone is left out and refunded -- shell step
+
+**Purpose:** a receipt whose stored file has disappeared is not in the zip, not in the CSV, and its credits come back.
+**Preconditions:** `F` with receipts; balance `B1` noted. (Shell step; without one mark **BLOCKED (needs-shell)**.) The
+shell step deletes one receipt's object from S3 **after** the dialog was shown but the export is made right after, so do
+it in this order:
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/receipts/`, note the file name of one receipt `G1` (its page, "Download original") and its id. | - |
+| 2 | (Shell step) delete its object: `python tests_e2e/ai/manage.py shell -c "from apps.receipts.models import Receipt; from apps.receipts.services.storage import get_storage; r=Receipt.objects.get(pk='<G1 id>'); get_storage().delete_object(r.file_key); print(r.file_key)"`. | Prints the key. |
+| 3 | In the browser open the dialog and confirm (RCPT-64 step 1). | The export is **Ready**: "N files ... Available to download until ...", then "1 file was no longer there and left out; 3 credits refunded." and "Charged 3N credits, 3 refunded." |
+| 4 | `/billing/credits/`. | A Spend of 3N and a Refund "Receipts export: 1 file(s) no longer there" of 3; balance `B1 - 3N + 3`. |
+| 5 | Open the zip and `receipts.csv`. | `G1` is in neither. Every other file is in both. |
+| 6 | The bell and the email (`/__e2e__/mail/?to=<F>`, MAIL-29). | The notice says "N-1 receipt files in 1 zip file"; the email says "1 file was no longer there and left out; the 3 credits for it were refunded." |
+
+### RCPT-69 Download files: a build that fails is refunded in full -- shell step
+
+**Purpose:** if the zip files can't be made, the whole charge is returned and the user is told.
+**Preconditions:** `F` with receipts, balance `B2`. (Shell step; without one mark **BLOCKED (needs-shell)**.) This makes
+the build raise three times, like a storage outage, then starts an export for `F` from the shell:
+
+```bash
+python tests_e2e/ai/manage.py shell -c "
+from apps.accounts.models import User
+from apps.receipts.models import ReceiptExport
+from apps.receipts.services import exports as e
+user = User.objects.get(email='<F>')
+def boom(export, part): raise RuntimeError('S3 is down')
+real = e._write_part
+e._write_part = boom
+ex = e.create_export(user, None, 'year_vendor')
+for _ in range(e.MAX_ATTEMPTS):
+    ReceiptExport.objects.filter(pk=ex.pk).update(lease_until=None)
+    e.build_part.call(str(ex.pk), 1)
+e._write_part = real
+ex.refresh_from_db(); print(ex.pk, ex.status, ex.charged_credits, ex.refunded_credits)
+"
+```
+
+(The shell's `create_export` queues its first part on commit, which runs inline and fails once; the loop makes the
+second and third failures.) It prints the id, `failed`, the charge and the same refund.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/receipts/exports/`. | The new export is listed with a red **Failed** pill. |
+| 2 | Open it. | "We couldn't prepare the zip files. The 3N credits you paid were refunded. You can try again from the dashboard." "Charged 3N credits, 3N refunded." No download button; **Delete** is offered. |
+| 3 | `/billing/credits/`. | A Spend of 3N and a Refund "Receipts export could not be prepared" of 3N: balance `B2`. |
+| 4 | Open the bell. | "Your receipts export could not be prepared": "Something went wrong, so we couldn't make your zip files. The 3N credits you paid were refunded."; no email was sent for it. |
+| 5 | Start a normal export from the dashboard. | It works (a failed one doesn't block the next). |
+
+### RCPT-70 Download files: one at a time, paused storage, ending an export, other people's exports
+
+**Purpose:** the rules around an export's life.
+**Preconditions:** `F` with receipts; `X1` from RCPT-64 (ready); another user `G` (any other account) signed in elsewhere.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | (Shell step) start an export whose build is never queued, so it stays "preparing": `python tests_e2e/ai/manage.py shell -c "from apps.accounts.models import User; import apps.receipts.services.exports as e; e.enqueue_after_commit = lambda *a: None; ex = e.create_export(User.objects.get(email='<F>'), None, 'year_vendor'); print(ex.pk, ex.status)"`. | Prints the id and `building`. |
+| 2 | Open `/receipts/exports/<that id>/`. | A blue **Preparing** pill; "Preparing your zip files: 0 of P done. This page updates by itself. You can leave it: we'll tell you when it is ready." (it re-fetches every 3 s for about two minutes, then says "Reload the page to check again."); no **Delete** and no download button. |
+| 3 | Open the dialog and confirm another export. | The dialog stays open with "An export is already being prepared. Wait for it to finish first."; nothing charged. |
+| 4 | (Shell step) build it now: `python tests_e2e/ai/manage.py shell -c "from apps.receipts.models import ReceiptExport; import apps.receipts.services.exports as e; ex = ReceiptExport.objects.get(status='building'); e.build_part.call(str(ex.pk), e.first_part_to_build(ex.part_count)); ex.refresh_from_db(); print(ex.status)"` and reload the page (the polling panel switches by itself). | `ready`; the page shows its download buttons. |
+| 5 | (Shell step) freeze `F` as in RCPT-44, then open `X1`'s page and click **Download**. | Back on the page with the red flash "Your receipts are paused until you add credits."; the dialog on the dashboard says "Storage is paused, so files can't be downloaded until you add credits." with a **Top up your credits** link and a disabled button. Add credits to lift it (RCPT-44 step 9). |
+| 6 | As `G` open `/receipts/exports/<X1>/`, `/receipts/exports/<X1>/panel/` and `/receipts/exports/<X1>/parts/1/download/`; POST its delete (the console: `fetch('/receipts/exports/<X1>/delete/', {method: 'POST', headers: {'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)[1]}})`). | Each is a **404**; `X1` is still ready for `F`. `G`'s `/receipts/exports/` doesn't list it. |
+| 7 | As `F` open `X1` and click **Delete**, then **Delete** in the dialog ("Delete this export? The zip files are deleted now and you will not get the credits back."). | Back on `/receipts/exports/` with "The export was deleted."; it is no longer listed; opening its URL is a 404; the credits were not refunded. |
+| 8 | Open a ready export's download link, copy the S3 URL it redirected to, delete the export, then open that URL again (shell: nothing else). | The old link fails (the object is gone). |
+| 9 | (Shell step) expire one: `python tests_e2e/ai/manage.py shell -c "from django.utils import timezone; from datetime import timedelta; from apps.receipts.models import ReceiptExport; from apps.receipts import jobs; e = ReceiptExport.objects.filter(status='ready').first(); ReceiptExport.objects.filter(pk=e.pk).update(expires_at=timezone.now()-timedelta(hours=1)); jobs.purge_exports(); e.refresh_from_db(); print(e.pk, e.status)"`. | Prints `expired`. Its page says "Expired" and "These zip files were deleted <date>. To get your files again, start a new export from the dashboard."; no download button; it stays in `/receipts/exports/` with an **Expired** pill. In admin (ADM-66) the export has no parts left. |
 
 ## Out of scope
 

@@ -8,6 +8,18 @@ urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('list/', views.receipt_list, name='list'),
     path('export.csv', views.export_csv, name='export'),
+    # Exports ("Download files", issue #315): the dialog (GET) and its confirmation (POST), the list,
+    # one export, its status panel, and the actions on it.
+    path('exports/', views.exports_page, name='exports'),
+    path('exports/new/', views.export_new, name='export-new'),
+    path('exports/<uuid:export_id>/', views.export_detail, name='export-detail'),
+    path('exports/<uuid:export_id>/panel/', views.export_panel, name='export-panel'),
+    path(
+        'exports/<uuid:export_id>/parts/<int:number>/download/',
+        views.export_part_download,
+        name='export-part-download',
+    ),
+    path('exports/<uuid:export_id>/delete/', views.export_delete, name='export-delete'),
     # Upload: the page, then two JSON endpoints the script calls around its direct S3 PUT.
     path('upload/', views.upload_page, name='upload'),
     path('upload/start/', views.upload_start, name='upload-start'),

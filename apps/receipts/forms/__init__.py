@@ -1,3 +1,4 @@
+from .export import ExportForm
 from .filters import (
     DATE_RANGES,
     DEFAULT_TAB,
@@ -28,6 +29,7 @@ __all__ = [
     'VENDOR_PAGE_SIZE',
     'VENDOR_TABS',
     'CategoryNameForm',
+    'ExportForm',
     'InboxSettingsForm',
     'ParsedFilters',
     'ParsedVendorFilters',
