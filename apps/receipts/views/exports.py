@@ -179,9 +179,12 @@ def _confirm(request: AuthenticatedHttpRequest) -> HttpResponse:
 
     # Reading the whole list is bounded like the dialog's quote: over its budget nothing is read,
     # and a refusal below (which did read it) spends one hit of it.
-    limited = ratelimit.peek_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
-    if not limited.allowed:
-        return ratelimit.web_response(request, limited, retarget='#export-msg')
+    # `RECEIPTS_EXPORT_FILES_USER` is peeked too: a request it would refuse reads nothing and
+    # spends nothing (the hit after the check below still settles a race).
+    for rule in ('RECEIPTS_EXPORT_DIALOG_USER', 'RECEIPTS_EXPORT_FILES_USER'):
+        limited = ratelimit.peek_user(request.user, rule)
+        if not limited.allowed:
+            return ratelimit.web_response(request, limited, retarget='#export-msg')
 
     # The list is read and planned once, here: every refusal below shows the dialog from it and
     # `create_export` is handed the same plan (and checks again what could have changed).

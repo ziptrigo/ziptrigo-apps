@@ -116,13 +116,15 @@ def create_export(request, payload: TodoExportCreateSchema):
     400 for a bad range or when no file matches (use `GET /export.xlsx` for the task list); 402
     while the account is frozen or the balance can't pay; 409 while another export is being
     prepared (one at a time) or the cost changed; 429 over `TODO_EXPORT_FILES_USER`, which a
-    refused request does not spend, or over `TODO_EXPORT_DIALOG_USER`, which the whole-range read
-    of a refused request spends."""
+    refused request does not spend and which is told before anything is read, or over
+    `TODO_EXPORT_DIALOG_USER`, which the whole-range read of a refused request spends."""
     chosen = _range(payload)
     # `check_export` reads and plans every file in the range, so it is bounded like the quote is:
     # over the dialog budget nothing is read; a refusal (which still read them) spends one hit of
-    # it. A refusal spends none of `TODO_EXPORT_FILES_USER`.
+    # it. `TODO_EXPORT_FILES_USER` is peeked here too, so a request it would refuse reads nothing
+    # and spends nothing; a refusal spends none of it, and the hit after the check settles a race.
     ratelimit.enforce(ratelimit.peek_user(request.auth, 'TODO_EXPORT_DIALOG_USER'))
+    ratelimit.enforce(ratelimit.peek_user(request.auth, 'TODO_EXPORT_FILES_USER'))
     try:
         with mapped_errors():
             prepared = services.check_export(

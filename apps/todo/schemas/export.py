@@ -14,6 +14,8 @@ from uuid import UUID
 from ninja import Schema
 from pydantic import ConfigDict, Field
 
+from apps.core.date_ranges import DATE_RANGES
+
 
 class TodoExportRequestSchema(Schema):
     """Body for `POST /exports/quote`: which tasks' files to pack, by the date they were
@@ -31,7 +33,12 @@ class TodoExportRequestSchema(Schema):
 
     model_config = ConfigDict(extra='forbid')
 
-    date_range: str | None = None
+    # A plain `str`, not a `Literal`: an unknown value is the documented 400 (the API's own message
+    # lists the choices), not ninja's 422. The enum is only advertised in the OpenAPI document, so
+    # a generated client sees the allowed values; `null` is in it because the field may be left out.
+    date_range: str | None = Field(
+        default=None, json_schema_extra={'enum': [*(key for key, _label in DATE_RANGES), None]}
+    )
     date_from: str | None = None
     date_to: str | None = None
 

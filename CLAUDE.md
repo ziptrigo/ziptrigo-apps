@@ -1972,7 +1972,9 @@ budget**: `POST /exports` runs `check_export` (the frozen account, one at a time
 cost, the balance) *before* charging `RECEIPTS_EXPORT_FILES_USER` and hands its `Prepared` to `create_export`
 (the list is read once). **That read is bounded too**: `RECEIPTS_EXPORT_DIALOG_USER` is *peeked* first (429
 over it, nothing read) and *hit* when `check_export` refuses (the refusal read the whole list), so a client
-can't loop a wrong `expected_cost` for free reads; the website's confirm (`views/exports.py::_confirm`) does
+can't loop a wrong `expected_cost` for free reads; `RECEIPTS_EXPORT_FILES_USER` is *peeked* there too (a request
+it would refuse reads nothing, spends nothing, so a user over it can't loop whole-list reads) and *hit* after
+the check, for the race; the website's confirm (`views/exports.py::_confirm`) does
 the same. A part's URL is made by `services.part_download` (which returns the part too; a part the export
 doesn't have is `ExportPartMissingError`, mapped to 404 in `mapped_errors`, the frozen 402 coming first)
 before `RECEIPTS_EXPORT_DOWNLOAD_USER` is charged, and the export is looked up first. `GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
@@ -2106,7 +2108,7 @@ The **file export endpoints** (issue #326, `api/exports.py`, `schemas/export.py`
 OpenAPI 2.16.0; the same services and rate-limit budgets as the web's "Download files" and Export XLSX, no rule of
 their own; Receipts' export API without the `layout` and with a created-date range for the filters; see "To-do" >
 "Exports"): `POST /exports/quote` (body `date_range` = `any`, `last_15_days`, `last_30_days`, `this_month`,
-`this_quarter`, `this_year` or `custom`, with `date_from`/`date_to` as `YYYY-MM-DD`; answers `{file_count,
+`this_quarter`, `this_year` or `custom`, with `date_from`/`date_to` as `YYYY-MM-DD`; the `date_range` values are an `enum` in the OpenAPI document, built from `apps.core.date_ranges.DATE_RANGES`, while an unknown one stays the 400; answers `{file_count,
 total_bytes, part_count, price_per_file, cost, balance, affordable, frozen, retention_days, part_bytes}`, writes
 and charges nothing, spends `TODO_EXPORT_DIALOG_USER` once the range is valid), `POST /exports` (the same body plus
 `expected_cost`; 201 with the export, `status: building`; `expected_cost` is the confirmed total: a different cost is a
@@ -2116,16 +2118,16 @@ and charges nothing, spends `TODO_EXPORT_DIALOG_USER` once the range is valid), 
 **without** the `Authorization` header) and `DELETE /exports/{id}` (204, no refund), plus `GET /export.xlsx`
 (`date_range`/`date_from`/`date_to`; the free quick workbook, `tasks-<date>.xlsx`, `private, no-store`,
 `TODO_EXPORT_XLSX_USER`). The range is validated **strictly** (`common.export_range`: the web's lenient parsing would
-quietly widen what a client pays for): an unknown `date_range`, a malformed date, dates sent with a preset or with `any`
+quietly widen what a client pays for): an unknown `date_range`, a malformed date (only `YYYY-MM-DD`: `20260101` and the ISO week `2026-W01-1` that `fromisoformat` would read are refused, see `common._strict_date`), dates sent with a preset or with `any`
 and a first date after the last are a 400; no `date_range` is `custom` when a date is sent, else `any`; `custom` with
 no date is every task. Statuses as Receipts' (`common.mapped_errors` maps the export errors before the generic 400):
 **400** a bad range, nothing to export (no file in the range; use `GET /export.xlsx`), a part's URL of an export that
 is not ready; **402** frozen account or too few credits; **404** another user's or a deleted export or a part number
 it doesn't have; **409** another export being prepared (one at a time), a changed cost and deleting one still being
 built; **429** the shared rules. **A refused request spends none of its budget**, in Receipts' order: the range is
-validated first; `POST /exports` *peeks* `TODO_EXPORT_DIALOG_USER` (over it nothing is read), runs `check_export` (frozen,
+validated first; `POST /exports` *peeks* `TODO_EXPORT_DIALOG_USER` and `TODO_EXPORT_FILES_USER` (over either nothing is read), runs `check_export` (frozen,
 one at a time, nothing to export, a changed cost, the balance), *hits* the dialog budget when that refuses (it read the
-files) and charges `TODO_EXPORT_FILES_USER` only after it passed, handing its `Prepared` to `create_export`; a part's
+files) and *hits* `TODO_EXPORT_FILES_USER` only after it passed (the peek, not the hit, is what keeps a user over it from looping reads), handing its `Prepared` to `create_export`; a part's
 URL (`services.part_download`) is made before `TODO_EXPORT_DOWNLOAD_USER` is charged. Tests: `apps/todo/tests/
 test_api_exports.py`.
 
@@ -3682,7 +3684,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `ExportInProgressError`, unknown layout / nothing to export -> `ValidationError`, `expected_cost`
     differing -> `ExportCostChangedError` with `.quote`, **nothing charged or created**, `None` accepts any
     cost, too few credits -> `InsufficientCreditsError`), which the view runs **before** it spends
-    `RECEIPTS_EXPORT_FILES_USER`, so a refused request spends no budget; it returns the `Prepared`, which the
+    `RECEIPTS_EXPORT_FILES_USER` (which it also peeks before reading), so a refused request spends no budget; it returns the `Prepared`, which the
     view hands to `create_export(prepared=)`, so **a confirm reads the list once** and every refusal draws the
     dialog from the same plan. `create_export` then, in one transaction, re-checks only what can have changed
     (`_recheck`: frozen, the number of files, the price and part size; a different list is **planned again**,
@@ -3749,7 +3751,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     was skipped, the charge and Delete (confirmation modal). `exports/<id>/parts/<n>/download/` redirects
     (`RECEIPTS_EXPORT_DOWNLOAD_USER`, 60/min). Another user's export is a 404. A link "Exports" sits next to
     Vendors and Trash.
-  - *Rate limits*: `RECEIPTS_EXPORT_FILES_USER` (5/hour, charged after validation and `check_export`),
+  - *Rate limits*: `RECEIPTS_EXPORT_FILES_USER` (5/hour, peeked before the list is read, charged after validation and `check_export`),
     `RECEIPTS_EXPORT_DIALOG_USER` (30/min, the dialog's GET, charged before the scan; over it the usual htmx
     429 message; the confirm POST and `POST /api/receipts/exports` peek it before reading the list and spend
     one hit when `check_export` refuses after reading it), `RECEIPTS_EXPORT_DOWNLOAD_USER` (60/min).
@@ -3785,7 +3787,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     its refund (exit 1). Then every built part is downloaded: its URL from `.../parts/N/url`, streamed **with no
     API token** (it is a storage URL) to `.<name>.part` in `--out` (created if needed), checked against the
     size the API gave and renamed into place, so a dropped connection leaves nothing cut off; one failing part
-    doesn't stop the rest (exit 1, says to run `export-download`). Before downloading, **a file of the same name is refused
+    doesn't stop the rest (exit 1, says to run `export-download`); **Ctrl-C while downloading** (the export is paid for)
+    removes the part being written, prints the same `export-download` hint and exits 130. A 409 when creating is shown
+    without a doubled full stop and pointing at `exports`, except a changed cost, which says the cost changed and to
+    run the command again for the new quote (the API's `Send expected_cost=...` is for API clients). Before downloading, **a file of the same name is refused
     without `--force`** (`export-files` also refuses an `--out` folder that already holds any `receipts-*.zip`
     **before quoting**, so nothing is charged; a clash that still appears after creation says the export is
     paid for and ready and points at `export-download`); `export-download` instead **skips one that
@@ -5917,7 +5922,7 @@ this section is what is To-do's own.
   `exports/<id>/parts/<n>/download/` redirects to a presigned URL; another user's export is a 404, a deleted one too. The
   pages are To-do pages (`nav='settings'`, the settings page links "Your exports"). The shared
   `export_status_pill` tag is in `core_ui`.
-- **Rate limits**: `TODO_EXPORT_FILES_USER` (5/hour, charged after validation and `check_export`),
+- **Rate limits**: `TODO_EXPORT_FILES_USER` (5/hour, peeked before the files are read, charged after validation and `check_export`),
   `TODO_EXPORT_DIALOG_USER` (30/min, the dialog's GET, charged before the scan; the confirm peeks it before reading and
   spends one hit when `check_export` refuses after reading), `TODO_EXPORT_DOWNLOAD_USER` (60/min) and
   `TODO_EXPORT_XLSX_USER` (10/min). A refused request spends no export budget; over a limit the usual 429, retargeted to
@@ -5946,7 +5951,8 @@ this section is what is To-do's own.
   `--wait`, default 30 minutes; **Ctrl-C (130), the time limit and any other error leave the export building** and print
   `todo export-download <env> <id> --out <dir>`), reports a failed export with its refund, then downloads every built
   part: its URL from `.../parts/N/url`, streamed **with no API token** to `.<name>.part` in `--out`, size-checked and
-  renamed, one failing part not stopping the rest. A file of the same name is refused without `--force` (and `--out`
+  renamed, one failing part not stopping the rest; **Ctrl-C while downloading** prints the `export-download` hint and exits
+  130, and a changed cost (409 when creating) says to run the command again for the new quote. A file of the same name is refused without `--force` (and `--out`
   folder already holding `task-files-*.zip` is refused **before quoting**, so nothing is charged; a clash that appears
   after creation says the export is paid for and points at `export-download`); `export-download` skips a complete file
   (sizes only) and refuses one of another size. `exports`, `export-get`, `export-download <env> <id>` (waits for a

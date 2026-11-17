@@ -72,7 +72,8 @@ DOWNLOAD_CHUNK_BYTES = 64 * 1024
 EXPORT_POLL_SECONDS = 3
 EXPORT_POLL_MAX_SECONDS = 15
 EXPORT_WAIT_MINUTES = 30
-#: What `--range` accepts (as typed, any case, `-` or `_`) -> what the API calls it.
+#: What `--range` accepts (as typed, any case, `-` or `_`) -> what the API calls it. These are the
+#: keys of `apps.core.date_ranges.DATE_RANGES`; a test fails when the two drift apart.
 EXPORT_RANGES: dict[str, str] = {
     name.replace('_', '-'): name
     for name in (
@@ -2239,6 +2240,27 @@ def _fetch_hint(export_id: str, out: Path) -> str:
     )
 
 
+def _refused_creating(response) -> str:
+    """Why creating the export was refused with a 409 (nothing was charged): another export is
+    being prepared, or the cost is no longer the one that was quoted. The API words are for an API
+    client (its cost message says to send `expected_cost`), so a changed cost is put in the CLI's
+    own words and says to run the command again for the new quote."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    detail = body.get('detail') if isinstance(body, dict) else None
+    if isinstance(detail, str) and detail.startswith('The cost changed'):
+        return (
+            'The cost changed since it was quoted, so nothing was charged. Run the command again '
+            'to see the new quote.'
+        )
+    return (
+        f'{_error_message(response).rstrip(".")}. Check `todo exports {current_environment()}`, then '
+        'try again.'
+    )
+
+
 def _wait_for_export(export_id: str, minutes: float, hint: str) -> dict:
     """Poll the export until it is no longer being prepared; returns it. Ctrl-C, running out of
     time and an error that ends the wait all leave it building (it carries on in the background)
@@ -2388,18 +2410,26 @@ def _download_export(
         raise _fail(f'Could not create {out}: {e}') from e
 
     failed = 0
-    for part, target in targets:
-        if resume and not force and target.exists():
-            _say(f'{target.name}: already downloaded, skipped.')
-            continue
-        _say(f'{target.name}: downloading {_size_text(part["size_bytes"])}...')
-        try:
-            _download_part(export['id'], part, target)
-        except DownloadFailed as e:
-            failed += 1
-            logger.error(escape(f'{target.name}: {e}'))
-        else:
-            _say(f'Wrote {target}.')
+    try:
+        for part, target in targets:
+            if resume and not force and target.exists():
+                _say(f'{target.name}: already downloaded, skipped.')
+                continue
+            _say(f'{target.name}: downloading {_size_text(part["size_bytes"])}...')
+            try:
+                _download_part(export['id'], part, target)
+            except DownloadFailed as e:
+                failed += 1
+                logger.error(escape(f'{target.name}: {e}'))
+            else:
+                _say(f'Wrote {target}.')
+    except KeyboardInterrupt:
+        # The part being written was cleaned up; the export is paid for and ready, so say how to
+        # get the rest without paying again (as Ctrl-C while waiting does).
+        _say(
+            f'Stopped downloading. The export is ready and paid for. {_fetch_hint(export["id"], out)}'
+        )
+        raise typer.Exit(130) from None
     if failed:
         raise _fail(
             f'{failed} of {len(targets)} zip files failed. Run `todo export-download '
@@ -2493,10 +2523,7 @@ def todo_export_files(
     if created.status_code == 409:
         # Another export is being prepared, or the cost changed since it was quoted: either way
         # nothing was charged, and the message says which.
-        raise _fail(
-            f'{_error_message(created)}. Check `todo exports {current_environment()}`, then try '
-            'again.'
-        )
+        raise _fail(_refused_creating(created))
     _check(created)
     export = created.json()
     if export['charged_credits']:

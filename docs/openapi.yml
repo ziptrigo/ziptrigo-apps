@@ -1496,9 +1496,11 @@ paths:
 
         balance can''t pay; 409 while another export is being prepared (one at a time) or the cost
 
-        changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend, or over
+        changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend and which
 
-        `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list read of a refused request spends.'
+        is told before anything is read, or over `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list
+
+        read of a refused request spends.'
       tags:
       - Receipts
       requestBody:
@@ -3304,9 +3306,9 @@ paths:
 
         prepared (one at a time) or the cost changed; 429 over `TODO_EXPORT_FILES_USER`, which a
 
-        refused request does not spend, or over `TODO_EXPORT_DIALOG_USER`, which the whole-range read
+        refused request does not spend and which is told before anything is read, or over
 
-        of a refused request spends.'
+        `TODO_EXPORT_DIALOG_USER`, which the whole-range read of a refused request spends.'
       tags:
       - To-do
       requestBody:
@@ -10580,6 +10582,15 @@ components:
           anyOf:
           - type: string
           - type: 'null'
+          enum:
+          - any
+          - last_15_days
+          - last_30_days
+          - this_month
+          - this_quarter
+          - this_year
+          - custom
+          - null
           title: Date Range
         date_from:
           anyOf:
@@ -10753,6 +10764,15 @@ components:
           anyOf:
           - type: string
           - type: 'null'
+          enum:
+          - any
+          - last_15_days
+          - last_30_days
+          - this_month
+          - this_quarter
+          - this_year
+          - custom
+          - null
           title: Date Range
         date_from:
           anyOf:

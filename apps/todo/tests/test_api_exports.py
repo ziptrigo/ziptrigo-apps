@@ -13,6 +13,7 @@ from openpyxl import load_workbook
 
 from apps.billing.models import CreditTransaction
 from apps.billing.services import add_credits, get_balance, spend_credits
+from apps.core import ratelimit
 
 from ..models import ExportStatus, Project, TodoAccount, TodoExport
 from ..services import exports as svc
@@ -168,6 +169,8 @@ class TestQuote:
             {'date_range': 'next_decade'},
             {'date_from': 'yesterday'},
             {'date_to': '2026-13-45'},
+            {'date_from': '20260101'},
+            {'date_from': '2026-W01-1'},
             {'date_range': 'this_month', 'date_from': '2026-01-01'},
             {'date_range': 'any', 'date_to': '2026-01-01'},
             {'date_from': '2026-02-01', 'date_to': '2026-01-01'},
@@ -321,6 +324,8 @@ class TestCreate:
         [
             {'date_range': 'x'},
             {'date_from': 'soon'},
+            {'date_from': '20260101'},
+            {'date_to': '2026-W01-1'},
             {'date_range': 'this_month', 'date_to': '2026-1-1'},
         ],
     )
@@ -341,11 +346,41 @@ class TestCreate:
         assert limited.status_code == 429 and limited['Retry-After']
         assert TodoExport.objects.count() == 1
 
+    def test_over_the_files_limit_nothing_is_read_or_spent(
+        self, client, auth, three, funded_user, settings, monkeypatch
+    ):
+        limit_rule(settings, 'TODO_EXPORT_FILES_USER')
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'TODO_EXPORT_DIALOG_USER': (5, 60),
+        }
+        assert post(client, '/exports', auth).status_code == 201
+        TodoExport.objects.update(status=ExportStatus.READY)
+        reads: list[int] = []
+        real = svc.prepare_export
+        monkeypatch.setattr(svc, 'prepare_export', lambda *a, **k: reads.append(1) or real(*a, **k))
+        dialog_left = ratelimit.peek_user(funded_user, 'TODO_EXPORT_DIALOG_USER').remaining
+
+        for body in ({}, {}, {'expected_cost': 1}):
+            assert post(client, '/exports', auth, body).status_code == 429
+
+        assert reads == []  # not one whole-range read
+        assert ratelimit.peek_user(funded_user, 'TODO_EXPORT_DIALOG_USER').remaining == dialog_left
+        assert TodoExport.objects.count() == 1
+
     @pytest.mark.parametrize(
-        'case', ['bad range', 'empty', 'frozen', 'broke', 'in progress', 'cost changed']
+        ('case', 'status'),
+        [
+            ('bad range', 400),
+            ('empty', 400),
+            ('frozen', 402),
+            ('broke', 402),
+            ('in progress', 409),
+            ('cost changed', 409),
+        ],
     )
     def test_a_refused_request_spends_none_of_the_budget(
-        self, client, auth, three, funded_user, settings, case
+        self, client, auth, three, funded_user, settings, case, status
     ):
         limit_rule(settings, 'TODO_EXPORT_FILES_USER')
         body: dict = {}
@@ -365,7 +400,7 @@ class TestCreate:
             body = {'expected_cost': 1}
 
         refused = post(client, '/exports', auth, body)
-        assert refused.status_code in (400, 402, 409)
+        assert refused.status_code == status
 
         # The whole budget (one hit) is still there for a request that goes through.
         TodoExport.objects.update(status=ExportStatus.READY)
@@ -561,6 +596,7 @@ class TestDelete:
         assert get_balance(funded_user) == balance  # nothing is refunded
         assert get(client, f'/exports/{ready.pk}', auth).status_code == 404
         assert delete(client, f'/exports/{ready.pk}', auth).status_code == 404
+        assert get(client, f'/exports/{ready.pk}/parts/1/url', auth).status_code == 404
 
     def test_one_being_prepared_is_a_409(self, client, auth, three, funded_user):
         export = svc.create_export(funded_user, None)
@@ -643,6 +679,8 @@ class TestXlsx:
         [
             {'date_range': 'nope'},
             {'date_from': 'x'},
+            {'date_from': '20260101'},
+            {'date_to': '2026-W01-1'},
             {'date_range': 'this_year', 'date_from': '2026-01-01'},
             {'date_from': '2026-02-01', 'date_to': '2026-01-01'},
         ],
@@ -689,3 +727,14 @@ def test_the_export_schema_names_are_prefixed():
 
     names = [n for n, v in vars(module).items() if getattr(v, '__module__', '') == module.__name__]
     assert names and all(n.startswith('TodoExport') for n in names)
+
+
+def test_the_openapi_document_lists_the_date_ranges_but_validation_stays_a_400(client, auth):
+    from apps.core.date_ranges import DATE_RANGES
+    from apps.todo.schemas import TodoExportRequestSchema
+
+    advertised = TodoExportRequestSchema.model_json_schema()['properties']['date_range']['enum']
+
+    assert advertised == [key for key, _label in DATE_RANGES] + [None]
+    # An unknown value is still the documented 400, not a 422 from the schema.
+    assert post(client, '/exports/quote', auth, {'date_range': 'next_decade'}).status_code == 400

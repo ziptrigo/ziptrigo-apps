@@ -61,7 +61,7 @@ class FakeResponse:
         self._content = content
         self.closed = False
         # Raised from `iter_content` after the first chunk: a connection dropped mid-download.
-        self.fail_mid_stream: Exception | None = None
+        self.fail_mid_stream: BaseException | None = None
 
     def close(self):
         self.closed = True
@@ -1764,7 +1764,7 @@ class TestExportFiles:
             ),
             (
                 FakeResponse(409, {'detail': 'The cost changed: it is now 12 credits.'}),
-                'now 12 credits',
+                'The cost changed since it was quoted',
             ),
             (FakeResponse(402, {'detail': 'Insufficient credits'}), 'top up your credits'),
             (FakeResponse(429, {'detail': 'Slow down'}, headers={'Retry-After': '3000'}), '50 min'),
@@ -1781,6 +1781,55 @@ class TestExportFiles:
 
         assert result.exit_code == 1 and message in result.output
         assert site.made('get', STORAGE_URL) == []
+
+    def test_a_409_does_not_double_the_full_stop(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch, {('post', '/exports'): FakeResponse(409, {'detail': 'Busy.'})}
+        )
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert '409: Busy. Check `receipts exports local`, then try again.' in result.output
+        assert '..' not in result.output
+
+    def test_a_changed_cost_says_to_run_it_again_in_the_clis_words(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        changed = FakeResponse(
+            409,
+            {
+                'detail': 'The cost changed: it is now 12 credits. Send expected_cost=12 to confirm it.'
+            },
+        )
+        site = site_for_a_ready_export(monkeypatch, {('post', '/exports'): changed})
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 1
+        assert 'The cost changed since it was quoted, so nothing was charged.' in result.output
+        assert 'Run the command again to see the new quote.' in result.output
+        assert 'expected_cost' not in result.output and '..' not in result.output
+        assert 'receipts exports' not in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_ctrl_c_while_downloading_says_how_to_fetch_it_later(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        interrupted = FakeResponse(200, content=ZIP_BYTES)
+        interrupted.fail_mid_stream = KeyboardInterrupt()
+        site_for_a_ready_export(monkeypatch, {('get', STORAGE_URL): interrupted})
+        out = tmp_path / 'my zips'
+
+        result = runner.invoke(receipts.app, ['export-files', 'local', '--out', str(out), '--yes'])
+
+        assert result.exit_code == 130
+        assert 'Stopped downloading' in result.output and 'paid for' in result.output
+        assert f"receipts export-download local {EXPORT_ID} --out '" in result.output
+        assert list(out.iterdir()) == []  # no cut-off file left behind
 
     def test_it_reports_the_progress_while_waiting(self, token_file, tmp_path, monkeypatch):
         building = make_export('building', parts=3, built=False)
@@ -2025,6 +2074,28 @@ class TestExportDownload:
         assert result.exit_code == 0, result.output
         assert (tmp_path / 'z' / 'receipts-2026-11-17-part-1.zip').read_bytes() == ZIP_BYTES
         assert site.made('post', '/exports') == []  # nothing is created or charged
+
+    def test_ctrl_c_while_downloading_says_how_to_fetch_it_later(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        interrupted = FakeResponse(200, content=ZIP_BYTES)
+        interrupted.fail_mid_stream = KeyboardInterrupt()
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(make_export()),
+                ('get', STORAGE_URL): interrupted,
+            },
+        )
+
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path / 'z')]
+        )
+
+        assert result.exit_code == 130
+        assert 'Stopped downloading' in result.output
+        assert f'receipts export-download local {EXPORT_ID} --out' in result.output
+        assert list((tmp_path / 'z').iterdir()) == []
 
     def test_it_waits_for_one_still_being_prepared(self, token_file, tmp_path, monkeypatch):
         site = site_for_a_ready_export(monkeypatch)

@@ -33,6 +33,7 @@ Status codes (documented once, here):
   `TODO_EXPORT_DIALOG_USER`, `TODO_EXPORT_DOWNLOAD_USER` and `TODO_EXPORT_XLSX_USER`).
 """
 
+import re
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -90,6 +91,9 @@ LINK_FIELDS = ('number', 'title', 'completed_at', 'deleted_at')
 #: Page size bounds of the list endpoints (clamped, not rejected).
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
+
+#: The only date format an export takes (see `_strict_date`).
+_STRICT_DATE = re.compile(r'\d{4}-\d{2}-\d{2}', re.ASCII)
 
 
 def validation_detail(exc: ValidationError) -> str:
@@ -158,14 +162,23 @@ def parse_date(name: str, value: str | None) -> date | None:
         raise HttpError(400, f'{name} must be a date like 2026-10-09.') from None
 
 
+def _strict_date(name: str, value: str | None) -> date | None:
+    """`parse_date` for an export, which takes only `YYYY-MM-DD`: `date.fromisoformat` also reads
+    `20261009` and the ISO week date `2026-W41-5`, which would quietly mean another day than the
+    documented format (the task list's filters keep the lenient `parse_date`)."""
+    if value is not None and value.strip() and not _STRICT_DATE.fullmatch(value.strip()):
+        raise HttpError(400, f'{name} must be a date like 2026-10-09.')
+    return parse_date(name, value)
+
+
 def export_range(date_range: str | None, date_from: str | None, date_to: str | None) -> ExportRange:
     """The "Task created" range of an export request, validated (a 400 for anything wrong, before
     any rate limit is charged). Stricter than the account page's form, which quietly drops what it
     can't read: a client that pays for an export must get the range it asked for, so an unknown
     `date_range`, a malformed date, dates sent with a preset (or with `any`) and a first date after
     the last are all refused. No `date_range` is `custom` when a date is sent, else `any`."""
-    first = parse_date('date_from', date_from)
-    last = parse_date('date_to', date_to)
+    first = _strict_date('date_from', date_from)
+    last = _strict_date('date_to', date_to)
     key = (date_range or '').strip()
     if key:
         key = choice('date_range', key, (value for value, _label in DATE_RANGES))
