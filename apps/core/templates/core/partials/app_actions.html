@@ -1,0 +1,19 @@
+{% comment %}
+The account page's "App actions" (`{% app_actions %}`, apps/core/templatetags/app_actions.py): one block per product
+that registered an `actions` provider, in the user's order. `blocks` is a list of {product, html}; `html` is the
+product's own markup, or None when its provider failed.
+{% endcomment %}
+<div id="app-actions" class="mt-8">
+  <h3 class="mb-1 text-sm font-medium">App actions</h3>
+  <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">Things you do now and then with an app's data.</p>
+  <div class="grid gap-3">
+    {% for block in blocks %}
+    <div data-app-actions="{{ block.product.label }}" class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+      <h4 class="mb-2 flex items-center gap-2 text-sm font-semibold">
+        <i class="{{ block.product.icon }} w-5 text-center text-sage-600 dark:text-sage-300" aria-hidden="true"></i>{{ block.product.name }}
+      </h4>
+      {% if block.html %}{{ block.html }}{% else %}<p class="text-sm text-gray-500 dark:text-gray-400">Not available right now.</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>

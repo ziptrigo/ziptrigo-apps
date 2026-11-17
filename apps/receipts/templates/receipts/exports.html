@@ -8,7 +8,7 @@
    class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Receipts</a>
 <h1 class="mt-2 mb-2 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Exports</h1>
 <p class="mb-8 text-sm text-gray-500 dark:text-gray-400">
-    Zip files of your receipt files, made with Download files on the dashboard. They can be downloaded for a limited time, then they are deleted.
+    Zip files of your receipt files, made with Download files on <a href="{% url 'accounts:account' %}#apps" class="underline">your account page</a>. They can be downloaded for a limited time, then they are deleted.
 </p>
 
 <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
@@ -31,7 +31,7 @@
         </li>
         {% empty %}
         <li class="px-4 py-12 text-center sm:px-6">
-            <p class="text-sm text-gray-500 dark:text-gray-400">No exports yet. Use <strong class="font-medium">Download files</strong> on the dashboard.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">No exports yet. Use <strong class="font-medium">Download files</strong> in the Receipts actions on <a href="{% url 'accounts:account' %}#apps" class="underline">your account page</a>.</p>
         </li>
         {% endfor %}
     </ul>

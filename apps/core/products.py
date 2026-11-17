@@ -7,6 +7,7 @@ import a product app -- the dependency only runs the other way.
 
 from dataclasses import dataclass
 
+from .app_actions import ActionsProvider
 from .costs import CostProvider
 
 
@@ -31,6 +32,9 @@ class ProductApp:
 
     costs: CostProvider | None = None
     """What the product charges, for the Costs page (`apps.core.costs`): called with the user."""
+
+    actions: ActionsProvider | None = None
+    """Actions for the account page's "Apps" section (`apps.core.app_actions`): called with the user."""
 
 
 _registry: dict[str, ProductApp] = {}

@@ -12,6 +12,7 @@ class ReceiptsConfig(AppConfig):
         from apps.core.products import ProductApp, register
 
         from . import checks  # noqa: F401
+        from .services.account_actions import account_actions
         from .services.costs import cost_section
 
         register(
@@ -22,6 +23,7 @@ class ReceiptsConfig(AppConfig):
                 url_name='receipts:dashboard',
                 icon='fas fa-receipt',
                 costs=cost_section,
+                actions=account_actions,
             )
         )
 

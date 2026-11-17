@@ -713,6 +713,19 @@ until it runs, and a `<noscript>` Save button covers no JS (ordering needs JS). 
 `apps/accounts/tests/unit/test_app_preferences.py`, the products tests in
 `apps/core/tests/test_products.py`, Playwright `tests_e2e/test_app_preferences.py`, AI case ACC-45.
 
+**App actions** (issue #315 follow-up) are the account page's per-app area under the apps list, before "Notifications on
+this device": things done now and then with an app's data. It is a registry like the Costs page's: a product gives its
+`ProductApp` an `actions` provider (`apps.core.app_actions`: `ActionsProvider = Callable[[user], AppActions | None]`, an
+`AppActions(template, context)`; `None` = nothing to show), and `{% load app_actions %}{% app_actions %}`
+(`apps/core/templatetags/app_actions.py`, included by `accounts/account.html` inside `<section id="apps">`) walks
+`products_for(user)` (every product, **switched-off ones included**, in the user's order), renders each product's template
+with the request inside a block with its icon and name (`core/partials/app_actions.html`, subheading "App actions"), and
+renders nothing when no product has actions. A provider that raises is logged (`logger.exception`) and its block says
+"Not available right now."; the page stays up. A provider must not create the product's account. **A new action registers
+a provider (or extends the product's template); nothing is added to the account page.** Receipts is the first user (its
+Download files and Export CSV, see "Receipts" > "Exports"). Tests: `apps/core/tests/test_app_actions.py`, the Receipts
+view tests, AI case ACC-55.
+
 **Time zone** (issue #177) is a property of the account, for "today", due dates with a time and
 reminders in the user's local time (the To-do app, #161). `User.timezone` is an IANA name or `''` for
 "not set yet", treated as UTC everywhere (`CharField(max_length=64, blank=True, default='',
@@ -3568,7 +3581,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
 - **Exports** (issue #315, PR 1 of 2: backend and web, PR 2: the JWT API and CLI, see the two bullets at the end of this list. `models/export.py`,
   `services/export_plan.py`, `services/exports.py`, `views/exports.py`, `forms/export.py`, migration
   `0006_exports`; templates `exports.html`, `export.html`, `partials/export_{modal,form,panel}.html`,
-  `emails/export_ready.{txt,html}`). **Download files** (dashboard button next to Export CSV) packs the
+  `emails/export_ready.{txt,html}`). **Download files** (a button in the account page's "App actions", next to Export CSV, see "Auth" > "Apps") packs the
   user's receipt files into independent zip files and one CSV, kept in S3 for 30 days.
   - *Settings* (`ReceiptsSettings`, all `db_default`ed): `export_price_per_file` (verbose name **"Export
     per receipt"**, default **3** credits, 0 = free; nothing hard-codes the number, the dialog, the
@@ -3653,10 +3666,15 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `ready` and the part is built) presigns an attachment URL named `receipts-2026-11-16-part-01-of-05.zip`
     (no suffix for one part). **No public link**: the page is behind sign-in; the email links to the page,
     never to a file.
-  - *Web*: the dashboard button (`#export-files-link`, re-sent out of band with every list refresh like the
-    CSV link, so it always carries the filters) fetches `GET /receipts/exports/new/?<filters>` into
-    `#export-modal` (`fragmentModal`, like the vendor rename dialog; a non-htmx GET redirects to the
-    dashboard, spending nothing; the dialog scans the list to quote it, so it spends `RECEIPTS_EXPORT_DIALOG_USER`): "N files (size) in P zip files of about 100 MB", the filters in words, the layout radios
+  - *Web*: the buttons are **not on the dashboard** any more: they are Receipts' block of the account page's
+    **App actions** (`apps.core.app_actions`, see "Auth" > "Apps"; `services/account_actions.py`,
+    `partials/account_actions.html`). A GET form (`#receipts-export-form`, action `receipts:export`) holds a
+    **Receipt date** select (the dashboard's `DATE_RANGES`; Custom shows the two core date pickers, disabled and so
+    unsent otherwise; ids `receipts-export-*`) and the buttons: **Export CSV** submits it, **Download files**
+    (`#export-files-link`, `hx-include="closest form"`) fetches `GET /receipts/exports/new/?date_range=...` into
+    `#export-modal` (inside the block; `fragmentModal`, a classic script `receipts/js/common.js` the block loads
+    itself, like the vendor rename dialog; a non-htmx GET redirects to `/account/#apps`, spending nothing; the
+    only filter is the date range, the rest of `parse_filters` still works for a hand-made URL; the dialog scans the list to quote it, so it spends `RECEIPTS_EXPORT_DIALOG_USER`): "N files (size) in P zip files of about 100 MB", the filters in words, the layout radios
     (Year / Vendor default, with an example path each), "This costs C credits (3 per file). Your balance is
     B.", a Top up link when short, `Download for C credits`, and `confirm_cost` posted back. A refusal is a
     **422 that re-renders the form in place** (`partials/export_form.html`); a changed cost shows the new
@@ -3982,8 +4000,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `#receipt-list` (which sits *inside* the form, so its hidden `status`/`sort` inputs travel with
     the next request) and the response's `HX-Push-Url` puts the **dashboard** URL in the address bar
     (a reload or shared link renders the full page; the list URL opened directly redirects there).
-    The tabs and the Export CSV link are re-sent out of band (`hx-swap-oob`) with every refresh, so
-    they carry the filters. While a row is `received`/`processing` the list re-fetches itself every
+    The tabs are re-sent out of band (`hx-swap-oob`) with every refresh, so
+    they carry the filters. (The Download files and Export CSV buttons moved to the account page.) While a row is `received`/`processing` the list re-fetches itself every
     3 s (`polls=` in the URL counts, capped at 40; `waiting_for_credits` is not polled, nor is a
     `received` receipt with a retry scheduled -- `Receipt.retry_scheduled`, shown as "trying again in
     ..." on the row and the detail page).

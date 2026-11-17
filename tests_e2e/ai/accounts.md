@@ -28,7 +28,7 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
   (Appearance, applied without a reload), the date and time format (Appearance: `mm/dd/yyyy` or
   `dd/mm/yyyy`, 12-hour or 24-hour, saved on the account and applied across the site; ACC-46), the
   Apps section (switching product apps off and on, putting them in order by drag and by keyboard,
-  issue #246), the promo code form's presence, change password (every
+  issue #246), the per-app **App actions** area under it (ACC-55), the promo code form's presence, change password (every
   refusal, Django's validators), the "password changed" email and its forgot-password link, other
   sessions signed out; what persists on the account across a new session and another browser.
 - **API refresh tokens** (`POST /api/auth/refresh`): each refresh returns a new refresh token, the old
@@ -934,6 +934,24 @@ after the last one) and record the new email's link as `LINK_2` and its code as 
 | 4 | Open the original confirmation link and press `Confirm my email` (OTPUNC is now confirmed), then request a sign-in code for OTPUNC. | Now a sign-in email arrives, and its code signs OTPUNC in. (The confirmation link still worked: the sign-in attempt in step 3 did not use it up.) Sign out. |
 | 5 | Request a sign-in code for `qa.user@example.com` (record `OTP_4`), then change that account's password on `/account/` (sign in with the password first in Context B, change it, sign out) and enter `OTP_4`. | The generic red block: a password change retires pending sign-in codes and links. (Same after a password reset and after changing the account's email.) |
 | 6 | Enter a wrong code for one address more than 50 times in a day from several IPs (or 30 within 15 minutes; or 10 within 5 minutes from one IP). | A `429` message with a retry time; the same for an unknown address. The account's password login and the other ways in are unaffected. |
+
+### ACC-55 Apps: the App actions area
+
+**Purpose:** each app can put its rarely used actions on the account page, below the apps list (issue #315: Receipts'
+**Download files** and **Export CSV**). The area comes from the apps' registrations; nothing is hard-coded on the page.
+**Preconditions:** signed in as `qa.user@example.com`; `/account/`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Scroll to the **Apps** section. | Below the apps list and above "Notifications on this device" (when push is configured) there is an **App actions** subheading with "Things you do now and then with an app's data." and one bordered block headed with the **Receipts** icon and name. No other app has a block yet. |
+| 2 | Read the Receipts block. | "Download your receipt files as zip files, or a CSV list of your receipts.", a **Receipt date** select (Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom), the buttons **Download files** and **Export CSV**, and a **Your exports** link. No date fields are visible. |
+| 3 | Choose **Custom**. | Two date fields appear (in the account's date order); choose another option and they hide again. |
+| 4 | Switch **Receipts** off in the apps list above (ACC-45), reload, and look at the block. | The block is still there (an app hidden from the menu keeps its data). Switch Receipts back on. Put **QR Codes** first in the apps list: the block order follows the apps list when other apps get actions. |
+| 5 | Click **Download files**. | The "Download files" dialog opens over the page (RCPT-63); Escape closes it and focus returns to the button. |
+| 6 | Click **Export CSV** with **Any date**. | `receipts-<today>.csv` downloads and the page stays. |
+| 7 | Sign in as a user who has never opened Receipts (a fresh account) and open `/account/`. | The block is shown the same and opening the page did not create a Receipts account (no "Email receipts to" address exists until `/receipts/` is opened). |
+
+A failing app provider shows "Not available right now." in its block and leaves the others (unit-tested in `apps/core/tests/test_app_actions.py`; not reachable from the running server).
 
 ## Out of scope
 

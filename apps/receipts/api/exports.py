@@ -1,5 +1,5 @@
 """The file export endpoints (`/api/receipts/exports`, issue #315): "download all my files" as
-zip files, for the API and the CLI. The twin of the dashboard's "Download files" dialog and the
+zip files, for the API and the CLI. The twin of the account page's "Download files" dialog and the
 exports pages (`apps.receipts.views.exports`): the same services, the same rate limits and budgets.
 
 1. `POST /exports/quote` says what an export of some filters would be (files, size, zip files,

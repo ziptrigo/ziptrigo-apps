@@ -132,8 +132,6 @@ def _list_context(request: AuthenticatedHttpRequest, parsed: ParsedFilters) -> d
         'page_query': page_query,
         'list_url': reverse('receipts:list'),
         'dashboard_url': reverse('receipts:dashboard'),
-        'export_url': _with_query(reverse('receipts:export'), parsed.query()),
-        'export_files_url': _with_query(reverse('receipts:export-new'), parsed.query()),
         'prev_query': parsed.query(page=page_obj.previous_page_number())
         if page_obj.has_previous()
         else '',

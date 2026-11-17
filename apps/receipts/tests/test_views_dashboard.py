@@ -404,13 +404,13 @@ class TestListPartial:
 
         assert web.get(reverse('receipts:list'), **HX)['HX-Push-Url'] == '/receipts/'
 
-    def test_it_resends_the_tabs_and_export_link_out_of_band(self, web, make):
+    def test_it_resends_the_tabs_out_of_band(self, web, make):
         make()
 
         content = web.get(reverse('receipts:list'), {'q': 'x'}, **HX).content.decode()
 
         assert 'id="receipt-tabs" hx-swap-oob="true"' in content
-        assert 'id="export-link" href="/receipts/export.csv?q=x" hx-swap-oob="true"' in content
+        assert 'id="export-link"' not in content and 'id="export-files-link"' not in content
         assert '<html' not in content
 
     def test_the_full_page_has_no_oob_duplicates(self, web, make):
@@ -553,19 +553,28 @@ class TestExport:
         assert [r['vendor'] for r in by_status] == ['Broken']
         assert [r['vendor'] for r in by_date] == ['Staples']
 
+    def test_it_honours_the_account_pages_date_range_fields(self, web, make):
+        make(vendor='Staples', receipt_date=date(2026, 10, 9))
+        make(vendor='Delta', receipt_date=date(2026, 10, 3))
+
+        custom = self.rows(
+            web.get(
+                reverse('receipts:export'),
+                {'date_range': 'custom', 'date_from': '2026-10-05', 'date_to': '2026-10-31'},
+            )
+        )
+        # What the form sends for "Any date": the two disabled date fields are not sent.
+        anything = self.rows(web.get(reverse('receipts:export'), {'date_range': 'any'}))
+
+        assert [r['vendor'] for r in custom] == ['Staples']
+        assert sorted(r['vendor'] for r in anything) == ['Delta', 'Staples']
+
     def test_it_exports_only_the_owners_live_receipts(self, web, make, other_user, fake_storage):
         make(vendor='Mine')
         make(vendor='Trashed', deleted_at=timezone.now())
         create_receipt(other_user, fake_storage, vendor='Theirs')
 
         assert [r['vendor'] for r in self.rows(web.get(reverse('receipts:export')))] == ['Mine']
-
-    def test_the_link_on_the_page_carries_the_filters(self, web, make):
-        content = web.get(
-            reverse('receipts:dashboard'), {'status': 'failed', 'q': 'a'}
-        ).content.decode()
-
-        assert 'href="/receipts/export.csv?status=failed&amp;q=a"' in content
 
     def test_it_is_rate_limited(self, web, make, settings):
         settings.RATELIMIT_ENABLE = True

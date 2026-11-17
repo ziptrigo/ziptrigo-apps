@@ -1,9 +1,10 @@
-"""Exports (issue #315): the "Download files" dialog on the dashboard, the list of exports, one
-export's page (with a download button per zip file) and the actions on it.
+"""Exports (issue #315): the "Download files" dialog (opened from the account page's "App actions",
+`receipts/partials/account_actions.html`), the list of exports, one export's page (with a download
+button per zip file) and the actions on it.
 
 The dialog is a fragment fetched into `#export-modal` (like the vendor rename dialog). It carries the
-dashboard's filters as query parameters (`GET`) and as hidden fields (`POST`), so "what the list
-shows now" is what is exported. Credits are never spent unseen: the dialog states the cost, and the
+receipt-date range chosen on the account page as query parameters (`GET`) and as hidden fields
+(`POST`), so the receipts in that range are what is exported. Credits are never spent unseen: the dialog states the cost, and the
 form posts it back (`confirm_cost`); if it is no longer true (`ExportCostChangedError`) the dialog
 comes back with the new total and nothing was charged. A refusal is a 422 that re-renders the form
 in place.
@@ -97,6 +98,11 @@ def _dialog_context(
     }
 
 
+def _account_actions_url() -> str:
+    """Where the dialog's buttons are: the account page's Apps section."""
+    return f'{reverse("accounts:account")}#apps'
+
+
 def _layout_of(value: object) -> str:
     return str(value) if value in ExportLayout.values else str(ExportLayout.YEAR_VENDOR)
 
@@ -104,16 +110,13 @@ def _layout_of(value: object) -> str:
 @login_required
 @require_http_methods(['GET', 'POST'])
 def export_new(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """GET: the dialog (a fragment; opened directly it goes to the dashboard). POST: confirm it
+    """GET: the dialog (a fragment; opened directly it goes to the account page). POST: confirm it
     and start the export."""
     if request.method == 'GET':
         parsed = parse_filters(request)
         resolve_vendor_filter(request, parsed)
         if not is_htmx(request):
-            query = parsed.query()
-            return redirect(
-                f'{reverse("receipts:dashboard")}?{query}' if query else 'receipts:dashboard'
-            )
+            return redirect(_account_actions_url())
         # The dialog reads the whole filtered list to quote it: bounded, loosely.
         limited = ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_DIALOG_USER')
         if not limited.allowed:
@@ -133,7 +136,7 @@ def _refused(
     top_up: bool = False,
 ) -> HttpResponse:
     """The form again with what was wrong (htmx swaps it in place); without htmx, flash messages
-    and back to the dashboard."""
+    and back to the account page."""
     if is_htmx(request):
         context = _dialog_context(
             request,
@@ -146,8 +149,7 @@ def _refused(
         return render(request, 'receipts/partials/export_form.html', context, status=422)
     for line in messages_list:
         messages.error(request, line)
-    query = parsed.query()
-    return redirect(f'{reverse("receipts:dashboard")}?{query}' if query else 'receipts:dashboard')
+    return redirect(_account_actions_url())
 
 
 def _confirm(request: AuthenticatedHttpRequest) -> HttpResponse:
