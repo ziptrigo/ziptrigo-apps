@@ -105,7 +105,9 @@ def owned_receipt(request, receipt_id, *, include_unfinished: bool = False) -> R
 def owned_export(request, export_id) -> ReceiptExport:
     """The caller's export (not a deleted one), or a 404, never a 403."""
     return get_object_or_404(
-        ReceiptExport.objects.exclude(status=ExportStatus.DELETED).prefetch_related('parts'),
+        ReceiptExport.objects.exclude(status=ExportStatus.DELETED)
+        .select_related('user')
+        .prefetch_related('parts'),
         id=export_id,
         user=request.auth,
     )

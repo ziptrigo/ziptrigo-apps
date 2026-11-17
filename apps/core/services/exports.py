@@ -50,7 +50,7 @@ import logging
 import zipfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 from uuid import UUID
 
@@ -175,6 +175,10 @@ class ExportKind:
 
     write_index: Callable[[ExportRecord, zipfile.ZipFile], None]
     """Write the index file into part 1's zip (`write_zip_entry` writes one entry)."""
+
+    timezone_of: Callable[[Any], tzinfo] | None = None
+    """`(user)` -> the zone the export's owner lives in, which dates the downloaded part names
+    (`core` can't import `accounts`, so the product passes `user_tz`). Without it the server's."""
 
 
 def notice_key(kind: ExportKind, export_id: object) -> str:
@@ -535,8 +539,9 @@ def _notify_failed(kind: ExportKind, export: ExportRecord) -> None:
 
 
 def part_name(kind: ExportKind, export: ExportRecord, number: int) -> str:
-    """The name a part is downloaded as."""
-    created: date = timezone.localdate(export.created_at)
+    """The name a part is downloaded as, dated where the export's owner is (the day they asked)."""
+    zone = kind.timezone_of(export.user) if kind.timezone_of else None
+    created: date = timezone.localdate(export.created_at, zone)
     return part_file_name(kind.download_prefix, created, number, export.part_count)
 
 

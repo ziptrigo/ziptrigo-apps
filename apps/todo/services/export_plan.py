@@ -14,7 +14,7 @@ goes alone).
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import datetime
 from uuid import UUID
 
 from apps.core.services.export_names import (
@@ -24,7 +24,6 @@ from apps.core.services.export_names import (
     pack_parts,
     unique_path,
 )
-from apps.core.services.export_names import part_file_name as _part_file_name
 
 NO_PROJECT = 'No project'
 COMMENTS_FOLDER = 'comments'
@@ -96,11 +95,6 @@ def plan_export(rows: list[ExportRow], part_bytes: int) -> Plan:
     return Plan(items=items, part_count=numbers[-1] if numbers else 0)
 
 
-def part_file_name(created: date, number: int, count: int) -> str:
-    """What a part is downloaded as: `task-files-2026-11-16-part-01-of-05.zip` (no suffix for an
-    export that fits one zip)."""
-    return _part_file_name(DOWNLOAD_PREFIX, created, number, count)
-
-
-#: What a zip is called, and what the spreadsheet is (`tasks-2026-11-16.xlsx`).
+#: What a zip is downloaded as (`task-files-2026-11-16-part-01-of-05.zip`): the one place the name
+#: is written, read by `KIND` (`exports.py`), which the engine names the parts from.
 DOWNLOAD_PREFIX = 'task-files'

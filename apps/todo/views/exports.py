@@ -90,7 +90,11 @@ def export_xlsx(request: AuthenticatedHttpRequest) -> HttpResponse | StreamingHt
     # The workbook is a zip itself, so it is written to a real file (spilling to disk when big)
     # and streamed from there; closing the response removes it.
     target = tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024)
-    build_xlsx(request.user, chosen, target)
+    try:
+        build_xlsx(request.user, chosen, target)
+    except Exception:
+        target.close()  # only the response closes it otherwise: don't wait for the collector
+        raise
     target.seek(0)
     response = FileResponse(
         target,

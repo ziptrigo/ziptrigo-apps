@@ -13,6 +13,7 @@ from ..services.export_names import (
     cell_text,
     clean_file_name,
     clean_folder_name,
+    looks_like_formula,
     pack_parts,
     part_file_name,
     split_extension,
@@ -147,3 +148,17 @@ class TestCellText:
     def test_none_is_empty_and_numbers_are_text(self):
         assert cell_text(None) == ''
         assert cell_text(12) == '12'
+
+
+class TestLooksLikeFormula:
+    @pytest.mark.parametrize('text', ['=1+1', '+1', '-1', '@home', ' =1', '\t=1', '\r=1', '- item'])
+    def test_what_a_spreadsheet_would_read_as_a_formula(self, text):
+        assert looks_like_formula(text)
+
+    @pytest.mark.parametrize('text', ['Pay rent', '1 + 1', 'a=b', '', '#1'])
+    def test_other_text_is_not(self, text):
+        assert not looks_like_formula(text)
+
+    @pytest.mark.parametrize('text', ['=1', 'plain', ' -x', ''])
+    def test_cell_text_and_the_predicate_agree(self, text):
+        assert (cell_text(text) != text) == looks_like_formula(text)

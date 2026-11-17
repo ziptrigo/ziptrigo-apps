@@ -24,8 +24,10 @@ from apps.core.services import exports as engine
 from .. import jobs
 from ..models import (
     Attachment,
+    Comment,
     ExportStatus,
     Project,
+    Task,
     TodoAccount,
     TodoExport,
     TodoExportItem,
@@ -35,6 +37,7 @@ from ..models import (
 from ..services import emails
 from ..services import exports as svc
 from ..services.errors import AccountFrozenError
+from ..services.export_plan import DOWNLOAD_PREFIX
 from ..services.export_range import ExportRange
 from ..services.exports import (
     NOTHING_TO_EXPORT,
@@ -647,6 +650,70 @@ class TestBuild:
         tasks = workbook_of(fake_storage, export)['Tasks']
         assert [row[0].value for row in tasks.iter_rows(min_row=2)] == [7001, 7002]
 
+    def test_a_task_trashed_and_a_comment_deleted_after_the_request_keep_their_rows_and_files(
+        self, funded_user, three, fake_storage
+    ):
+        export = make_export(funded_user)
+        # Between "Download files" and the part 1 build: the files are still in the zips...
+        Task.objects.filter(number=7002).update(deleted_at=timezone.now())
+        Comment.objects.update(deleted_at=timezone.now())
+        build_all(export)
+
+        archive = zip_of(fake_storage, export, 1)
+        assert set(archive.namelist()) == {*PATHS, 'tasks.xlsx'}
+        # ...so the workbook has their rows, and says where each file went.
+        workbook = workbook_of(fake_storage, export)
+        assert workbook.sheetnames == ['Tasks', 'Comments']
+        tasks = {row[0].value: row for row in workbook['Tasks'].iter_rows(min_row=2)}
+        assert sorted(tasks) == [7001, 7002]
+        assert tasks[7002][15].value == 'No project/7002 - Call the bank/notes.txt'
+        [comment] = list(workbook['Comments'].iter_rows(min_row=2))
+        assert comment[4].value == 'proof attached'
+        assert comment[5].value == 'Home/7001 - Pay rent/comments/proof.png'
+
+    def test_a_comment_written_after_the_request_is_left_out(
+        self, funded_user, three, fake_storage
+    ):
+        export = make_export(funded_user)
+        make_comment(three[0].task, 'too late', created_at=export.created_at + timedelta(minutes=5))
+        build_all(export)
+        comments = workbook_of(fake_storage, export)['Comments']
+        assert [row[4].value for row in comments.iter_rows(min_row=2)] == ['proof attached']
+
+    def test_a_file_whose_rows_are_gone_is_listed_in_a_last_sheet(
+        self, funded_user, three, fake_storage
+    ):
+        export = make_export(funded_user)
+        Task.objects.filter(number=7002).delete()  # hard: no row left to put the file on
+        build_all(export)
+
+        archive = zip_of(fake_storage, export, 1)
+        assert 'No project/7002 - Call the bank/notes.txt' in archive.namelist()
+        workbook = workbook_of(fake_storage, export)
+        assert workbook.sheetnames == ['Tasks', 'Comments', 'Files not listed above']
+        [row] = list(workbook['Files not listed above'].iter_rows(min_row=2))
+        assert [c.value for c in row][::2] == ['Task', 'No project/7002 - Call the bank/notes.txt']
+        assert [row[0].value for row in workbook['Tasks'].iter_rows(min_row=2)] == [7001]
+
+    def test_every_file_in_the_zips_is_listed_whatever_happened_since(
+        self, funded_user, three, fake_storage
+    ):
+        export = make_export(funded_user)
+        Task.objects.filter(number=7001).update(deleted_at=timezone.now())
+        Task.objects.filter(number=7002).delete()
+        build_all(export)
+
+        workbook = workbook_of(fake_storage, export)
+        text = ' '.join(
+            str(cell.value)
+            for sheet in workbook.worksheets
+            for row in sheet.iter_rows(min_row=2)
+            for cell in row
+            if cell.value
+        )
+        for path in PATHS:
+            assert path in text, path
+
     def test_the_workbook_is_only_of_the_range(self, funded_user, three, fake_storage):
         created(three[2].task, utc(2024, 3, 3))
         created(three[0].task, utc(2026, 11, 2))
@@ -1179,7 +1246,18 @@ class TestDownload:
         assert call['disposition'] == 'attachment'
         assert call['filename'] == svc.part_name(ready, 1)
         assert call['filename'] == f'task-files-{timezone.localdate(ready.created_at)}.zip'
+        assert call['filename'].startswith(f'{DOWNLOAD_PREFIX}-')
         assert url.startswith('https://fake-s3.test/')
+
+    def test_the_part_is_dated_where_the_user_is(self, ready):
+        # 22:30 on the 16th in Los Angeles is already the 17th in UTC, the server's zone.
+        User.objects.filter(pk=ready.user_id).update(timezone='America/Los_Angeles')
+        TodoExport.objects.filter(pk=ready.pk).update(created_at=utc(2026, 11, 17, 6, 30))
+        ready = TodoExport.objects.get(pk=ready.pk)
+        assert svc.part_name(ready, 1) == 'task-files-2026-11-16.zip'
+        User.objects.filter(pk=ready.user_id).update(timezone='UTC')
+        ready = TodoExport.objects.get(pk=ready.pk)
+        assert svc.part_name(ready, 1) == 'task-files-2026-11-17.zip'
 
     def test_a_multi_part_name_says_which(self, ready):
         TodoExport.objects.filter(pk=ready.pk).update(part_count=5)

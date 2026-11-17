@@ -34,6 +34,7 @@ from django.db import IntegrityError, transaction
 from django.tasks import task
 
 from apps.accounts.models import User
+from apps.accounts.services.timezones import user_tz
 from apps.billing.models import CreditTransactionType
 from apps.billing.services import (
     InsufficientCreditsError,
@@ -152,6 +153,7 @@ KIND = ExportKind(
     refund=_refund,
     can_notify=_can_notify,
     write_index=_write_csv,
+    timezone_of=user_tz,
 )
 
 NOTICE_KEY_PREFIX = 'receipts_export:'

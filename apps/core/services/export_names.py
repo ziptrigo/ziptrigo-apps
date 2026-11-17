@@ -13,8 +13,8 @@ functions: no database, no storage.
   folder merges cleanly.
 - *Parts.* Items are packed in the order given; a zip is closed when the next file would take it
   over the part size (a file is never cut in two; a file bigger than the part size goes alone).
-- *Cells.* `cell_text` is the formula guard every text written to a CSV or spreadsheet goes
-  through.
+- *Cells.* `looks_like_formula` is the one rule for what a spreadsheet would read as a formula;
+  `cell_text` is the guard every text written to a CSV goes through (it prefixes an apostrophe).
 """
 
 import re
@@ -138,14 +138,20 @@ _FORMULA_PREFIXES = ('=', '+', '-', '@')
 _CONTROL_PREFIXES = ('\t', '\r')
 
 
+def looks_like_formula(text: str) -> bool:
+    """Whether a spreadsheet would read `text` as a formula: it starts with `=`, `+`, `-`, `@`...,
+    even after leading whitespace (some importers trim it), or with a tab or carriage return. The
+    one rule behind `cell_text` (CSV: an apostrophe) and the XLSX writer (the `quotePrefix` cell
+    style), so the two can't drift."""
+    return text.startswith(_CONTROL_PREFIXES) or text.lstrip().startswith(_FORMULA_PREFIXES)
+
+
 def cell_text(value: object) -> str:
-    """One CSV or spreadsheet cell as text. A text that a spreadsheet would read as a formula (it
-    starts with `=`, `+`, `-`, `@`...), even after leading whitespace (some importers trim it), is
-    prefixed with an apostrophe: vendors, notes, task titles and comments come from emails and the
-    AI, and `=HYPERLINK(...)` in an exported file is a real attack. Every cell goes through here."""
+    """One CSV cell as text. A text that `looks_like_formula` is prefixed with an apostrophe:
+    vendors, notes, task titles and comments come from emails and the AI, and `=HYPERLINK(...)` in
+    an exported file is a real attack. Every CSV cell goes through here (a spreadsheet file has
+    the same rule without the visible apostrophe, in `todo.services.export_workbook`)."""
     if value is None:
         return ''
     text = str(value)
-    if text.startswith(_CONTROL_PREFIXES) or text.lstrip().startswith(_FORMULA_PREFIXES):
-        return "'" + text
-    return text
+    return "'" + text if looks_like_formula(text) else text

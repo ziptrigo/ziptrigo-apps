@@ -25,9 +25,13 @@ export at a time" is the partial unique constraint `todo_export_one_building_per
 in the range there is no zip to make (the task list is the free XLSX).
 
 **The workbook** is written when part 1 is built (last), from the database as of then, for the
-instants the export keeps (`filters['start']`/`['end']`) and **only tasks created up to the moment
-it was asked for**; its files column is written from the items (the paths in the zips), so it says
-what really went in. The quick XLSX (`build_xlsx`) lists file names instead of paths.
+instants the export keeps (`filters['start']`/`['end']`), **only tasks created, and comments
+written, up to the moment it was asked for**; its files column is written from the items (the
+paths in the zips). The files in the zips were fixed when the export was asked for, so the tasks
+and comments the items refer to are written whatever has happened to them since (a task moved to
+the Trash or a comment deleted in between still has its row), and the rare file whose task or
+comment row no longer exists at all goes into a "Files not listed above" sheet: no file in the
+zips is unlisted. The quick XLSX (`build_xlsx`) lists file names instead of paths.
 """
 
 import logging
@@ -45,6 +49,7 @@ from django.db.models import Q
 from django.tasks import task
 
 from apps.accounts.models import User
+from apps.accounts.services.timezones import user_tz
 from apps.billing.models import CreditTransactionType
 from apps.billing.services import (
     InsufficientCreditsError,
@@ -67,7 +72,6 @@ from apps.core.services.exports import (  # noqa: F401  (re-exported for the cal
     first_part_to_build,
 )
 from apps.core.services.queue import enqueue_after_commit
-from apps.core.services.zip_stream import copy_stream
 
 from ..models import (
     Attachment,
@@ -80,7 +84,7 @@ from ..models import (
 from .accounts import is_frozen
 from .emails import send_export_ready_email
 from .errors import AccountFrozenError
-from .export_plan import ExportRow, Plan, plan_export
+from .export_plan import DOWNLOAD_PREFIX, ExportRow, Plan, plan_export
 from .export_range import ExportRange
 from .export_workbook import (
     WORKBOOK_NAME,
@@ -415,10 +419,7 @@ def _write_workbook(export: TodoExport, zf: zipfile.ZipFile) -> None:
             as_of=export.created_at,
         )
         buffer.seek(0)
-        info = zipfile.ZipInfo(WORKBOOK_NAME, date_time=engine.zip_stamp(export))
-        info.compress_type = zipfile.ZIP_STORED
-        with zf.open(info, mode='w', force_zip64=True) as dest:
-            copy_stream(buffer, dest)
+        engine.write_zip_entry(zf, export, WORKBOOK_NAME, iter(lambda: buffer.read(1 << 20), b''))
 
 
 # -- The kind -------------------------------------------------------------------------------------
@@ -455,7 +456,7 @@ KIND = ExportKind(
     ready_title='Your to-do export is ready',
     failed_title='Your to-do export could not be prepared',
     file_noun='file',
-    download_prefix='task-files',
+    download_prefix=DOWNLOAD_PREFIX,
     detail_url_name='todo:export-detail',
     export_model=TodoExport,
     part_model=TodoExportPart,
@@ -470,6 +471,7 @@ KIND = ExportKind(
     refund=_refund,
     can_notify=_can_notify,
     write_index=_write_workbook,
+    timezone_of=user_tz,
 )
 
 

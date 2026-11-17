@@ -116,8 +116,10 @@ def test_download_files_and_export_xlsx(page: Page, receipts_server: ReceiptsSer
         row for row in workbook['Comments'].iter_rows(min_row=2) if row[0].value == int(number)
     ]
     assert len(comment) == 1 and f'{folder}/comments/comment-file.png' in comment[0][5].value
-    # The comment looked like a formula: it is text, with the guard's apostrophe.
-    assert comment[0][4].data_type == 's' and comment[0][4].value.startswith("'=")
+    # The comment looked like a formula: it is text as typed (no visible apostrophe), with the
+    # quote-prefix cell style.
+    assert comment[0][4].data_type == 's' and comment[0][4].value.startswith('=')
+    assert comment[0][4].quotePrefix is True
 
     # The quick XLSX: the same workbook on its own, with file names.
     page.goto(f'{url}/account/')

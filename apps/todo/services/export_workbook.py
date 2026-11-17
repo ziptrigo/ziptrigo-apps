@@ -9,15 +9,27 @@ into any binary file object; the caller copies it on.
 - *Tasks*: number, title, description, state, resolution, priority, due date, due time, project,
   section, labels (comma-separated), parent (its number), created, closed, comments (how many) and
   files (one line per file: its path in the zip, plus ` (part N)` when there is more than one zip).
-  Every live task created in the range: open, closed and subtasks; never the Trash.
+  Every live task created in the range (and up to `as_of`): open, closed and subtasks; never the
+  Trash.
 - *Comments*: task number, task title, created, edited, comment (its Markdown as typed), files.
-  The comments that are not deleted; never a comment's earlier revisions.
+  The comments that are not deleted and were written up to `as_of`; never a comment's earlier
+  revisions.
+- *Files not listed above*: only when needed, see below.
 
-**Never a formula.** Titles, descriptions and comments can arrive by email, so every text cell goes
-through the shared formula guard (`export_names.cell_text`: a leading `=`, `+`, `-` or `@` gets an
-apostrophe, like the CSV exports) *and* is written with the string data type, so no spreadsheet can
-read it as one. Characters a spreadsheet file can't hold (control characters) are dropped, and a
-text over the 32,767 characters a cell holds is cut.
+**The workbook says what is in the zips.** The files in the zips were fixed when the export was
+asked for, the workbook is written later (part 1 is built last), and a task may have been trashed
+or a comment deleted in between. So the tasks and comments that the files (`FileListing`) refer to
+are written too, whatever has happened to them since (`deleted_at` is ignored for those ids), and
+a file is never unlisted. Only a row that no longer exists at all (hard-deleted) can't be written;
+its files go into the "Files not listed above" sheet, by id, so no file in the zips is left out.
+
+**Never a formula.** Titles, descriptions and comments can arrive by email. Every text cell is
+written with the string data type (an inline string, never a formula), after the characters a
+spreadsheet file can't hold (control characters) are dropped, and a text the shared rule
+(`export_names.looks_like_formula`: a leading `=`, `+`, `-` or `@`...) calls formula-like also gets
+the `quotePrefix` cell style: the text is kept as typed, nothing visible is added, and a
+spreadsheet that edits the cell keeps it text. (The CSV exports, which have no styles, prefix an
+apostrophe instead.) A text over the 32,767 characters a cell holds is cut.
 
 Dates and times are real spreadsheet dates, **in the user's time zone** (a spreadsheet has no zone):
 `Created` and `Closed` are the user's local date and time, `Due date` and `Due time` are the local
@@ -31,7 +43,7 @@ from datetime import date, datetime, time
 from typing import IO, Any
 from uuid import UUID
 
-from django.db.models import Count
+from django.db.models import Count, Q
 from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE, Cell
@@ -40,7 +52,7 @@ from openpyxl.worksheet._write_only import WriteOnlyWorksheet
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_tz
-from apps.core.services.export_names import cell_text
+from apps.core.services.export_names import looks_like_formula
 
 from ..models import Comment, Priority, Resolution, Task, TaskState
 
@@ -91,8 +103,11 @@ class FileListing:
 
     by_task: dict[UUID, list[str]] = field(default_factory=lambda: defaultdict(list))
     by_comment: dict[UUID, list[str]] = field(default_factory=lambda: defaultdict(list))
+    task_ids: set[UUID] = field(default_factory=set)
+    """Every task a file is on, a comment's files included: the workbook has a row for each."""
 
     def add(self, task_id: UUID, comment_id: UUID | None, line: str) -> None:
+        self.task_ids.add(task_id)
         if comment_id is None:
             self.by_task[task_id].append(line)
         else:
@@ -127,11 +142,14 @@ def task_scope(
 
 
 def _text(sheet: WriteOnlyWorksheet, value: object, *, wrap: bool = False) -> Cell:
-    """A text cell: guarded against formulas, stripped of what a spreadsheet can't hold, cut to
-    what a cell holds, and typed as a string whatever it starts with."""
-    text = ILLEGAL_CHARACTERS_RE.sub('', cell_text(value))[:CELL_MAX]
-    cell = WriteOnlyCell(sheet, value=text or None)
+    """A text cell: stripped of what a spreadsheet can't hold *first* (a leading control character
+    would otherwise hide a formula from the guard, then vanish), guarded against formulas with the
+    `quotePrefix` style, cut to what a cell holds, and typed as a string whatever it starts with."""
+    text = ILLEGAL_CHARACTERS_RE.sub('', '' if value is None else str(value))
+    cell = WriteOnlyCell(sheet, value=text[:CELL_MAX] or None)
     cell.data_type = 's'
+    if text and looks_like_formula(text):
+        cell.quotePrefix = True
     if wrap and text:
         cell.alignment = Alignment(wrap_text=True, vertical='top')
     return cell
@@ -176,6 +194,38 @@ def _lines(listing: dict[UUID, list[str]], key: UUID) -> str:
     return '\n'.join(sorted(listing.get(key, ()), key=str.casefold))
 
 
+UNLISTED_SHEET = 'Files not listed above'
+UNLISTED_COLUMNS = (('Kind', 10), ('Id', 40), ('Files', 80))
+
+
+def _write_unlisted(
+    workbook: Workbook, files: FileListing, listed_tasks: set[UUID], listed_comments: set[UUID]
+) -> None:
+    """The last safety net: files of a task or comment that has no row at all any more (it was
+    hard-deleted) are listed here by id, so no file in the zips is left unlisted. No sheet when
+    there are none."""
+    rows = [
+        ('Task', key, lines) for key, lines in files.by_task.items() if key not in listed_tasks
+    ] + [
+        ('Comment', key, lines)
+        for key, lines in files.by_comment.items()
+        if key not in listed_comments
+    ]
+    if not rows:
+        return
+    sheet = workbook.create_sheet(UNLISTED_SHEET)
+    _prepare(sheet, UNLISTED_COLUMNS)
+    sheet.append(_header(sheet, UNLISTED_COLUMNS))
+    for kind, key, lines in sorted(rows, key=lambda row: (row[0], str(row[1]))):
+        sheet.append(
+            [
+                _text(sheet, kind),
+                _text(sheet, str(key)),
+                _text(sheet, '\n'.join(sorted(lines, key=str.casefold)), wrap=True),
+            ]
+        )
+
+
 def write_workbook(
     target: IO[bytes],
     user: User,
@@ -189,6 +239,12 @@ def write_workbook(
     file object, which the caller rewinds and copies on)."""
     tz = user_tz(user)
     scope = task_scope(user, start, end, as_of)
+    # The tasks and comments the files refer to are written whatever happened to them since.
+    task_filter = Q(**scope) | Q(id__in=files.task_ids)
+    comment_filter = (
+        Q(deleted_at__isnull=True, task__in=Task.objects.filter(task_filter).values('id'))
+        & (Q(created_at__lte=as_of) if as_of is not None else Q())
+    ) | Q(id__in=files.by_comment.keys())
     workbook = Workbook(write_only=True)
 
     tasks_sheet = workbook.create_sheet('Tasks')
@@ -199,26 +255,24 @@ def write_workbook(
     # Per task: its labels and its number of comments, in one query each for the whole range.
     labels: dict[UUID, list[str]] = defaultdict(list)
     for task_id, name in (
-        Task.labels.through.objects.filter(
-            **{f'task__{key}': value for key, value in scope.items()}
-        )
+        Task.labels.through.objects.filter(task__in=Task.objects.filter(task_filter).values('id'))
         .order_by('label__position', 'label__name')
         .values_list('task_id', 'label__name')
     ):
         labels[task_id].append(name)
     comment_counts = dict(
-        Comment.objects.filter(
-            deleted_at__isnull=True, **{f'task__{key}': value for key, value in scope.items()}
-        )
+        Comment.objects.filter(comment_filter)
         .values_list('task_id')
         .annotate(total=Count('id'))
         .order_by()
     )
+    listed_tasks: set[UUID] = set()
+    listed_comments: set[UUID] = set()
 
     tasks_sheet.append(_header(tasks_sheet, TASK_COLUMNS))
     task_total = 0
     task_rows = (
-        Task.objects.filter(**scope)
+        Task.objects.filter(task_filter)
         .order_by('number')
         .values_list(
             'id',
@@ -254,6 +308,8 @@ def write_workbook(
         completed_at,
     ) in task_rows.iterator(chunk_size=1000):
         closed = completed_at is not None
+        if task_id in files.by_task:
+            listed_tasks.add(task_id)
         tasks_sheet.append(
             [
                 _number(tasks_sheet, number),
@@ -283,15 +339,15 @@ def write_workbook(
     comments_sheet.append(_header(comments_sheet, COMMENT_COLUMNS))
     comment_total = 0
     comment_rows = (
-        Comment.objects.filter(
-            deleted_at__isnull=True, **{f'task__{key}': value for key, value in scope.items()}
-        )
+        Comment.objects.filter(comment_filter)
         .order_by('task__number', 'created_at', 'id')
         .values_list('id', 'task__number', 'task__title', 'created_at', 'edited_at', 'body')
     )
     for comment_id, number, title, created_at, edited_at, body in comment_rows.iterator(
         chunk_size=1000
     ):
+        if comment_id in files.by_comment:
+            listed_comments.add(comment_id)
         comments_sheet.append(
             [
                 _number(comments_sheet, number),
@@ -304,5 +360,6 @@ def write_workbook(
         )
         comment_total += 1
 
+    _write_unlisted(workbook, files, listed_tasks, listed_comments)
     workbook.save(target)
     return WorkbookStats(tasks=task_total, comments=comment_total)

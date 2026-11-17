@@ -3597,7 +3597,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `apps/core/models/exports.py` (abstract `BaseExport` / `BaseExportPart` / `BaseExportItem` with the shared
     columns, `ExportStatus`; `ReceiptExport*` subclass them with the same table names, constraint and indexes),
     `apps/core/services/export_names.py` (pure: the folder and file name cleaning, `Folders` and `unique_path`
-    for the case-insensitive uniqueness, `pack_parts`, `part_file_name`, and the formula guard `cell_text`, which
+    for the case-insensitive uniqueness, `pack_parts`, `part_file_name`, and the formula guard `cell_text` (over `looks_like_formula`), which
     `filters._cell` is now an alias of), `apps/core/services/export_errors.py` (`ExportCostChangedError`,
     `ExportInProgressError`, `ExportPartMissingError`, re-exported by `receipts.services.errors`),
     `apps/core/date_ranges.py` (the date select) and `apps/core/services/exports.py`: the lifecycle from the
@@ -3695,7 +3695,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     is a 404; an expired or failed one stays listed with its state and what was charged or refunded.
   - *Download*: `part_download_url` (`AccountFrozenError` while storage is paused, `ValidationError` unless
     `ready` and the part is built) presigns an attachment URL named `receipts-2026-11-16-part-01-of-05.zip`
-    (no suffix for one part). **No public link**: the page is behind sign-in; the email links to the page,
+    (no suffix for one part), the date being the day it was asked for **in the user's time zone** (`ExportKind.timezone_of`,
+    issue #326; the server's UTC date before). **No public link**: the page is behind sign-in; the email links to the page,
     never to a file.
   - *Web*: the buttons are **not on the dashboard** any more: they are Receipts' block of the account page's
     **App actions** (`apps.core.app_actions`, see "Auth" > "Apps"; `services/account_actions.py`,
@@ -5823,21 +5824,31 @@ this section is what is To-do's own.
   workbook); a task's own file called `comments` is numbered so it can't take that folder's name. Names are cleaned and
   de-duplicated exactly as Receipts does it (case-insensitive, across every part, the first spelling of a folder wins;
   rows ordered by task number, the task's own files before its comments', then when attached, then id; the number comes
-  first in the folder name so a long title is what is cut). Zip files are called `task-files-2026-11-16-part-01-of-05.zip`.
+  first in the folder name so a long title is what is cut). Zip files are called `task-files-2026-11-16-part-01-of-05.zip` (`export_plan.DOWNLOAD_PREFIX`, the one place the
+  prefix is written; `KIND` reads it), **dated in the owner's time zone** like the XLSX name: the engine's
+  `part_name` goes through the optional `ExportKind.timezone_of` hook (`user_tz`, passed by Receipts and To-do, as `core`
+  can't import `accounts`), so an evening export in UTC-8 is not named for tomorrow.
 - **The workbook** (`export_workbook.write_workbook`, openpyxl **write-only** mode into a temp file, copied into the zip
   entry): sheet **Tasks** (number, title, description, state, resolution, priority, due date, due time, project, section,
   labels (comma-separated, by position), parent (number), created, closed -- the issue's `closed_at` is `completed_at` --,
   comments (not deleted), files) and sheet **Comments** (task number, task title, created, edited, comment as Markdown,
   files). A closed task says state `Closed` and its resolution (`Done` when an old row has none). Dates and times are real
   spreadsheet dates **in the user's time zone** (created/closed are the wall clock; due date/time are the local values the
-  task keeps); the header is bold and frozen and the columns have widths. **Never a formula**: every text cell goes through
-  the shared formula guard `export_names.cell_text` (a leading `=`, `+`, `-` or `@`, even after whitespace, gets an
-  apostrophe -- also a Markdown bullet `- item`, the price of the guard, like the CSVs) *and* is written with the string data
-  type; characters a spreadsheet can't hold (control characters) are dropped and a text over 32,767 characters is cut. The
+  task keeps); the header is bold and frozen and the columns have widths. **Never a formula**: every text cell is written as an
+  inline string (never a formula), after the characters a spreadsheet can't hold (control characters) are **dropped
+  first** -- so a `\x01=HYPERLINK(...)` can't hide from the guard and then lose its mask -- and a text that
+  `export_names.looks_like_formula` calls formula-like (a leading `=`, `+`, `-` or `@`, even after whitespace, also a
+  Markdown bullet `- item`; the same predicate `cell_text` uses, so the CSV and the XLSX can't drift) gets the
+  **`quotePrefix` cell style**: the text is exactly as typed, with **no visible apostrophe**. (The CSVs, which have no
+  styles, still prefix an apostrophe.) A text over 32,767 characters is cut. The
   files column is one line per file: **its path in the zip plus ` (part N)` when there is more than one zip** in the export
   (built from the items, so a skipped file is not claimed); the quick XLSX lists file names. The workbook in part 1 is built
-  last, from the database **as of then**, for the instants the export kept and **only tasks created up to the moment it
-  was asked for**.
+  last, from the database **as of then**, for the instants the export kept and **only tasks created, and comments written,
+  up to the moment it was asked for**. **It says what is in the zips**: the items were fixed when the export was asked for,
+  so the tasks and comments they refer to are written whatever happened to them since (a task moved to the Trash or a comment
+  deleted in between keeps its row; `deleted_at` is ignored for those ids), and the rare file whose task or comment row is gone
+  altogether (hard-deleted) goes into a last sheet **"Files not listed above"** (kind, id, files), which exists only then.
+  So no file in the zips is unlisted.
 - **Creating** (`services/exports.py`: `prepare_export`, `quote_export`, `check_export`, `create_export`) is Receipts' flow
   with `ExportRange` for the filters and no layout: a `Prepared` read once and re-checked in the transaction (frozen,
   the number of files, the price and part size), the `expected_cost` / `ExportCostChangedError` contract, one building export

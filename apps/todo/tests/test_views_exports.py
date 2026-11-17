@@ -560,7 +560,24 @@ class TestXlsx:
     def test_a_title_that_looks_like_a_formula_is_neutralised(self, web, funded_user):
         make_task(funded_user, title='=HYPERLINK("http://evil","x")')
         cell = self.open(web.get(reverse(self.URL)))['Tasks']['B2']
-        assert cell.data_type == 's' and cell.value.startswith("'=")
+        # Kept as typed (no visible apostrophe), a string cell with the quote-prefix style.
+        assert cell.data_type == 's' and cell.value == '=HYPERLINK("http://evil","x")'
+        assert cell.quotePrefix is True
+
+    def test_the_temporary_file_is_closed_when_the_build_fails(self, web, monkeypatch):
+        from ..views import exports as views
+
+        targets = []
+
+        def boom(user, chosen, target):
+            targets.append(target)
+            raise RuntimeError('boom')
+
+        monkeypatch.setattr(views, 'build_xlsx', boom)
+        with pytest.raises(RuntimeError):
+            web.get(reverse(self.URL))
+        [target] = targets
+        assert target.closed
 
     def test_it_needs_a_login_and_get_only(self, client, web):
         assert client.get(reverse(self.URL)).status_code == 302

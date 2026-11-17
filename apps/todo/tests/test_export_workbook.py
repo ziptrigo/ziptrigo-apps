@@ -3,6 +3,7 @@ checked sheet by sheet, the formula guard included (read from the raw XML too: n
 formula)."""
 
 import io
+import re
 import zipfile
 from datetime import UTC, date, datetime, time
 
@@ -267,12 +268,13 @@ class TestComments:
         _, comments, _ = sheets(user)
         assert column(comments, 'Comment') == ['**bold**\n\n- [ ] one\n- [x] two']
 
-    def test_a_comment_that_starts_with_a_bullet_gets_the_guards_apostrophe(self, user):
-        # The price of the formula guard: a text that begins with `-` (a Markdown list) is
-        # prefixed, like in the CSV exports. It is still a string cell, so nothing can run.
+    def test_a_comment_that_starts_with_a_bullet_keeps_its_text_and_gets_quote_prefix(self, user):
+        # A text that begins with `-` (a Markdown list) is formula-like: it stays as typed (no
+        # visible apostrophe) and the cell has the quote-prefix style. Still a string cell.
         make_comment(make_task(user), '- [ ] one\n- [x] two')
         _, comments, _ = sheets(user)
-        assert column(comments, 'Comment') == ["'- [ ] one\n- [x] two"]
+        assert column(comments, 'Comment') == ['- [ ] one\n- [x] two']
+        assert comments['E2'].quotePrefix is True and comments['E2'].data_type == 's'
 
     def test_deleted_comments_and_revisions_are_left_out(self, user):
         task = make_task(user)
@@ -333,8 +335,9 @@ class TestNeverAFormula:
         body = comments['E2']
         for cell in (title, description, body):
             assert cell.data_type == 's', cell.coordinate
-            assert cell.value == "'" + text
-            assert cell.value.startswith("'")
+            # No visible apostrophe: the text is as typed and the cell has the quote-prefix style.
+            assert cell.value == text
+            assert cell.quotePrefix is True, cell.coordinate
 
     def test_no_cell_in_the_file_is_a_formula(self, user):
         for number, text in enumerate(ATTACKS, start=7001):
@@ -355,21 +358,51 @@ class TestNeverAFormula:
         label = make_label(user, '+y')
         make_task(user, project=project, section=section, labels=[label])
         tasks, _, _ = sheets(user)
-        assert column(tasks, 'Project') == ["'=1+1"]
-        assert column(tasks, 'Section') == ["'@x"]
-        assert column(tasks, 'Labels') == ["'+y"]
+        assert column(tasks, 'Project') == ['=1+1']
+        assert column(tasks, 'Section') == ['@x']
+        assert column(tasks, 'Labels') == ['+y']
+        assert [tasks[f'{col}2'].quotePrefix for col in 'IJK'] == [True, True, True]
 
     def test_ordinary_text_is_untouched(self, user):
         make_task(user, title='1 + 1 = 2', description='a=b -- fine')
         tasks, _, _ = sheets(user)
         assert column(tasks, 'Title') == ['1 + 1 = 2']
         assert column(tasks, 'Description') == ['a=b -- fine']
+        assert not tasks['B2'].quotePrefix and not tasks['C2'].quotePrefix
 
     def test_control_characters_a_spreadsheet_cannot_hold_are_dropped(self, user):
         make_task(user, title='bell\x07 and nul\x00 here', description='tab\tstays\nnewline too')
         tasks, _, _ = sheets(user)
         assert column(tasks, 'Title') == ['bell and nul here']
         assert column(tasks, 'Description') == ['tab\tstays\nnewline too']
+
+    def test_a_formula_hidden_behind_a_control_character_is_still_guarded(self, user):
+        # `\x01` is not whitespace to Python, so a guard that ran before the strip let it through
+        # and the strip then uncovered the formula.
+        text = '\x01=HYPERLINK("http://x","y")'
+        make_task(user, title=text, description='\x00\x07@home')
+        tasks, _, _ = sheets(user)
+        title, description = tasks['B2'], tasks['C2']
+        assert title.value == '=HYPERLINK("http://x","y")' and title.data_type == 's'
+        assert title.quotePrefix is True
+        assert description.value == '@home' and description.quotePrefix is True
+
+    @pytest.mark.parametrize(
+        ('text', 'prefixed'),
+        [('=1+1', True), ('- item', True), ('@home', True), ('Pay rent', False), ('1 + 1', False)],
+    )
+    def test_quote_prefix_is_in_the_styles_and_on_the_cell(self, user, text, prefixed):
+        make_task(user, title=text)
+        raw = zipfile.ZipFile(build(user))
+        styles = raw.read('xl/styles.xml').decode()
+        sheet = raw.read('xl/worksheets/sheet1.xml').decode()
+        assert ('quotePrefix="1"' in styles) == prefixed
+        title_cell = re.search(r'<c r="B2"[^>]*>', sheet)
+        assert title_cell is not None
+        assert ('s="' in title_cell.group(0)) == prefixed
+        assert 't="inlineStr"' in title_cell.group(0)
+        tasks, _, _ = sheets(user)
+        assert tasks['B2'].value == text and tasks['B2'].quotePrefix is prefixed
 
     def test_a_text_longer_than_a_cell_holds_is_cut(self, user):
         make_task(user, description='x' * (CELL_MAX + 500))

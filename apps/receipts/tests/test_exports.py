@@ -6,7 +6,7 @@ notification and email."""
 import csv
 import io
 import zipfile
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -953,6 +953,18 @@ class TestDownload:
         assert call['disposition'] == 'attachment'
         assert call['filename'] == svc.part_name(ready, 1) and call['filename'].endswith('.zip')
         assert url.startswith('https://fake-s3.test/')
+
+    def test_the_part_is_dated_where_the_user_is(self, ready):
+        # 22:30 on the 16th in Los Angeles is already the 17th in UTC, the server's zone.
+        User.objects.filter(pk=ready.user_id).update(timezone='America/Los_Angeles')
+        ReceiptExport.objects.filter(pk=ready.pk).update(
+            created_at=datetime(2026, 11, 17, 6, 30, tzinfo=UTC)
+        )
+        ready = ReceiptExport.objects.get(pk=ready.pk)
+        assert svc.part_name(ready, 1) == 'receipts-2026-11-16.zip'
+        User.objects.filter(pk=ready.user_id).update(timezone='UTC')
+        ready = ReceiptExport.objects.get(pk=ready.pk)
+        assert svc.part_name(ready, 1) == 'receipts-2026-11-17.zip'
 
     def test_a_multi_part_name_says_which(self, ready):
         ReceiptExport.objects.filter(pk=ready.pk).update(part_count=5)

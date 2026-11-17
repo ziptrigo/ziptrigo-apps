@@ -1,14 +1,13 @@
 """Planning a To-do export (`services/export_plan.py`): the folders, collisions and packing."""
 
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from ..services.export_plan import (
     NO_PROJECT,
     ExportRow,
-    part_file_name,
     plan_export,
     task_folder_name,
 )
@@ -166,8 +165,3 @@ class TestParts:
         assert plan.total_bytes == 12
         empty = plan_export([], 100)
         assert empty.items == [] and empty.part_count == 0 and empty.total_bytes == 0
-
-
-def test_part_file_names():
-    assert part_file_name(date(2026, 11, 16), 1, 5) == 'task-files-2026-11-16-part-01-of-05.zip'
-    assert part_file_name(date(2026, 11, 16), 1, 1) == 'task-files-2026-11-16.zip'
