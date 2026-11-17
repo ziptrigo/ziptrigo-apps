@@ -1,7 +1,7 @@
 {% comment %} Receipts' block of the account page's "App actions" (`apps.core.app_actions`): Download files (the zip
    export, issue #315) and Export CSV, both of the receipts in a receipt-date range. The form is a plain GET to the CSV;
    the Download files button fetches the dialog into #export-modal with the same fields (`hx-include`). The dialog is
-   the `fragmentModal` component of `receipts/js/common.js`, which the provider asks core to load
+   the `fragmentModal` component of `core/js/fragment_modal.js`, which the provider asks core to load
    (`AppActions.scripts`). Custom shows the two date fields; hidden they are disabled, so they aren't sent. {% endcomment %}
 <p class="mb-3 text-sm text-gray-600 dark:text-gray-300">Download your receipt files as zip files, or a CSV list of your receipts.</p>
 <form id="receipts-export-form" method="get" action="{% url 'receipts:export' %}">

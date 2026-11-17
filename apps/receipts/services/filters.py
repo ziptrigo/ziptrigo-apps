@@ -13,6 +13,7 @@ from django.db.models import BigIntegerField, CharField, Count, F, Q, QuerySet, 
 from django.db.models.functions import Abs, Cast, Concat, LPad, Mod, Round
 
 from apps.accounts.models import User
+from apps.core.services.export_names import cell_text as _cell
 
 from ..models import IN_PROGRESS_STATUSES, Receipt, ReceiptStatus
 from .ai import THOUSANDS_COMMAS
@@ -189,22 +190,6 @@ def _ordering(sort: str, *, trashed: bool) -> list:
 
 
 # -- CSV export ---------------------------------------------------------------------------------
-
-_FORMULA_PREFIXES = ('=', '+', '-', '@')
-_CONTROL_PREFIXES = ('\t', '\r')
-
-
-def _cell(value: object) -> str:
-    """One CSV cell. A text that a spreadsheet would read as a formula (it starts with `=`, `+`,
-    `-`, `@`...), even after leading whitespace (some importers trim it), is prefixed with an
-    apostrophe: vendors and notes come from emails and the AI, and `=HYPERLINK(...)` in an
-    exported file is a real attack. Every cell goes through here."""
-    if value is None:
-        return ''
-    text = str(value)
-    if text.startswith(_CONTROL_PREFIXES) or text.lstrip().startswith(_FORMULA_PREFIXES):
-        return "'" + text
-    return text
 
 
 def iter_csv(user: User, filters: ReceiptFilters | None = None) -> Iterator[str]:

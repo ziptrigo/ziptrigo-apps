@@ -3,6 +3,10 @@ while. `ReceiptExport` is one request; its `ReceiptExportPart`s are the zip file
 `ReceiptExportItem`s are what goes into them (the plan, and what the CSV is written from). Items
 and parts are deleted when the export ends (expired, failed or deleted), so the tables stay small.
 
+The columns every product's export has are the abstract bases in `apps.core.models.exports` (issue
+#326); what is Receipts' own is here: the owner, the folder layout, what was listed, and the copy
+of a receipt's CSV line on an item.
+
 Every new column has a `db_default` (the container still serving during the migration doesn't know
 them).
 """
@@ -17,20 +21,18 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 
 from apps.accounts.models import User
+from apps.core.models.exports import BaseExport, BaseExportItem, BaseExportPart, ExportStatus
 
 if TYPE_CHECKING:
     from django.db.models import Manager
 
-
-class ExportStatus(models.TextChoices):
-    """`BUILDING` -> `READY` | `FAILED`; `READY` -> `EXPIRED` (after the retention days) or
-    `DELETED` (the user deleted it). A failed one is refunded in full."""
-
-    BUILDING = 'building', 'Preparing'
-    READY = 'ready', 'Ready'
-    FAILED = 'failed', 'Failed'
-    EXPIRED = 'expired', 'Expired'
-    DELETED = 'deleted', 'Deleted'
+__all__ = [
+    'ExportLayout',
+    'ExportStatus',
+    'ReceiptExport',
+    'ReceiptExportItem',
+    'ReceiptExportPart',
+]
 
 
 class ExportLayout(models.TextChoices):
@@ -38,11 +40,8 @@ class ExportLayout(models.TextChoices):
     VENDOR_YEAR = 'vendor_year', 'Vendor / Year'
 
 
-class ReceiptExport(models.Model):
-    """One "download my files" request. Charged in full when it is created (`charged_credits`,
-    at `price_per_file` each); a failed build refunds all of it, a file that had vanished by the
-    time it was zipped refunds its own share (`refunded_credits`). The status change that does a
-    refund is the compare-and-swap that makes it happen once."""
+class ReceiptExport(BaseExport):
+    """One "download my files" request (the shared lifecycle columns are `BaseExport`'s)."""
 
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
@@ -50,10 +49,6 @@ class ReceiptExport(models.Model):
     parts: ClassVar['Manager']
     items: ClassVar['Manager']
 
-    # `ty` types `pk` as the primary key field object itself, not the value it holds.
-    pk: uuid.UUID
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = cast(
         'User',
         models.ForeignKey(
@@ -61,15 +56,6 @@ class ReceiptExport(models.Model):
         ),
     )
     user_id: uuid.UUID
-    status = cast(
-        str,
-        models.CharField(
-            max_length=16,
-            choices=ExportStatus.choices,
-            default=ExportStatus.BUILDING,
-            db_default=ExportStatus.BUILDING,
-        ),
-    )
     layout = cast(
         str,
         models.CharField(
@@ -89,34 +75,6 @@ class ReceiptExport(models.Model):
             'display, `params`: the dashboard query).',
         ),
     )
-    file_count = cast(int, models.PositiveIntegerField(default=0, db_default=0))
-    total_bytes = cast(int, models.PositiveBigIntegerField(default=0, db_default=0))
-    part_count = cast(int, models.PositiveIntegerField(default=0, db_default=0))
-    price_per_file = cast(
-        int,
-        models.PositiveIntegerField(
-            default=0, db_default=0, help_text='The price per file when it was charged.'
-        ),
-    )
-    charged_credits = cast(int, models.PositiveIntegerField(default=0, db_default=0))
-    refunded_credits = cast(int, models.PositiveIntegerField(default=0, db_default=0))
-    skipped_count = cast(
-        int,
-        models.PositiveIntegerField(
-            default=0,
-            db_default=0,
-            help_text='Files that were gone when they were zipped (left out and refunded).',
-        ),
-    )
-    attempts = cast(
-        int,
-        models.PositiveSmallIntegerField(
-            default=0,
-            db_default=0,
-            help_text='Times a worker took the part being built without it finishing (reset '
-            'by every part that is built); the export fails at `MAX_ATTEMPTS`.',
-        ),
-    )
     progress_at = cast(
         datetime,
         models.DateTimeField(
@@ -125,18 +83,6 @@ class ReceiptExport(models.Model):
             'that has not for a while.',
         ),
     )
-    lease_until = cast(
-        'datetime | None',
-        models.DateTimeField(
-            null=True,
-            blank=True,
-            help_text='A worker is building a part until this time (or a retry waits for it).',
-        ),
-    )
-    ready_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
-    expires_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
-    last_error = cast(str, models.CharField(max_length=255, blank=True, default='', db_default=''))
-    created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
 
     class Meta:
         indexes = [
@@ -154,35 +100,17 @@ class ReceiptExport(models.Model):
         ]
         ordering = ['-created_at']
 
-    def __str__(self) -> str:
-        return f'Export {self.pk} ({self.status})'
 
-    @property
-    def is_building(self) -> bool:
-        return self.status == ExportStatus.BUILDING
-
-    @property
-    def is_ready(self) -> bool:
-        return self.status == ExportStatus.READY
-
-
-class ReceiptExportPart(models.Model):
+class ReceiptExportPart(BaseExportPart):
     """One zip file of an export. `built_at` is null until it is written."""
 
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
-    id = models.BigAutoField(primary_key=True)
     export = cast(
         'ReceiptExport',
         models.ForeignKey(ReceiptExport, on_delete=models.CASCADE, related_name='parts'),
     )
-    export_id: uuid.UUID
-    number = cast(int, models.PositiveIntegerField())
-    key = cast(str, models.CharField(max_length=512))
-    size_bytes = cast(int, models.PositiveBigIntegerField(default=0, db_default=0))
-    file_count = cast(int, models.PositiveIntegerField(default=0, db_default=0))
-    built_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
 
     class Meta:
         constraints = [
@@ -190,11 +118,8 @@ class ReceiptExportPart(models.Model):
         ]
         ordering = ['number']
 
-    def __str__(self) -> str:
-        return f'Export {self.export_id}, part {self.number}'
 
-
-class ReceiptExportItem(models.Model):
+class ReceiptExportItem(BaseExportItem):
     """One receipt file in an export, with the data its CSV line is written from (a copy, taken
     when the export was planned, so a later edit or delete of the receipt changes nothing).
     `receipt_id` is a plain UUID, not a foreign key: a receipt deleted for good meanwhile must not
@@ -202,18 +127,11 @@ class ReceiptExportItem(models.Model):
 
     objects: ClassVar['Manager']
 
-    id = models.BigAutoField(primary_key=True)
     export = cast(
         'ReceiptExport',
         models.ForeignKey(ReceiptExport, on_delete=models.CASCADE, related_name='items'),
     )
-    export_id: uuid.UUID
-    part_number = cast(int, models.PositiveIntegerField())
     receipt_id = cast(uuid.UUID, models.UUIDField())
-    file_key = cast(str, models.CharField(max_length=512))
-    path = cast(str, models.CharField(max_length=512, help_text='The name inside the zip.'))
-    size_bytes = cast(int, models.PositiveBigIntegerField(default=0, db_default=0))
-    skipped = cast(bool, models.BooleanField(default=False, db_default=False))
     receipt_date = cast('date | None', models.DateField(null=True, blank=True))
     vendor = cast(str, models.CharField(max_length=255, blank=True, default='', db_default=''))
     document_type = cast(
@@ -228,6 +146,3 @@ class ReceiptExportItem(models.Model):
     class Meta:
         indexes = [models.Index(fields=['export', 'part_number'])]
         ordering = ['part_number', 'path']
-
-    def __str__(self) -> str:
-        return self.path

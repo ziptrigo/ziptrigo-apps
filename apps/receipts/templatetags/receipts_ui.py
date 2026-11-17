@@ -5,9 +5,9 @@ Load with `{% load receipts_ui %}`.
 
 from django import template
 
-from apps.core.templatetags.core_ui import pill_html
+from apps.core.templatetags.core_ui import export_status_pill, pill_html
 
-from ..models import ExportStatus, FailureReason, ReceiptStatus
+from ..models import FailureReason, ReceiptStatus
 
 register = template.Library()
 
@@ -28,22 +28,9 @@ def status_pill(status: str) -> str:
     return pill_html(tone, label, icon=icon)
 
 
-_EXPORT_PILLS = {
-    ExportStatus.BUILDING: ('Preparing', 'fas fa-spinner fa-spin', 'blue'),
-    ExportStatus.READY: ('Ready', 'fas fa-check', 'green'),
-    ExportStatus.FAILED: ('Failed', 'fas fa-circle-xmark', 'red'),
-    ExportStatus.EXPIRED: ('Expired', 'fas fa-clock', 'gray'),
-    ExportStatus.DELETED: ('Deleted', 'fas fa-trash', 'gray'),
-}
-
-
-@register.simple_tag
-def export_status_pill(status: str) -> str:
-    """The pill for an export's status (`export.status`)."""
-    label, icon, tone = _EXPORT_PILLS.get(
-        status, (str(status).replace('_', ' ').capitalize(), '', 'gray')
-    )
-    return pill_html(tone, label, icon=icon)
+# Shared with every product's exports pages (`apps.core.templatetags.core_ui`); registered here too
+# so the Receipts templates keep loading it from `receipts_ui`.
+register.simple_tag(export_status_pill)
 
 
 @register.simple_tag

@@ -39,5 +39,5 @@ def account_actions(request: HttpRequest) -> AppActions:
             'date_from': parsed.params.get('date_from', ''),
             'date_to': parsed.params.get('date_to', ''),
         },
-        scripts=('receipts/js/common.js',),
+        scripts=('core/js/fragment_modal.js',),
     )

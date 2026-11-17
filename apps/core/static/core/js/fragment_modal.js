@@ -1,10 +1,12 @@
 /*
- * Alpine components specific to the Receipts pages (`copyText` and `confirmModal` are shared by
- * every product and live in `core/js/components.js`). Loaded as a classic script (not deferred)
- * so the `alpine:init` listener is registered before Alpine starts.
+ * The `fragmentModal` Alpine component, shared by every page that fetches a dialog into a host
+ * element: Receipts' vendor rename and merge dialogs and the "Download files" dialogs of the
+ * account page's App actions (Receipts and To-do; it used to be Receipts' `common.js`, moved here
+ * for issue #326). `copyText` and `confirmModal` live in `core/js/components.js`. Loaded as a
+ * classic script (not deferred) so the `alpine:init` listener is registered before Alpine starts.
  */
 document.addEventListener('alpine:init', function () {
-    // A dialog that was fetched into a host element (the vendor rename and merge dialogs): the
+    // A dialog that was fetched into a host element (the vendor rename and merge dialogs, the "Download files" dialogs): the
     // server sends the whole overlay, which has this component on its root. Closing removes it,
     // and focus goes back to what opened it. A refused form is re-rendered inside it by htmx, so
     // the dialog stays open; a successful one redirects the page.
