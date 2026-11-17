@@ -8,6 +8,11 @@ stores is under `todo/` (the infra IAM user is scoped to that prefix, issue #185
   filename, which the user controls -- for the same reasons as file transfer's and Receipts' keys;
   the display name lives on `Attachment.filename` and goes into `Content-Disposition`.
 
+- `todo/users/<user_id>/exports/<export_id>/part-NN.zip`: the zip files of an export (issue #326),
+  kept for the retention days and then deleted. Not part of the account's `stored_bytes` (the
+  export's price covers them). Under the user's prefix, so deleting the account deletes them, and
+  inside the `todo/*` scope of the IAM user.
+
 - `todo/inbound/<message id>`: the raw messages SES drops for the email intake (issue #186), read by
   the poller (`services.inbound`); a message that fails to ingest is parked under `todo/failed/`
   so a pile of failures cannot crowd new mail out of the listing. SES writes under `todo/inbound/`;
@@ -44,6 +49,8 @@ __all__ = [
     'ObjectInfo',
     'S3Storage',
     'attachment_key',
+    'export_key',
+    'export_prefix',
     'failed_key_for',
     'get_storage',
     'reset_storage_cache',
@@ -74,6 +81,15 @@ def user_prefix(user_id: object) -> str:
 
 def attachment_key(user_id: object, attachment_id: object) -> str:
     return f'{user_prefix(user_id)}attachments/{attachment_id}'
+
+
+def export_prefix(user_id: object, export_id: object) -> str:
+    """Every object of one export (with the trailing slash that keeps ids apart)."""
+    return f'{user_prefix(user_id)}exports/{export_id}/'
+
+
+def export_key(user_id: object, export_id: object, number: int) -> str:
+    return f'{export_prefix(user_id, export_id)}part-{number:02d}.zip'
 
 
 _storage: S3Storage | None = None

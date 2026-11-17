@@ -1,10 +1,12 @@
 from typing import ClassVar, cast
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.core.models.singleton import load_singleton
+
+_MB = 1024**2
 
 
 class TodoSettings(models.Model):
@@ -100,6 +102,40 @@ class TodoSettings(models.Model):
             help_text='Inbound emails per user per 24 hours that are recorded when they create '
             'no task (rejected, empty); beyond it they are only logged. Accepted mail is never '
             'dropped by it.',
+        ),
+    )
+
+    export_price_per_file = cast(
+        int,
+        models.PositiveIntegerField(
+            default=3,
+            db_default=3,
+            verbose_name='Export per file',
+            help_text='Credits charged per attached file (on a task or on a comment) when a user '
+            'downloads their task files as zip files (account page > To-do > Download files), '
+            'charged when they confirm. 0 makes it free. The spreadsheet export is always free.',
+        ),
+    )
+    export_retention_days = cast(
+        int,
+        models.PositiveIntegerField(
+            default=30,
+            db_default=30,
+            validators=[MinValueValidator(1)],
+            help_text='Days the zip files of an export stay available to download before they '
+            'are deleted.',
+        ),
+    )
+    export_part_bytes = cast(
+        int,
+        models.PositiveBigIntegerField(
+            default=100 * _MB,
+            db_default=100 * _MB,
+            validators=[MinValueValidator(10 * _MB), MaxValueValidator(1024 * _MB)],
+            verbose_name='Export part size (bytes)',
+            help_text='About how big each zip file of an export gets. An attached file is never '
+            'split: a zip is closed when the next file would take it over this size. At most 1 GB: '
+            'a part is built within one 15-minute lease.',
         ),
     )
 

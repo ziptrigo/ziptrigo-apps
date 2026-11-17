@@ -13,6 +13,7 @@ class TodoConfig(AppConfig):
         from apps.core.products import ProductApp, register
 
         from . import checks  # noqa: F401
+        from .services.account_actions import account_actions
         from .services.costs import cost_section
 
         register(
@@ -23,6 +24,7 @@ class TodoConfig(AppConfig):
                 url_name='todo:today',
                 icon='fas fa-check-square',
                 costs=cost_section,
+                actions=account_actions,
             )
         )
 
@@ -118,6 +120,33 @@ class TodoConfig(AppConfig):
                 ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
+            )
+        )
+
+        register_job(
+            JobSpec(
+                name='todo.purge_exports',
+                func=jobs.purge_exports,
+                description=(
+                    'Deletes the zip files of to-do exports once their retention days '
+                    'have passed, and finishes deleting ended exports whose files are '
+                    'still there.'
+                ),
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
+        register_job(
+            JobSpec(
+                name='todo.retry_exports',
+                func=jobs.retry_exports,
+                description=(
+                    'Resumes to-do exports whose build stalled: queues the next zip file '
+                    'of one nobody is working on, and fails and refunds one that was '
+                    'interrupted too many times.'
+                ),
+                interval=timedelta(minutes=5),
+                lease=timedelta(minutes=10),
             )
         )
 

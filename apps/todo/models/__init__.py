@@ -3,6 +3,7 @@ from .attachment import Attachment
 from .blocker import TaskBlocker
 from .comment import Comment, CommentRevision
 from .event import EventChannel, EventKind, TaskEvent
+from .export import ExportStatus, TodoExport, TodoExportItem, TodoExportPart
 from .inbox import (
     InboundEmail,
     InboundEmailStatus,
@@ -41,6 +42,7 @@ __all__ = [
     'DeliveryChannel',
     'EventChannel',
     'EventKind',
+    'ExportStatus',
     'InboundEmail',
     'InboundEmailStatus',
     'InboundMessage',
@@ -68,5 +70,8 @@ __all__ = [
     'TaskSource',
     'TaskState',
     'TodoAccount',
+    'TodoExport',
+    'TodoExportItem',
+    'TodoExportPart',
     'TodoSettings',
 ]

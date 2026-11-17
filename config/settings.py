@@ -511,6 +511,18 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'TODO_BLOCKER_SUGGEST_USER': (120, 60),
     # Retiring the email address and issuing a new one (issue #186), per user.
     'TODO_REGENERATE_USER': (5, 60 * 60),
+    # Exports (issue #326), the twin of Receipts' `RECEIPTS_EXPORT_*`, per user. "Download files"
+    # charges credits and builds zip files of everything, so a handful an hour is plenty (a
+    # refused or failed request spends none: it is charged only once the form is valid, right
+    # before the export is created); opening the dialog reads every file in the range to quote it,
+    # so it is bounded too, loosely (the confirm peeks it before reading and spends a hit when it
+    # refuses after reading); downloading a part is a redirect to a presigned URL, cheap but a
+    # fresh URL per click; the quick XLSX walks every task in the range, so ten a minute is plenty
+    # for a human.
+    'TODO_EXPORT_FILES_USER': (5, 60 * 60),
+    'TODO_EXPORT_DIALOG_USER': (30, 60),
+    'TODO_EXPORT_DOWNLOAD_USER': (60, 60),
+    'TODO_EXPORT_XLSX_USER': (10, 60),
     # -- notes (issue #260): the Notes pages (and, later, `/api/notes/`) --
     # Creating a note (and duplicating or restoring one that may cost credits): per user, shared
     # by the web and the API. Each is a row of up to 50,000 characters and may cost credits.

@@ -1,0 +1,11 @@
+{% extends 'todo/layout.html' %}
+
+{% block title %}Export - To-do - ZipTrigo{% endblock %}
+
+{% block todo_content %}
+<a href="{% url 'todo:exports' %}"
+   class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Exports</a>
+<h1 class="mt-2 mb-6 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Export</h1>
+{% comment %} The confirmation modal (`x-data="confirmModal"`) is the layout's. {% endcomment %}
+{% include 'todo/partials/export_panel.html' %}
+{% endblock %}

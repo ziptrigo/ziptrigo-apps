@@ -117,7 +117,11 @@ class TodoE2EStorage(FakeTodoStorage):
 
     def presigned_get_url(self, key: str, filename: str, *args, **kwargs) -> str:
         super().presigned_get_url(key, filename, *args, **kwargs)
-        return f'{settings.BASE_URL}/__e2e__/todo-s3/{key}?filename={quote(filename)}'
+        disposition = kwargs.get('disposition', 'attachment')
+        return (
+            f'{settings.BASE_URL}/__e2e__/todo-s3/{key}'
+            f'?filename={quote(filename)}&disposition={disposition}'
+        )
 
 
 @csrf_exempt
@@ -135,7 +139,11 @@ def todo_fake_bucket(request: HttpRequest, key: str) -> HttpResponse:
         data = fake.objects.get(key)  # ty: ignore[unresolved-attribute]
         if data is None:
             return HttpResponse('NoSuchKey', status=404)
-        return HttpResponse(data, content_type='application/octet-stream')
+        response = HttpResponse(data, content_type='application/octet-stream')
+        if request.GET.get('disposition') == 'attachment':
+            filename = request.GET.get('filename', 'download')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
     return HttpResponse(status=405)
 
 

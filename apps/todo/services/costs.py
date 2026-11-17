@@ -44,7 +44,17 @@ def cost_section(user: User) -> CostSection:
         )
     lines += [
         storage('Attach files', 'Files on tasks and on comments.', unit='per day'),
-        free('Projects, reading dates from a title, reminders, comments, search and saved filters'),
+        charge(
+            'Download all files as zip',
+            config.export_price_per_file,
+            'per file',
+            f'Files on tasks and on comments. You confirm the cost first. Kept for '
+            f'{config.export_retention_days} days.',
+        ),
+        free(
+            'Projects, reading dates from a title, reminders, comments, search, saved filters '
+            'and exporting your tasks to a spreadsheet'
+        ),
     ]
 
     # Read only: opening the Costs page must not create a To-do account.

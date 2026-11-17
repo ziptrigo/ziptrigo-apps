@@ -1,0 +1,41 @@
+{% comment %} To-do's block of the account page's "App actions" (`apps.core.app_actions`, issue #326): Download files (the zip
+   export of the files attached to tasks and comments) and Export XLSX (the task list as a spreadsheet), both of the tasks
+   created in a range. The form is a plain GET to the XLSX; the Download files button fetches the dialog into
+   #todo-export-modal with the same fields (`hx-include`). The dialog is the `fragmentModal` component of
+   `core/js/fragment_modal.js`, which the provider asks core to load (`AppActions.scripts`). Custom shows the two date
+   fields; hidden they are disabled, so they aren't sent. Everything here has its own `todo-` ids, so it can't collide
+   with Receipts' block, which sits on the same page. {% endcomment %}
+<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">Download your task files as zip files, or your tasks as a spreadsheet.</p>
+<form id="todo-export-form" method="get" action="{% url 'todo:export-xlsx' %}">
+    <fieldset data-range="{{ date_range }}" x-data="{ range: $el.dataset.range }">
+        <legend class="mb-1 text-sm font-medium">Task created</legend>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label for="todo-export-date-range" class="sr-only">Task created range</label>
+            <select name="date_range" id="todo-export-date-range" x-model="range"
+                    class="w-full sm:w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+                {% for value, label in date_ranges %}
+                <option value="{{ value }}" {% if date_range == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <div x-show="range === 'custom'" {% if not custom %}style="display: none"{% endif %} class="flex items-center gap-2">
+                {% include 'core/components/date_picker.html' with name='date_from' id='todo-export-from' hidden_id='todo-export-from-value' value=date_from aria_label='Task created from' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True disabled=custom|yesno:',True' %}
+                <span class="text-gray-500 dark:text-gray-400" aria-hidden="true">&ndash;</span>
+                {% include 'core/components/date_picker.html' with name='date_to' id='todo-export-to' hidden_id='todo-export-to-value' value=date_to aria_label='Task created to' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True disabled=custom|yesno:',True' %}
+            </div>
+        </div>
+    </fieldset>
+    <div class="mt-3 flex flex-wrap items-center gap-3">
+        <button type="button" id="todo-export-files"
+                hx-get="{% url 'todo:export-new' %}" hx-include="closest form" hx-target="#todo-export-modal" hx-swap="innerHTML"
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+            <i class="fas fa-file-zipper mr-2" aria-hidden="true"></i>Download files
+        </button>
+        <button type="submit" id="todo-export-xlsx"
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+            <i class="fas fa-file-excel mr-2" aria-hidden="true"></i>Export XLSX
+        </button>
+        <a href="{% url 'todo:exports' %}" class="text-sm text-sage-600 dark:text-sage-300 hover:underline">Your exports</a>
+    </div>
+</form>
+{# Where the "Download files" dialog is loaded. #}
+<div id="todo-export-modal"></div>

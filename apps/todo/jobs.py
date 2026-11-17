@@ -11,7 +11,7 @@ from django.utils import timezone
 from apps.billing.services import get_storage_price_per_gb_per_day
 
 from .models import TodoAccount
-from .services import attachments, inbound, reminders, tasks
+from .services import attachments, exports, inbound, reminders, tasks
 from .services.metering import meter_account, resume
 
 logger = logging.getLogger(__name__)
@@ -82,3 +82,18 @@ def purge_inbound_messages() -> None:
     purged = inbound.purge_done_messages()
     if purged:
         logger.info('Purged %d old inbound message(s).', purged)
+
+
+def purge_exports() -> None:
+    """Daily: expire exports past `expires_at` (their zip files are deleted) and finish deleting
+    ended ones whose files are still there (issue #326). See `services.exports.expire_exports`."""
+    expired = exports.expire_exports()
+    if expired:
+        logger.info('Expired %d to-do export(s).', expired)
+
+
+def retry_exports() -> None:
+    """Every 5 minutes: resume the export builds nobody is working on (a dead worker, a part whose
+    retry is due), and fail and refund one whose attempts are spent. See
+    `services.exports.resume_stalled`."""
+    exports.resume_stalled()

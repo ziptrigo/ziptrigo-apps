@@ -1,0 +1,49 @@
+{% extends 'todo/layout.html' %}
+{% load datetime_format core_ui %}
+
+{% block title %}Exports - To-do - ZipTrigo{% endblock %}
+
+{% block todo_content %}
+<a href="{% url 'todo:settings' %}"
+   class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Settings</a>
+<h1 class="mt-2 mb-2 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Exports</h1>
+<p class="mb-8 text-sm text-gray-500 dark:text-gray-400">
+    Zip files of the files attached to your tasks, made with Download files on <a href="{% url 'accounts:account' %}#apps" class="underline">your account page</a>. They can be downloaded for a limited time, then they are deleted.
+</p>
+
+<div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+        {% for export in exports %}
+        <li class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:px-6">
+            <div class="min-w-0 flex-1">
+                <a href="{% url 'todo:export-detail' export.pk %}"
+                   class="block truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline">{{ export.created_at|fdatetime }}</a>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {{ export.file_count }} file{{ export.file_count|pluralize }} &middot; {{ export.total_bytes|filesizeformat }} &middot; {{ export.part_count }} zip file{{ export.part_count|pluralize }}
+                    {% if export.status == 'ready' %}&middot; until {{ export.expires_at|fdate }}{% endif %}
+                </p>
+            </div>
+            <div class="flex items-center gap-3">
+                {% export_status_pill export.status %}
+                <a href="{% url 'todo:export-detail' export.pk %}"
+                   class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">Open</a>
+            </div>
+        </li>
+        {% empty %}
+        <li class="px-4 py-12 text-center sm:px-6">
+            <p class="text-sm text-gray-500 dark:text-gray-400">No exports yet. Use <strong class="font-medium">Download files</strong> in the To-do actions on <a href="{% url 'accounts:account' %}#apps" class="underline">your account page</a>.</p>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="mt-6 flex items-center justify-between text-sm">
+    <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+    <div class="flex gap-4">
+        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="text-sage-600 dark:text-sage-300 hover:underline">Previous</a>{% endif %}
+        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="text-sage-600 dark:text-sage-300 hover:underline">Next</a>{% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

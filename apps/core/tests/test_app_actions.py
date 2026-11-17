@@ -126,8 +126,9 @@ def test_a_provider_is_called_once_per_render_with_the_request(only_products):
     assert seen == [user]
 
 
-def test_the_installed_registry_still_has_receipts_actions():
+def test_the_installed_registry_has_receipts_and_todo_actions():
     assert any(p.label == 'receipts' and p.actions for p in get_products())
+    assert any(p.label == 'todo' and p.actions for p in get_products())
 
 
 def test_scripts_are_loaded_once_each_before_the_blocks(only_products):

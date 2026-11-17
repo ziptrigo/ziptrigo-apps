@@ -17,6 +17,15 @@ from .comments import (
     comment_history_view,
     comment_restore,
 )
+from .exports import (
+    export_delete,
+    export_detail,
+    export_new,
+    export_panel,
+    export_part_download,
+    export_xlsx,
+    exports_page,
+)
 from .filters import (
     filter_counts_view,
     filter_delete,
@@ -96,6 +105,13 @@ __all__ = [
     'comment_restore',
     'closed_page',
     'completed_page',
+    'export_delete',
+    'export_detail',
+    'export_new',
+    'export_panel',
+    'export_part_download',
+    'export_xlsx',
+    'exports_page',
     'filter_counts_view',
     'filter_delete',
     'filter_page',
