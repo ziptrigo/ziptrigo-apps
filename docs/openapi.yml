@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.15.1
+  version: 2.16.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -1496,9 +1496,11 @@ paths:
 
         balance can''t pay; 409 while another export is being prepared (one at a time) or the cost
 
-        changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend, or over
+        changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend and which
 
-        `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list read of a refused request spends.'
+        is told before anything is read, or over `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list
+
+        read of a refused request spends.'
       tags:
       - Receipts
       requestBody:
@@ -3190,6 +3192,246 @@ paths:
       description: 'The earlier texts of a comment, oldest first, each with when it was replaced. Works for a
 
         deleted comment too.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/export.xlsx:
+    get:
+      operationId: apps_todo_api_exports_export_xlsx
+      summary: Export Xlsx
+      parameters:
+      - in: query
+        name: date_range
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date Range
+        required: false
+      - in: query
+        name: date_from
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date From
+        required: false
+      - in: query
+        name: date_to
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date To
+        required: false
+      responses:
+        '200':
+          description: OK
+      description: 'Download the tasks **created** in the range as a spreadsheet (`tasks.xlsx`: a Tasks and a
+
+        Comments sheet, file names in the files columns; nothing stored). Free. The range is as for
+
+        `POST /exports/quote`. Limited per user (`TODO_EXPORT_XLSX_USER`), shared with the web
+
+        export; a request with an invalid range is a 400 and does not spend any of that budget.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/exports/quote:
+    post:
+      operationId: apps_todo_api_exports_quote_export
+      summary: Quote Export
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TodoExportQuoteSchema'
+      description: 'What an export of the tasks created in this range would be: how many files, their size, how
+
+        many zip files, the cost in credits, your balance and whether it is `affordable`. Writes and
+
+        charges nothing. The quote reads every file in the range, so it is limited per user
+
+        (`TODO_EXPORT_DIALOG_USER`), the budget the website''s dialog uses; a request with an invalid
+
+        range is a 400 and spends none of it.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TodoExportRequestSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/todo/exports:
+    post:
+      operationId: apps_todo_api_exports_create_export
+      summary: Create Export
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TodoExportSchema'
+      description: 'Charge for and start an export: every uploaded file on a task created in the range (and on
+
+        its comments that are not deleted; never the Trash), packed into independent zip files (about
+
+        `part_bytes` each) with a `tasks.xlsx` of the tasks and comments in number 1. Costs
+
+        `price_per_file` credits per file, charged now; kept for `retention_days` once ready. Answers
+
+        201 with the export, `status: building`.
+
+
+        Send `expected_cost` (the quote''s `cost`) to be sure of what you pay: if the cost is now
+
+        different the answer is a 409 naming the real total, and nothing is charged. Without it the
+
+        export is created whatever it costs.
+
+
+        400 for a bad range or when no file matches (use `GET /export.xlsx` for the task list); 402
+
+        while the account is frozen or the balance can''t pay; 409 while another export is being
+
+        prepared (one at a time) or the cost changed; 429 over `TODO_EXPORT_FILES_USER`, which a
+
+        refused request does not spend and which is told before anything is read, or over
+
+        `TODO_EXPORT_DIALOG_USER`, which the whole-range read of a refused request spends.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TodoExportCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    get:
+      operationId: apps_todo_api_exports_list_exports
+      summary: List Exports
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          default: 50
+          title: Limit
+          type: integer
+        required: false
+      - in: query
+        name: offset
+        schema:
+          default: 0
+          title: Offset
+          type: integer
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TodoExportListSchema'
+      description: 'The caller''s exports, newest first (a deleted one is not listed). `limit` (1-100, default
+
+        50) and `offset` page the result; `count` is the total.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/exports/{export_id}:
+    get:
+      operationId: apps_todo_api_exports_get_export
+      summary: Get Export
+      parameters:
+      - in: path
+        name: export_id
+        schema:
+          format: uuid
+          title: Export Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TodoExportSchema'
+      description: 'One export: its status, the zip files (`parts`, with `built` while they are being
+
+        written), what was charged and refunded, what it was made from and when it expires.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_todo_api_exports_delete_export
+      summary: Delete Export
+      parameters:
+      - in: path
+        name: export_id
+        schema:
+          format: uuid
+          title: Export Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Delete an export: its zip files go now (nothing is refunded). 409 while it is still being
+
+        prepared; a deleted export is a 404.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/exports/{export_id}/parts/{number}/url:
+    get:
+      operationId: apps_todo_api_exports_export_part_url
+      summary: Export Part Url
+      parameters:
+      - in: path
+        name: export_id
+        schema:
+          format: uuid
+          title: Export Id
+          type: string
+        required: true
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TodoExportPartUrlSchema'
+      description: 'A short-lived presigned URL for one zip file of a ready export (`GET` it with no
+
+        `Authorization` header; it downloads as `filename`). Ask again for each download. 400 for an
+
+        export that is not ready, 402 while the account is frozen, 404 for a part number the export
+
+        doesn''t have; limited per user (`TODO_EXPORT_DOWNLOAD_USER`, the website''s budget), which a
+
+        refused request does not spend.'
       tags:
       - To-do
       security:
@@ -10279,6 +10521,323 @@ components:
       - body_html
       - replaced_at
       title: RevisionSchema
+      type: object
+    TodoExportQuoteSchema:
+      description: 'What an export of this range would be. `cost` is `file_count x price_per_file` credits
+
+        (`0` is free). `affordable` is `balance >= cost`; `frozen` says the account''s storage is
+
+        paused (an export would be refused with a 402). `retention_days` is how long the zip files
+
+        stay downloadable after they are ready; `part_bytes` is about how big each zip file is.'
+      properties:
+        file_count:
+          title: File Count
+          type: integer
+        total_bytes:
+          title: Total Bytes
+          type: integer
+        part_count:
+          title: Part Count
+          type: integer
+        price_per_file:
+          title: Price Per File
+          type: integer
+        cost:
+          title: Cost
+          type: integer
+        balance:
+          title: Balance
+          type: integer
+        affordable:
+          title: Affordable
+          type: boolean
+        frozen:
+          title: Frozen
+          type: boolean
+        retention_days:
+          title: Retention Days
+          type: integer
+        part_bytes:
+          title: Part Bytes
+          type: integer
+      required:
+      - file_count
+      - total_bytes
+      - part_count
+      - price_per_file
+      - cost
+      - balance
+      - affordable
+      - frozen
+      - retention_days
+      - part_bytes
+      title: TodoExportQuoteSchema
+      type: object
+    TodoExportRequestSchema:
+      additionalProperties: false
+      description: "Body for `POST /exports/quote`: which tasks' files to pack, by the date they were\n**created** (the account page's \"Task created\" select). Every state and every subtask counts;\nthe Trash never does. Only files on a task, or on a comment that is not deleted, are packed.\n\n- `date_range`: `any` (every task), `last_15_days`, `last_30_days`, `this_month`,\n  `this_quarter`, `this_year` (resolved against today in your time zone) or `custom`. Left\n  out, it is `custom` when a date is sent and `any` otherwise.\n- `date_from` / `date_to`: `YYYY-MM-DD`, inclusive, read in your time zone; either may be\n  left out for no bound. Only with `custom` (or no `date_range`): dates sent with any other\n  range are a 400, so a request can never cover more than it says. A malformed date, or one\n  after `date_to`, is a 400 too."
+      properties:
+        date_range:
+          anyOf:
+          - type: string
+          - type: 'null'
+          enum:
+          - any
+          - last_15_days
+          - last_30_days
+          - this_month
+          - this_quarter
+          - this_year
+          - custom
+          - null
+          title: Date Range
+        date_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date From
+        date_to:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date To
+      title: TodoExportRequestSchema
+      type: object
+    TodoExportFilterInfoSchema:
+      description: 'What the export was made from: `summary` is short lines for display (`Task created: ...`;
+
+        empty for every task) and `params` the range that was used (the body''s keys).'
+      properties:
+        summary:
+          items:
+            type: string
+          title: Summary
+          type: array
+        params:
+          additionalProperties: true
+          title: Params
+          type: object
+      required:
+      - summary
+      - params
+      title: TodoExportFilterInfoSchema
+      type: object
+    TodoExportPartSchema:
+      description: 'One zip file of an export. The zip files are independent (each opens on its own);
+
+        `tasks.xlsx` (the tasks and their comments) is in number 1. `built` is false while it is still
+
+        being written (`size_bytes` is 0 until then); `filename` is the name it downloads as.'
+      properties:
+        number:
+          title: Number
+          type: integer
+        filename:
+          title: Filename
+          type: string
+        size_bytes:
+          title: Size Bytes
+          type: integer
+        file_count:
+          title: File Count
+          type: integer
+        built:
+          title: Built
+          type: boolean
+      required:
+      - number
+      - filename
+      - size_bytes
+      - file_count
+      - built
+      title: TodoExportPartSchema
+      type: object
+    TodoExportSchema:
+      description: 'One export, as every export endpoint returns it.
+
+
+        `status` is `building` (the zip files are being written: poll until it changes), `ready`
+
+        (download the parts until `expires_at`), `failed` (it could not be built and every credit was
+
+        refunded) or `expired` (past its retention; the files are gone). A deleted export is a 404.
+
+
+        `charged_credits` was spent when the export was created; `refunded_credits` is given back for
+
+        a failed export (all of it) or for files that had vanished by the time they were zipped
+
+        (`skipped_count`, left out of the zip files). `file_count` is the number planned, so the zip
+
+        files hold `file_count - skipped_count` once ready. `parts` is empty for a failed or expired
+
+        export (its rows are gone). `ready_at` and `expires_at` are `null` until it is ready.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        status:
+          enum:
+          - building
+          - ready
+          - failed
+          - expired
+          title: Status
+          type: string
+        filters:
+          $ref: '#/components/schemas/TodoExportFilterInfoSchema'
+        file_count:
+          title: File Count
+          type: integer
+        skipped_count:
+          title: Skipped Count
+          type: integer
+        total_bytes:
+          title: Total Bytes
+          type: integer
+        part_count:
+          title: Part Count
+          type: integer
+        price_per_file:
+          title: Price Per File
+          type: integer
+        charged_credits:
+          title: Charged Credits
+          type: integer
+        refunded_credits:
+          title: Refunded Credits
+          type: integer
+        parts:
+          items:
+            $ref: '#/components/schemas/TodoExportPartSchema'
+          title: Parts
+          type: array
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        ready_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Ready At
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Expires At
+      required:
+      - id
+      - status
+      - filters
+      - file_count
+      - skipped_count
+      - total_bytes
+      - part_count
+      - price_per_file
+      - charged_credits
+      - refunded_credits
+      - parts
+      - created_at
+      - ready_at
+      - expires_at
+      title: TodoExportSchema
+      type: object
+    TodoExportCreateSchema:
+      additionalProperties: false
+      description: 'Body for `POST /exports`: the quote''s fields and `expected_cost`.
+
+
+        `expected_cost` is the total in credits the client confirmed (the quote''s `cost`). If what
+
+        the export costs now is different (files were added or removed, or the price changed) the
+
+        answer is a 409 naming the real total and nothing is charged or created. Left out, the export
+
+        is created whatever it costs, for a client with no one to ask.'
+      properties:
+        date_range:
+          anyOf:
+          - type: string
+          - type: 'null'
+          enum:
+          - any
+          - last_15_days
+          - last_30_days
+          - this_month
+          - this_quarter
+          - this_year
+          - custom
+          - null
+          title: Date Range
+        date_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date From
+        date_to:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date To
+        expected_cost:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          title: Expected Cost
+      title: TodoExportCreateSchema
+      type: object
+    TodoExportListSchema:
+      properties:
+        count:
+          title: Count
+          type: integer
+        limit:
+          title: Limit
+          type: integer
+        offset:
+          title: Offset
+          type: integer
+        results:
+          items:
+            $ref: '#/components/schemas/TodoExportSchema'
+          title: Results
+          type: array
+      required:
+      - count
+      - limit
+      - offset
+      - results
+      title: TodoExportListSchema
+      type: object
+    TodoExportPartUrlSchema:
+      description: 'A short-lived presigned URL for one zip file: `GET` it (no `Authorization` header) within
+
+        `expires_in` seconds; it downloads as `filename`. Never cache it; ask again.'
+      properties:
+        url:
+          title: Url
+          type: string
+        filename:
+          title: Filename
+          type: string
+        size_bytes:
+          title: Size Bytes
+          type: integer
+        expires_in:
+          title: Expires In
+          type: integer
+      required:
+      - url
+      - filename
+      - size_bytes
+      - expires_in
+      title: TodoExportPartUrlSchema
       type: object
     FilterParamsSchema:
       additionalProperties: false

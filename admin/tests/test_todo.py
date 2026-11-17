@@ -132,7 +132,7 @@ class FakeResponse:
         self._content = content
         self.closed = False
         # Raised from `iter_content` after the first chunk: a connection dropped mid-download.
-        self.fail_mid_stream: Exception | None = None
+        self.fail_mid_stream: BaseException | None = None
 
     def close(self):
         self.closed = True
@@ -2323,3 +2323,983 @@ def test_get_shows_the_project(api):
     result = invoke('get', 'local', '1234')
 
     assert 'Project: Website relaunch / Design' in flat(result)
+
+
+# -- Exports: all the files of a range as zip files, and the quick workbook (issue #326) ---------
+
+EXPORT_ID = '88888888-8888-8888-8888-888888888888'
+STORAGE_URL = 'https://storage.test/part-1.zip?signed'
+ZIP_BYTES = b'PK-the-first-zip-file'
+XLSX_BYTES = b'PK-a-workbook'
+
+
+def make_export(status='ready', parts=1, built=True, **fields) -> dict:
+    export = {
+        'id': EXPORT_ID,
+        'status': status,
+        'filters': {'summary': [], 'params': {}},
+        'file_count': 3,
+        'skipped_count': 0,
+        'total_bytes': 70,
+        'part_count': parts,
+        'price_per_file': 3,
+        'charged_credits': 9,
+        'refunded_credits': 0,
+        'parts': [
+            {
+                'number': n,
+                'filename': f'task-files-2026-11-17-part-{n}.zip',
+                'size_bytes': len(ZIP_BYTES),
+                'file_count': 3,
+                'built': built,
+            }
+            for n in range(1, parts + 1)
+        ],
+        'created_at': '2026-11-17T09:00:00Z',
+        'ready_at': '2026-11-17T09:00:30Z' if status == 'ready' else None,
+        'expires_at': '2026-12-17T09:00:30Z' if status == 'ready' else None,
+    }
+    export.update(fields)
+    return export
+
+
+def make_quote(**fields) -> dict:
+    quote = {
+        'file_count': 3,
+        'total_bytes': 70,
+        'part_count': 1,
+        'price_per_file': 3,
+        'cost': 9,
+        'balance': 100,
+        'affordable': True,
+        'frozen': False,
+        'retention_days': 30,
+        'part_bytes': 100 * 1024 * 1024,
+    }
+    quote.update(fields)
+    return quote
+
+
+class FakeSite:
+    """The export endpoints and the storage URL, as `requests.<method>` replacements. A route is a
+    response, a list of responses (served in order, the last one repeated) or a function of the
+    call's keyword arguments."""
+
+    def __init__(self, monkeypatch, routes: dict):
+        self.routes = routes
+        self.calls: list[tuple[str, str, dict]] = []
+        for method in ('get', 'post', 'delete'):
+            monkeypatch.setattr(f'requests.{method}', self._handler(method))
+
+    def _handler(self, method):
+        def handle(url, **kwargs):
+            key = (method, url.removeprefix(BASE) if url.startswith(BASE) else url)
+            self.calls.append((method, key[1], kwargs))
+            route = self.routes[key]
+            if callable(route):
+                return route(**kwargs)
+            if isinstance(route, list):
+                return route.pop(0) if len(route) > 1 else route[0]
+            return route
+
+        return handle
+
+    def made(self, method, path) -> list[dict]:
+        return [kw for m, p, kw in self.calls if (m, p) == (method, path)]
+
+
+def ok(body, **kwargs):
+    return FakeResponse(200, body, **kwargs)
+
+
+def site_for_a_ready_export(monkeypatch, overrides: dict | None = None) -> FakeSite:
+    routes = {
+        ('post', '/exports/quote'): ok(make_quote()),
+        ('post', '/exports'): FakeResponse(201, make_export('building', built=False)),
+        ('get', f'/exports/{EXPORT_ID}'): [
+            ok(make_export('building', built=False)),
+            ok(make_export()),
+        ],
+        ('get', f'/exports/{EXPORT_ID}/parts/1/url'): ok(
+            {
+                'url': STORAGE_URL,
+                'filename': 'task-files-2026-11-17-part-1.zip',
+                'size_bytes': len(ZIP_BYTES),
+                'expires_in': 900,
+            }
+        ),
+        ('get', STORAGE_URL): lambda **kw: FakeResponse(200, content=ZIP_BYTES),
+    }
+    routes.update(overrides or {})
+    return FakeSite(monkeypatch, routes)
+
+
+@pytest.fixture
+def wide_terminal(monkeypatch):
+    """Rich wraps a long log line (a path, a message) at the terminal's width; keep it on one."""
+    monkeypatch.setenv('COLUMNS', '400')
+
+
+@pytest.mark.usefixtures('wide_terminal')
+class TestExportFiles:
+    def run(self, tmp_path, *args, input=None):
+        return invoke('export-files', 'local', '--out', str(tmp_path), *args, input=input)
+
+    def test_quotes_asks_creates_waits_and_downloads(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+        out = tmp_path / 'zips'
+
+        result = invoke(
+            'export-files',
+            'local',
+            '--out',
+            str(out),
+            '--range',
+            'custom',
+            '--from',
+            '2026-01-01',
+            '--to',
+            '2026-12-31',
+            input='y\n',
+        )
+
+        assert result.exit_code == 0, result.output
+        selection = {'date_range': 'custom', 'date_from': '2026-01-01', 'date_to': '2026-12-31'}
+        assert site.made('post', '/exports/quote')[0]['json'] == selection
+        assert site.made('post', '/exports')[0]['json'] == {**selection, 'expected_cost': 9}
+        assert 'This costs 9 credits. Continue?' in result.output
+        assert '3 files (70 B) in 1 zip file of about 100.0 MB each' in result.output
+        assert 'Cost: 9 credits (3 per file). Your balance is 100.' in result.output
+        assert 'Charged 9 credits.' in result.output
+        assert (out / 'task-files-2026-11-17-part-1.zip').read_bytes() == ZIP_BYTES
+        assert sorted(p.name for p in out.iterdir()) == ['task-files-2026-11-17-part-1.zip']
+        assert 'Downloaded 1 zip file' in result.output
+
+    def test_it_waits_with_no_range_for_every_task(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+
+        assert self.run(tmp_path, '--yes').exit_code == 0
+
+        assert site.made('post', '/exports/quote')[0]['json'] == {}
+        assert site.made('post', '/exports')[0]['json'] == {}
+
+    @pytest.mark.parametrize(
+        ('typed', 'sent'),
+        [
+            ('this-month', 'this_month'),
+            ('This_Year', 'this_year'),
+            ('last-15-days', 'last_15_days'),
+            ('LAST-30-DAYS', 'last_30_days'),
+            ('this-quarter', 'this_quarter'),
+            ('any', 'any'),
+        ],
+    )
+    def test_the_range_is_sent_as_the_api_names_it(
+        self, token_file, tmp_path, monkeypatch, typed, sent
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+        self.run(tmp_path, '--yes', '--range', typed)
+        assert site.made('post', '/exports/quote')[0]['json'] == {'date_range': sent}
+
+    def test_dates_alone_are_sent_without_a_range(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+        self.run(tmp_path, '--yes', '--from', '2026-01-01')
+        assert site.made('post', '/exports/quote')[0]['json'] == {'date_from': '2026-01-01'}
+
+    @pytest.mark.parametrize(
+        ('args', 'message'),
+        [
+            (['--range', 'next-decade'], 'Choose --range any, last-15-days'),
+            (['--range', 'this-month', '--from', '2026-01-01'], 'go with --range custom'),
+            (['--range', 'any', '--to', '2026-01-01'], 'go with --range custom'),
+        ],
+    )
+    def test_a_bad_range_fails_before_any_request(
+        self, token_file, tmp_path, monkeypatch, args, message
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+
+        result = self.run(tmp_path, *args)
+
+        assert result.exit_code == 1 and message in result.output
+        assert site.calls == []
+
+    def test_the_api_token_goes_to_the_site_and_never_to_storage(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+
+        self.run(tmp_path, '--yes')
+
+        for kwargs in site.made('post', '/exports') + site.made('get', f'/exports/{EXPORT_ID}'):
+            assert kwargs['headers'] == {'Authorization': 'Bearer tok'}
+        (storage_call,) = site.made('get', STORAGE_URL)
+        assert 'headers' not in storage_call
+        assert storage_call['stream'] is True
+
+    def test_yes_skips_the_question_and_sends_no_expected_cost(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 0, result.output
+        assert 'Continue?' not in result.output
+        assert 'expected_cost' not in site.made('post', '/exports')[0]['json']
+
+    def test_declining_creates_nothing(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+
+        result = self.run(tmp_path, input='n\n')
+
+        assert result.exit_code == 1
+        assert 'nothing was charged' in result.output
+        assert site.made('post', '/exports') == []
+
+    def test_a_free_export_asks_nothing_and_confirms_zero(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(
+            monkeypatch, {('post', '/exports/quote'): ok(make_quote(cost=0, price_per_file=0))}
+        )
+
+        result = self.run(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        assert 'Continue?' not in result.output
+        assert site.made('post', '/exports')[0]['json']['expected_cost'] == 0
+
+    @pytest.mark.parametrize(
+        ('quote', 'message'),
+        [
+            (make_quote(file_count=0, cost=0), 'There are no files to download in this range'),
+            (make_quote(frozen=True), 'Storage is paused until you add credits'),
+            (make_quote(affordable=False, balance=5), 'balance is 5'),
+        ],
+    )
+    def test_a_quote_that_cannot_go_ahead_stops_before_asking(
+        self, token_file, tmp_path, monkeypatch, quote, message
+    ):
+        site = site_for_a_ready_export(monkeypatch, {('post', '/exports/quote'): ok(quote)})
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 1 and message in result.output
+        assert site.made('post', '/exports') == []
+
+    def test_nothing_to_download_points_at_the_xlsx(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch, {('post', '/exports/quote'): ok(make_quote(file_count=0, cost=0))}
+        )
+        result = self.run(tmp_path, '--yes')
+        assert 'todo export-xlsx local --out tasks.xlsx' in result.output
+
+    def test_a_file_as_the_folder_fails_before_any_request(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+        a_file = tmp_path / 'file'
+        a_file.write_text('x')
+
+        result = invoke('export-files', 'local', '--out', str(a_file))
+
+        assert result.exit_code == 1 and 'Not a folder' in result.output
+        assert site.calls == []
+
+    @pytest.mark.parametrize(
+        ('response', 'message'),
+        [
+            (
+                FakeResponse(409, {'detail': 'An export is already being prepared.'}),
+                'An export is already being prepared',
+            ),
+            (
+                FakeResponse(409, {'detail': 'The cost changed: it is now 12 credits.'}),
+                'The cost changed since it was quoted',
+            ),
+            (FakeResponse(402, {'detail': 'Insufficient credits'}), 'top up your credits'),
+            (FakeResponse(429, {'detail': 'Slow down'}, headers={'Retry-After': '3000'}), '50 min'),
+            (FakeResponse(400, {'detail': 'No files in this range'}), 'No files in this range'),
+        ],
+    )
+    def test_a_refusal_when_creating_is_shown_and_nothing_is_downloaded(
+        self, token_file, tmp_path, monkeypatch, response, message
+    ):
+        site = site_for_a_ready_export(monkeypatch, {('post', '/exports'): response})
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 1 and message in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_a_409_points_at_the_exports_list(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch, {('post', '/exports'): FakeResponse(409, {'detail': 'Busy.'})}
+        )
+        output = self.run(tmp_path, '--yes').output
+        # The API's own full stop is not doubled before the CLI's advice.
+        assert '409: Busy. Check `todo exports local`, then try again.' in output
+        assert '..' not in output
+
+    def test_a_changed_cost_says_to_run_it_again_in_the_clis_words(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        changed = FakeResponse(
+            409,
+            {
+                'detail': 'The cost changed: it is now 12 credits. Send expected_cost=12 to confirm it.'
+            },
+        )
+        site = site_for_a_ready_export(monkeypatch, {('post', '/exports'): changed})
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 1
+        assert 'The cost changed since it was quoted, so nothing was charged.' in result.output
+        assert 'Run the command again to see the new quote.' in result.output
+        assert 'expected_cost' not in result.output and '..' not in result.output
+        assert 'todo exports' not in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_ctrl_c_while_downloading_says_how_to_fetch_it_later(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        interrupted = FakeResponse(200, content=ZIP_BYTES)
+        interrupted.fail_mid_stream = KeyboardInterrupt()
+        site_for_a_ready_export(monkeypatch, {('get', STORAGE_URL): interrupted})
+        out = tmp_path / 'my zips'
+
+        result = invoke('export-files', 'local', '--out', str(out), '--yes')
+
+        assert result.exit_code == 130
+        assert 'Stopped downloading' in result.output and 'paid for' in result.output
+        assert f"todo export-download local {EXPORT_ID} --out '" in result.output
+        assert list(out.iterdir()) == []  # no cut-off file left behind
+
+    def test_it_reports_the_progress_while_waiting(self, token_file, tmp_path, monkeypatch):
+        building = make_export('building', parts=3, built=False)
+        halfway = make_export('building', parts=3, built=False)
+        halfway['parts'][1]['built'] = True
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): [
+                    ok(building),
+                    ok(halfway),
+                    ok(make_export(parts=1)),
+                ]
+            },
+        )
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 0, result.output
+        assert 'Written so far: 0 of 3 zip files' in result.output
+        assert 'Written so far: 1 of 3 zip files' in result.output
+
+    def test_a_failed_export_is_reported_with_its_refund(self, token_file, tmp_path, monkeypatch):
+        failed = make_export('failed', built=False, refunded_credits=9, parts=1)
+        failed['parts'] = []
+        site = site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(failed)})
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 1
+        assert 'failed and 9 credits were refunded' in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_ctrl_c_stops_waiting_and_says_how_to_fetch_it_later(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): ok(make_export('building', built=False))},
+        )
+
+        def interrupt(seconds):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(todo.time, 'sleep', interrupt)
+
+        result = invoke('export-files', 'local', '--out', str(tmp_path / 'my zips'), '--yes')
+
+        assert result.exit_code == 130
+        assert 'Stopped waiting' in result.output
+        assert f"todo export-download local {EXPORT_ID} --out '" in result.output
+
+    def test_it_gives_up_waiting_after_the_time_it_was_given(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): ok(make_export('building', built=False))},
+        )
+
+        result = self.run(tmp_path, '--yes', '--wait', '0.05')
+
+        assert result.exit_code == 1
+        assert 'Still not ready after 3 seconds' in result.output
+        assert f'todo export-download local {EXPORT_ID}' in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_a_dropped_poll_is_tried_again(self, token_file, tmp_path, monkeypatch):
+        calls = {'n': 0}
+
+        def poll(**kwargs):
+            calls['n'] += 1
+            if calls['n'] == 1:
+                raise requests.exceptions.ConnectionError('network down')
+            return ok(make_export())
+
+        site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): poll})
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 0, result.output
+        assert 'trying again' in result.output
+
+    @pytest.mark.parametrize('status', [502, 503, 429])
+    def test_a_transient_answer_while_waiting_is_tried_again(
+        self, token_file, tmp_path, monkeypatch, status
+    ):
+        answers = [
+            FakeResponse(status, {'detail': 'busy'}, headers={'Retry-After': '3600'}),
+            ok(make_export()),
+        ]
+        site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): answers})
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 0, result.output
+        assert f'The site answered {status}' in result.output and 'trying again' in result.output
+
+    def test_a_site_that_keeps_failing_ends_with_the_fetch_hint(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): FakeResponse(503, {'detail': 'down'})},
+        )
+
+        result = self.run(tmp_path, '--yes', '--wait', '0.05')
+
+        assert result.exit_code == 1
+        assert f'todo export-download local {EXPORT_ID}' in result.output
+
+    def test_another_error_while_waiting_prints_the_fetch_hint(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): FakeResponse(401, {'detail': 'Invalid token'})},
+        )
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 1
+        assert f'todo export-download local {EXPORT_ID}' in result.output
+
+    def test_the_wait_backs_off(self, token_file, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(todo.time, 'sleep', lambda s: slept.append(s))
+        building = ok(make_export('building', built=False))
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): [building] * 12 + [ok(make_export())]},
+        )
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 0, result.output
+        assert slept[0] == 3 and slept == sorted(slept) and max(slept) == 15
+
+    def test_a_folder_with_zip_files_is_refused_before_anything_is_quoted_or_charged(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+        existing = tmp_path / 'task-files-2026-11-17-part-1.zip'
+        existing.write_bytes(ZIP_BYTES)
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 1
+        assert 'Nothing was charged' in result.output and '--force' in result.output
+        assert site.made('post', '/exports/quote') == [] and site.made('post', '/exports') == []
+        assert existing.read_bytes() == ZIP_BYTES
+
+    def test_receipts_zip_files_in_the_folder_are_not_a_clash(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site_for_a_ready_export(monkeypatch)
+        (tmp_path / 'receipts-2026-11-17.zip').write_bytes(b'not ours')
+        assert self.run(tmp_path, '--yes').exit_code == 0
+
+    def test_a_clash_that_appears_after_creation_says_the_export_is_paid_for(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        existing = tmp_path / 'task-files-2026-11-17-part-1.zip'
+
+        def poll(**kwargs):
+            existing.write_bytes(b'something else entirely')  # made while waiting
+            return ok(make_export())
+
+        site = site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): poll})
+
+        result = self.run(tmp_path, '--yes')
+
+        assert result.exit_code == 1
+        assert 'paid for and ready' in result.output
+        assert f'export-download local {EXPORT_ID}' in result.output
+        assert existing.read_bytes() == b'something else entirely'
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_force_replaces_it(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(monkeypatch)
+        existing = tmp_path / 'task-files-2026-11-17-part-1.zip'
+        existing.write_bytes(b'something else entirely')
+
+        result = self.run(tmp_path, '--yes', '--force')
+
+        assert result.exit_code == 0, result.output
+        assert existing.read_bytes() == ZIP_BYTES
+
+    def test_files_that_vanished_are_mentioned(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(
+                    make_export(skipped_count=1, refunded_credits=3)
+                )
+            },
+        )
+        result = self.run(tmp_path, '--yes')
+        assert result.exit_code == 0
+        assert '1 file(s) had vanished' in result.output and '3 credits refunded' in result.output
+
+    def test_it_needs_a_login(self, logged_out):
+        assert invoke('export-files', 'local').exit_code != 0
+
+
+@pytest.mark.usefixtures('wide_terminal')
+class TestExportDownload:
+    def run(self, tmp_path, *args):
+        return invoke('export-download', 'local', EXPORT_ID, '--out', str(tmp_path), *args)
+
+    def test_a_ready_export_is_downloaded(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(
+            monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())}
+        )
+
+        result = self.run(tmp_path / 'z')
+
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / 'z' / 'task-files-2026-11-17-part-1.zip').read_bytes() == ZIP_BYTES
+        assert site.made('post', '/exports') == []  # nothing is created or charged
+
+    def test_ctrl_c_while_downloading_says_how_to_fetch_it_later(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        interrupted = FakeResponse(200, content=ZIP_BYTES)
+        interrupted.fail_mid_stream = KeyboardInterrupt()
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(make_export()),
+                ('get', STORAGE_URL): interrupted,
+            },
+        )
+
+        result = self.run(tmp_path / 'z')
+
+        assert result.exit_code == 130
+        assert 'Stopped downloading' in result.output
+        assert f'todo export-download local {EXPORT_ID} --out' in result.output
+        assert list((tmp_path / 'z').iterdir()) == []
+
+    def test_it_waits_for_one_still_being_prepared(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+
+        result = self.run(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        assert 'Preparing your zip files' in result.output
+        assert len(site.made('get', f'/exports/{EXPORT_ID}')) == 2  # the first look, one poll
+        assert (tmp_path / 'task-files-2026-11-17-part-1.zip').exists()
+
+    def test_a_file_that_is_already_complete_is_skipped(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(
+            monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())}
+        )
+        (tmp_path / 'task-files-2026-11-17-part-1.zip').write_bytes(ZIP_BYTES)
+
+        result = self.run(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        assert 'already downloaded, skipped' in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_a_file_of_another_size_is_refused_without_force(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(
+            monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())}
+        )
+        existing = tmp_path / 'task-files-2026-11-17-part-1.zip'
+        existing.write_bytes(b'other')
+
+        result = self.run(tmp_path)
+
+        assert result.exit_code == 1 and 'Use --force' in result.output
+        assert existing.read_bytes() == b'other' and site.made('get', STORAGE_URL) == []
+
+    def test_force_downloads_again_even_if_complete(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(
+            monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())}
+        )
+        (tmp_path / 'task-files-2026-11-17-part-1.zip').write_bytes(ZIP_BYTES)
+
+        result = self.run(tmp_path, '--force')
+
+        assert result.exit_code == 0 and len(site.made('get', STORAGE_URL)) == 1
+
+    def test_an_interrupted_run_is_finished_by_running_it_again(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        export = make_export(parts=2)
+        export['parts'][1]['filename'] = 'task-files-2026-11-17-part-2.zip'
+        urls = {n: f'https://storage.test/part-{n}.zip' for n in (1, 2)}
+        routes = {('get', f'/exports/{EXPORT_ID}'): ok(export)}
+        for n in (1, 2):
+            routes[('get', f'/exports/{EXPORT_ID}/parts/{n}/url')] = ok(
+                {
+                    'url': urls[n],
+                    'filename': f'task-files-2026-11-17-part-{n}.zip',
+                    'size_bytes': len(ZIP_BYTES),
+                    'expires_in': 900,
+                }
+            )
+        broken = FakeResponse(200, content=ZIP_BYTES)
+        broken.fail_mid_stream = requests.exceptions.ChunkedEncodingError('reset by peer')
+        routes[('get', urls[1])] = lambda **kw: FakeResponse(200, content=ZIP_BYTES)
+        routes[('get', urls[2])] = lambda **kw: broken
+        FakeSite(monkeypatch, routes)
+
+        first = self.run(tmp_path)
+
+        assert first.exit_code == 1
+        assert '1 of 2 zip files failed' in first.output and 'reset by peer' in first.output
+        assert (tmp_path / 'task-files-2026-11-17-part-1.zip').exists()
+        assert not (tmp_path / 'task-files-2026-11-17-part-2.zip').exists()
+        assert not list(tmp_path.glob('.task-files-*.part'))  # no cut-off file left behind
+
+        routes[('get', urls[2])] = lambda **kw: FakeResponse(200, content=ZIP_BYTES)
+        second = self.run(tmp_path)
+
+        assert second.exit_code == 0, second.output
+        assert (tmp_path / 'task-files-2026-11-17-part-2.zip').read_bytes() == ZIP_BYTES
+
+    def test_a_download_of_the_wrong_size_is_not_kept(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(make_export()),
+                ('get', STORAGE_URL): lambda **kw: FakeResponse(200, content=b'PK-short'),
+            },
+        )
+
+        result = self.run(tmp_path)
+
+        assert result.exit_code == 1
+        assert 'received 8 bytes, expected 21' in result.output
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['.todo_token.local']
+
+    def test_a_storage_error_is_reported(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(make_export()),
+                ('get', STORAGE_URL): FakeResponse(403, text='expired'),
+            },
+        )
+        result = self.run(tmp_path)
+        assert result.exit_code == 1 and 'storage failed (403)' in result.output
+
+    def test_a_refused_url_is_reported_with_the_apis_message(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(make_export()),
+                ('get', f'/exports/{EXPORT_ID}/parts/1/url'): FakeResponse(
+                    402, {'detail': 'Storage is paused: top up your credits.'}
+                ),
+            },
+        )
+        result = self.run(tmp_path)
+        assert result.exit_code == 1 and 'Storage is paused' in result.output
+
+    @pytest.mark.parametrize('status', ['failed', 'expired'])
+    def test_an_ended_export_has_nothing_to_download(
+        self, token_file, tmp_path, monkeypatch, status
+    ):
+        ended = make_export(status)
+        ended['parts'] = []
+        site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(ended)})
+
+        result = self.run(tmp_path)
+
+        assert result.exit_code == 1 and f'is {status}' in result.output
+
+    def test_an_unknown_export_is_the_apis_404(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): FakeResponse(404, {'detail': 'Not Found'})},
+        )
+        result = self.run(tmp_path)
+        assert result.exit_code == 1 and '404' in result.output
+
+
+@pytest.mark.usefixtures('wide_terminal')
+class TestExportListGetDelete:
+    def test_exports_lists_them(self, token_file, monkeypatch):
+        site = FakeSite(
+            monkeypatch,
+            {
+                ('get', '/exports'): ok(
+                    {'count': 3, 'limit': 1, 'offset': 0, 'results': [make_export()]}
+                )
+            },
+        )
+
+        result = invoke('exports', 'local', '--limit', '1')
+
+        assert result.exit_code == 0, result.output
+        assert site.made('get', '/exports')[0]['params'] == {'limit': 1, 'offset': 0}
+        assert EXPORT_ID in result.output and 'ready' in result.output
+        assert 'Use --offset 1 to see more' in result.output
+
+    def test_exports_with_none(self, token_file, monkeypatch):
+        FakeSite(
+            monkeypatch,
+            {('get', '/exports'): ok({'count': 0, 'limit': 20, 'offset': 0, 'results': []})},
+        )
+        result = invoke('exports', 'local')
+        assert result.exit_code == 0 and 'No exports' in result.output
+
+    def test_export_get_shows_everything_and_the_parts(self, token_file, monkeypatch):
+        export = make_export(skipped_count=1, refunded_credits=3)
+        export['filters']['summary'] = ['Task created: from Jan 1, 2026 [red]x[/red]']
+        FakeSite(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(export)})
+
+        result = invoke('export-get', 'local', EXPORT_ID)
+
+        assert result.exit_code == 0, result.output
+        out = result.output
+        assert 'Status: ready' in out and 'Charged: 9 credits' in out
+        assert 'Refunded: 3 credits' in out and '1 left out' in out
+        assert 'Task created: from Jan 1, 2026 [red]x[/red]' in out  # shown as typed
+        assert 'task-files-2026-11-17-part-1.zip' in out
+        assert 'Expires: 2026-12-17T09:00:30Z' in out
+
+    def test_export_get_of_every_task(self, token_file, monkeypatch):
+        FakeSite(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())})
+        result = invoke('export-get', 'local', EXPORT_ID)
+        assert 'Selection: every task' in result.output
+
+    def test_export_get_of_another_users_is_a_404(self, token_file, monkeypatch):
+        FakeSite(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): FakeResponse(404, {'detail': 'Not Found'})},
+        )
+        result = invoke('export-get', 'local', EXPORT_ID)
+        assert result.exit_code == 1 and '404' in result.output
+
+    def test_export_delete_asks_first(self, token_file, monkeypatch):
+        site = FakeSite(monkeypatch, {('delete', f'/exports/{EXPORT_ID}'): FakeResponse(204)})
+
+        declined = invoke('export-delete', 'local', EXPORT_ID, input='n\n')
+        assert declined.exit_code == 1 and site.made('delete', f'/exports/{EXPORT_ID}') == []
+
+        accepted = invoke('export-delete', 'local', EXPORT_ID, input='y\n')
+        assert accepted.exit_code == 0 and 'Deleted.' in accepted.output
+        assert len(site.made('delete', f'/exports/{EXPORT_ID}')) == 1
+
+    def test_export_delete_yes_skips_the_question(self, token_file, monkeypatch):
+        site = FakeSite(monkeypatch, {('delete', f'/exports/{EXPORT_ID}'): FakeResponse(204)})
+        result = invoke('export-delete', 'local', EXPORT_ID, '--yes')
+        assert result.exit_code == 0 and len(site.calls) == 1
+
+    def test_export_delete_while_building_shows_the_409(self, token_file, monkeypatch):
+        FakeSite(
+            monkeypatch,
+            {
+                ('delete', f'/exports/{EXPORT_ID}'): FakeResponse(
+                    409, {'detail': 'This export is still being prepared.'}
+                )
+            },
+        )
+        result = invoke('export-delete', 'local', EXPORT_ID, '--yes')
+        assert result.exit_code == 1 and 'still being prepared' in result.output
+
+    def test_they_need_a_login(self, logged_out):
+        for args in (['exports', 'local'], ['export-get', 'local', EXPORT_ID]):
+            assert invoke(*args).exit_code == 1
+        assert invoke('export-delete', 'local', EXPORT_ID, '--yes').exit_code == 1
+
+
+@pytest.mark.usefixtures('wide_terminal')
+class TestExportXlsx:
+    HEADERS = {'Content-Disposition': 'attachment; filename="tasks-2026-11-17.xlsx"'}
+
+    def site(self, monkeypatch, response=None) -> FakeSite:
+        return FakeSite(
+            monkeypatch,
+            {
+                ('get', '/export.xlsx'): response
+                or FakeResponse(200, content=XLSX_BYTES, headers=self.HEADERS)
+            },
+        )
+
+    def test_writes_the_workbook(self, token_file, tmp_path, monkeypatch):
+        site = self.site(monkeypatch)
+        out = tmp_path / 'tasks.xlsx'
+
+        result = invoke('export-xlsx', 'local', '--out', str(out))
+
+        assert result.exit_code == 0, result.output
+        assert out.read_bytes() == XLSX_BYTES
+        assert f'Wrote {out} ({len(XLSX_BYTES):,} bytes).' in result.output
+        (call,) = site.made('get', '/export.xlsx')
+        assert call['params'] == {} and call['stream'] is True
+        assert call['headers'] == {'Authorization': 'Bearer tok'}
+        assert not list(tmp_path.glob('.*.part'))
+
+    def test_the_range_is_sent(self, token_file, tmp_path, monkeypatch):
+        site = self.site(monkeypatch)
+
+        result = invoke(
+            'export-xlsx',
+            'local',
+            '--out',
+            str(tmp_path / 't.xlsx'),
+            '--range',
+            'custom',
+            '--from',
+            '2026-07-01',
+            '--to',
+            '2026-09-30',
+        )
+
+        assert result.exit_code == 0, result.output
+        assert site.made('get', '/export.xlsx')[0]['params'] == {
+            'date_range': 'custom',
+            'date_from': '2026-07-01',
+            'date_to': '2026-09-30',
+        }
+
+    def test_a_preset_is_sent_as_the_api_names_it(self, token_file, tmp_path, monkeypatch):
+        site = self.site(monkeypatch)
+        invoke('export-xlsx', 'local', '--out', str(tmp_path / 't.xlsx'), '--range', 'this-year')
+        assert site.made('get', '/export.xlsx')[0]['params'] == {'date_range': 'this_year'}
+
+    def test_a_bad_range_fails_before_any_request(self, token_file, tmp_path, monkeypatch):
+        site = self.site(monkeypatch)
+
+        result = invoke(
+            'export-xlsx', 'local', '--out', str(tmp_path / 't.xlsx'), '--range', 'sometime'
+        )
+
+        assert result.exit_code == 1 and 'Choose --range' in result.output
+        assert site.calls == []
+
+    def test_an_existing_file_is_refused_before_the_request(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = self.site(monkeypatch)
+        out = tmp_path / 'tasks.xlsx'
+        out.write_bytes(b'mine')
+
+        result = invoke('export-xlsx', 'local', '--out', str(out))
+
+        assert result.exit_code == 1 and 'Use --force' in result.output
+        assert out.read_bytes() == b'mine' and site.calls == []
+
+    def test_force_replaces_it(self, token_file, tmp_path, monkeypatch):
+        self.site(monkeypatch)
+        out = tmp_path / 'tasks.xlsx'
+        out.write_bytes(b'mine')
+
+        assert invoke('export-xlsx', 'local', '--out', str(out), '--force').exit_code == 0
+        assert out.read_bytes() == XLSX_BYTES
+
+    def test_a_folder_gets_the_file_name_the_site_gave(self, token_file, tmp_path, monkeypatch):
+        self.site(monkeypatch)
+
+        result = invoke('export-xlsx', 'local', '--out', str(tmp_path))
+
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / 'tasks-2026-11-17.xlsx').read_bytes() == XLSX_BYTES
+
+    def test_a_file_in_the_folder_is_refused_without_force(self, token_file, tmp_path, monkeypatch):
+        self.site(monkeypatch)
+        (tmp_path / 'tasks-2026-11-17.xlsx').write_bytes(b'mine')
+
+        result = invoke('export-xlsx', 'local', '--out', str(tmp_path))
+
+        assert result.exit_code == 1 and 'Use --force' in result.output
+        assert (tmp_path / 'tasks-2026-11-17.xlsx').read_bytes() == b'mine'
+
+    def test_a_missing_folder_fails_before_the_request(self, token_file, tmp_path, monkeypatch):
+        site = self.site(monkeypatch)
+
+        result = invoke('export-xlsx', 'local', '--out', str(tmp_path / 'nope' / 't.xlsx'))
+
+        assert result.exit_code == 1 and 'Not a folder' in result.output
+        assert site.calls == []
+
+    @pytest.mark.parametrize(
+        ('response', 'message'),
+        [
+            (FakeResponse(400, {'detail': 'date_from must be a date like 2026-10-09.'}), '400'),
+            (FakeResponse(401, {'detail': 'Invalid token'}), 'login'),
+            (FakeResponse(429, {'detail': 'Slow down'}, headers={'Retry-After': '3000'}), '50 min'),
+        ],
+    )
+    def test_an_error_writes_no_file(self, token_file, tmp_path, monkeypatch, response, message):
+        self.site(monkeypatch, response)
+        out = tmp_path / 'tasks.xlsx'
+
+        result = invoke('export-xlsx', 'local', '--out', str(out), '--from', 'x')
+
+        assert result.exit_code == 1 and message in result.output
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['.todo_token.local']
+
+    def test_a_mid_stream_failure_leaves_no_partial_file(self, token_file, tmp_path, monkeypatch):
+        broken = FakeResponse(200, content=XLSX_BYTES, headers=self.HEADERS)
+        broken.fail_mid_stream = requests.exceptions.ChunkedEncodingError('reset by peer')
+        self.site(monkeypatch, broken)
+        out = tmp_path / 'tasks.xlsx'
+
+        result = invoke('export-xlsx', 'local', '--out', str(out))
+
+        assert result.exit_code == 1 and 'nothing written' in result.output
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['.todo_token.local']
+
+    def test_it_requires_out(self, token_file):
+        assert invoke('export-xlsx', 'local').exit_code != 0
+
+    def test_it_needs_a_login(self, logged_out, tmp_path):
+        assert invoke('export-xlsx', 'local', '--out', str(tmp_path / 't.xlsx')).exit_code == 1
+
+
+def test_the_export_ranges_are_the_backends():
+    """`--range` offers exactly the `date_range` values the API accepts."""
+    from apps.core.date_ranges import DATE_RANGES
+
+    assert set(todo.EXPORT_RANGES.values()) == {key for key, _label in DATE_RANGES}
+    assert all(typed == name.replace('_', '-') for typed, name in todo.EXPORT_RANGES.items())
+
+
+def test_size_text():
+    assert todo._size_text(884) == '884 B'
+    assert todo._size_text(1536) == '1.5 KB'
+    assert todo._size_text(100 * 1024 * 1024) == '100.0 MB'
+    assert todo._size_text(3 * 1024**3) == '3.0 GB'

@@ -7,8 +7,10 @@ Command line interface for the To-do JWT API (`/api/todo/`, issue #187), on the 
 you: "pay rent every month on the 1st"), list and search them, read and edit one, change its state
 (to do, in progress, on hold; blocked is set by blockers), close it as done or won't do and reopen
 it, block it by other tasks, read its history, postpone, trash and restore, comment, manage labels
-and reminders, attach and download files, run saved filters, and see or change the settings and the
-address tasks can be emailed to.
+and reminders, attach and download files, download all the files of the tasks created in a date
+range as zip files and export the tasks as a spreadsheet (`export-files` and its companions,
+issue #326), run saved filters, and see or change the settings and the address tasks can be
+emailed to.
 
 A task is addressed by its number (the `1234` of `#1234`). The first 10 tasks of a month are free,
 then each costs credits; commands that create tasks say what they charged.
@@ -18,6 +20,8 @@ import base64
 import hashlib
 import mimetypes
 import re
+import shlex
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
@@ -34,6 +38,8 @@ from .utils import (
     api_error_text,
     api_request,
     api_url,
+    current_environment,
+    format_wait,
     get_headers,
     logger,
     password_from_prompt_or_env,
@@ -60,6 +66,28 @@ FILE_DOWNLOAD_TIMEOUT_SECONDS = 600
 # Read a file for hashing in chunks rather than all at once.
 HASH_CHUNK_BYTES = 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 64 * 1024
+# Exports (issue #326): how often to ask whether it is ready (3 s at first, backing off by half
+# again each time to at most 15 s: a zip file takes far longer to build than 3 s) and how long to
+# wait for it by default (minutes). A zip file is about 100 MB.
+EXPORT_POLL_SECONDS = 3
+EXPORT_POLL_MAX_SECONDS = 15
+EXPORT_WAIT_MINUTES = 30
+#: What `--range` accepts (as typed, any case, `-` or `_`) -> what the API calls it. These are the
+#: keys of `apps.core.date_ranges.DATE_RANGES`; a test fails when the two drift apart.
+EXPORT_RANGES: dict[str, str] = {
+    name.replace('_', '-'): name
+    for name in (
+        'any',
+        'last_15_days',
+        'last_30_days',
+        'this_month',
+        'this_quarter',
+        'this_year',
+        'custom',
+    )
+}
+#: The start of every zip file's name (`task-files-2026-11-17-part-01-of-02.zip`).
+EXPORT_ZIP_GLOB = 'task-files-*.zip'
 
 REPEAT = '\N{CLOCKWISE OPEN CIRCLE ARROW}'
 BELL = '\N{BELL}'
@@ -2153,6 +2181,595 @@ def todo_regenerate(environment: EnvironmentAnnotation, yes: YesAnnotation = Fal
     _confirm('Retire the current address? Mail sent to it from now on is dropped.', yes)
     inbox = _call('post', '/inbox/regenerate')
     _say(f'Your new address: {inbox["address"]}')
+
+
+# -- Commands: exports (issue #326) -------------------------------------------------------------
+
+
+def _size_text(size: int) -> str:
+    """`884 B`, `12.3 MB` (1,024-based, like the website)."""
+    value = float(size)
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if value < 1024 or unit == 'GB':
+            return f'{int(value)} B' if unit == 'B' else f'{value:.1f} {unit}'
+        value /= 1024
+    return f'{size} B'  # pragma: no cover - the loop always returns
+
+
+def _range_body(range_: str | None, date_from: str | None, date_to: str | None) -> dict:
+    """The "Task created" range as the export endpoints take it. Checked here, before any
+    request: `--range` is one of `EXPORT_RANGES`, and the dates go with `--range custom` (or with
+    no `--range`, which the API reads as Custom)."""
+    body: dict = {}
+    if range_:
+        key = range_.strip().lower().replace('_', '-')
+        if key not in EXPORT_RANGES:
+            raise _fail(f'Choose --range {", ".join(EXPORT_RANGES)}.')
+        body['date_range'] = EXPORT_RANGES[key]
+        if EXPORT_RANGES[key] != 'custom' and (date_from or date_to):
+            raise _fail('--from and --to go with --range custom, not with another range.')
+    for name, value in (('date_from', date_from), ('date_to', date_to)):
+        if value:
+            body[name] = value
+    return body
+
+
+def _export_path(export_id: str, suffix: str = '') -> str:
+    return f'/exports/{export_id}{suffix}'
+
+
+def _describe_quote(quote: dict) -> None:
+    files = quote['file_count']
+    parts = quote['part_count']
+    _say(
+        f'{files} file{"" if files == 1 else "s"} ({_size_text(quote["total_bytes"])}) in '
+        f'{parts} zip file{"" if parts == 1 else "s"} of about '
+        f'{_size_text(quote["part_bytes"])} each, with a tasks.xlsx of the tasks and comments.'
+    )
+    _say(
+        f'Cost: {_credits(quote["cost"])} ({quote["price_per_file"]} per file). '
+        f'Your balance is {quote["balance"]}. They stay available for {quote["retention_days"]} '
+        'days.'
+    )
+
+
+def _fetch_hint(export_id: str, out: Path) -> str:
+    return (
+        f'Fetch it later with: todo export-download {current_environment()} {export_id} '
+        f'--out {shlex.quote(str(out))}'
+    )
+
+
+def _refused_creating(response) -> str:
+    """Why creating the export was refused with a 409 (nothing was charged): another export is
+    being prepared, or the cost is no longer the one that was quoted. The API words are for an API
+    client (its cost message says to send `expected_cost`), so a changed cost is put in the CLI's
+    own words and says to run the command again for the new quote."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    detail = body.get('detail') if isinstance(body, dict) else None
+    if isinstance(detail, str) and detail.startswith('The cost changed'):
+        return (
+            'The cost changed since it was quoted, so nothing was charged. Run the command again '
+            'to see the new quote.'
+        )
+    return (
+        f'{_error_message(response).rstrip(".")}. Check `todo exports {current_environment()}`, then '
+        'try again.'
+    )
+
+
+def _wait_for_export(export_id: str, minutes: float, hint: str) -> dict:
+    """Poll the export until it is no longer being prepared; returns it. Ctrl-C, running out of
+    time and an error that ends the wait all leave it building (it carries on in the background)
+    and say how to fetch it later. A dropped connection, a 5xx and a 429 that `api_request` gave
+    up on are not errors: they are tried again until the time is up."""
+    limit = minutes * 60
+    waited = 0.0
+    delay = float(EXPORT_POLL_SECONDS)
+    shown: int | None = None
+    _say('Preparing your zip files (Ctrl-C stops waiting; the export carries on without you)...')
+    try:
+        while True:
+            problem: str | None = None
+            try:
+                response = _request('get', _export_path(export_id), exit_on_error=False)
+            except NetworkError as e:
+                problem = f'Could not reach the site ({e})'
+            else:
+                if response.status_code >= 500 or response.status_code == 429:
+                    problem = f'The site answered {response.status_code}'
+                else:
+                    try:
+                        _check(response)
+                    except typer.Exit:
+                        _say(hint)
+                        raise
+                    export = response.json()
+                    if export['status'] != 'building':
+                        return export
+                    built = sum(1 for part in export['parts'] if part['built'])
+                    if built != shown:
+                        shown = built
+                        _say(f'Written so far: {built} of {export["part_count"]} zip files.')
+            if problem:
+                logger.warning(escape(f'{problem}; trying again...'))
+            if waited >= limit:
+                _say(f'Still not ready after {format_wait(limit)}. {hint}')
+                raise typer.Exit(1)
+            time.sleep(delay)
+            waited += delay
+            delay = min(delay * 1.5, float(EXPORT_POLL_MAX_SECONDS))
+    except KeyboardInterrupt:
+        _say(f'Stopped waiting. The export is still being prepared. {hint}')
+        raise typer.Exit(130) from None
+
+
+class DownloadFailed(Exception):
+    """One zip file could not be downloaded; the message says why. The rest carry on."""
+
+
+def _download_part(export_id: str, part: dict, target: Path) -> None:
+    """Download one zip file: ask the API for a short-lived URL, then stream it **without the API
+    token** (it is a presigned storage URL) to `.<name>.part` next to `target`, renamed into place
+    only once complete and of the size the export says, so an interrupted download never leaves a
+    cut-off zip behind.
+
+    Raises:
+        DownloadFailed: with the reason.
+    """
+    import requests
+
+    try:
+        info = _request(
+            'get', _export_path(export_id, f'/parts/{part["number"]}/url'), exit_on_error=False
+        )
+    except NetworkError as e:
+        raise DownloadFailed(str(e)) from e
+    if not info.ok:
+        raise DownloadFailed(_error_message(info))
+    ticket = info.json()
+    try:
+        response = api_request(
+            'get',
+            ticket['url'],
+            stream=True,
+            exit_on_error=False,
+            timeout=FILE_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+    except NetworkError as e:
+        raise DownloadFailed(f'download failed: {e}') from e
+    try:
+        if not response.ok:
+            raise DownloadFailed(f'the download from storage failed ({response.status_code})')
+        partial = target.with_name(f'.{target.name}.part')
+        size = 0
+        try:
+            with partial.open('wb') as fh:
+                for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_BYTES):
+                    fh.write(chunk)
+                    size += len(chunk)
+            if size != ticket['size_bytes']:
+                raise DownloadFailed(f'received {size} bytes, expected {ticket["size_bytes"]}')
+            partial.replace(target)
+        except (requests.exceptions.RequestException, OSError) as e:
+            partial.unlink(missing_ok=True)
+            raise DownloadFailed(f'download failed: {e}') from e
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+    finally:
+        response.close()
+
+
+def _download_export(
+    export: dict, out: Path, *, force: bool, resume: bool = False, paid: bool = False
+) -> None:
+    """Download every zip file of a ready export into the folder `out` (created if needed).
+
+    Before anything is downloaded, a file of the same name is refused unless `force` is set
+    (`--force` replaces it). With `resume` (`export-download`, for finishing an interrupted run) a
+    file that is already complete (the size the export says) is skipped instead of refused, and
+    only one of a different size is. `paid` says the export was just created and charged (a clash
+    then points at `export-download`, not at making another). Exits 1 if any file failed (the
+    others are still downloaded).
+
+    Resuming compares sizes only (the API has no checksum per file), so use a folder per export.
+    """
+    parts = [part for part in export['parts'] if part['built']]
+    if not parts:
+        raise _fail('This export has no zip files to download.')
+    targets: list[tuple[dict, Path]] = []
+    for part in parts:
+        name = Path(part['filename']).name
+        if name in ('', '.', '..'):
+            raise _fail(f'The site gave an unusable file name: {part["filename"]!r}.')
+        targets.append((part, out / name))
+    clashes = [
+        target
+        for part, target in targets
+        if target.exists()
+        and not force
+        and not (resume and target.stat().st_size == part['size_bytes'])
+    ]
+    if clashes:
+        listing = ', '.join(str(target) for target in clashes)
+        if paid:
+            raise _fail(
+                f'{listing} already exists. The export is paid for and ready: run `todo '
+                f'export-download {current_environment()} {export["id"]} --out <a folder for this '
+                'export>` (add --force to replace the existing file) rather than exporting '
+                'again, which would charge a second time.'
+            )
+        raise _fail(f'{listing} already exists. Use --force to replace it.')
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise _fail(f'Could not create {out}: {e}') from e
+
+    failed = 0
+    try:
+        for part, target in targets:
+            if resume and not force and target.exists():
+                _say(f'{target.name}: already downloaded, skipped.')
+                continue
+            _say(f'{target.name}: downloading {_size_text(part["size_bytes"])}...')
+            try:
+                _download_part(export['id'], part, target)
+            except DownloadFailed as e:
+                failed += 1
+                logger.error(escape(f'{target.name}: {e}'))
+            else:
+                _say(f'Wrote {target}.')
+    except KeyboardInterrupt:
+        # The part being written was cleaned up; the export is paid for and ready, so say how to
+        # get the rest without paying again (as Ctrl-C while waiting does).
+        _say(
+            f'Stopped downloading. The export is ready and paid for. {_fetch_hint(export["id"], out)}'
+        )
+        raise typer.Exit(130) from None
+    if failed:
+        raise _fail(
+            f'{failed} of {len(targets)} zip files failed. Run `todo export-download '
+            f'{current_environment()} {export["id"]} --out {shlex.quote(str(out))}` to get the '
+            'rest.'
+        )
+    _say(f'Downloaded {len(targets)} zip file{"" if len(targets) == 1 else "s"} to {out}.')
+
+
+@app.command(name='export-files')
+def todo_export_files(
+    environment: EnvironmentAnnotation,
+    date_range: str | None = typer.Option(
+        None,
+        '--range',
+        help='Tasks created in: any, last-15-days, last-30-days, this-month, this-quarter, '
+        'this-year or custom (default: any, or custom when --from/--to is given).',
+    ),
+    date_from: str | None = typer.Option(
+        None, '--from', help='Earliest creation date, YYYY-MM-DD (with --range custom).'
+    ),
+    date_to: str | None = typer.Option(
+        None, '--to', help='Latest creation date, YYYY-MM-DD, inclusive (with --range custom).'
+    ),
+    out: Path = typer.Option(
+        Path('.'), '--out', '-o', help='The folder to save the zip files in (created if needed).'
+    ),
+    yes: bool = typer.Option(
+        False, '--yes', '-y', help='Do not ask to confirm the cost (and accept whatever it is).'
+    ),
+    force: bool = typer.Option(False, '--force', help='Replace zip files that already exist.'),
+    wait: float = typer.Option(
+        EXPORT_WAIT_MINUTES, '--wait', help='Minutes to wait for the zip files to be prepared.'
+    ),
+):
+    """
+    Download the files attached to the tasks you created in a date range (and to their comments;
+    never the Trash) as zip files: each of about 100 MB, independent, the first with a tasks.xlsx
+    of the tasks and comments. It costs credits per file (nothing is asked for a free export), so
+    the cost is shown and you are asked to confirm it first. The zip files are prepared in the
+    background; this command waits for them and downloads them. Ctrl-C stops waiting without
+    cancelling the export. Use a folder of its own for each export: files are told apart by name
+    and size only.
+
+    Example:
+        todo export-files local --out ./my-task-files
+        todo export-files local --out ./2026 --from 2026-01-01 --to 2026-12-31
+        todo export-files prod --range this-year --yes
+    """
+    select_environment(environment)
+    get_headers(CLI)
+    body = _range_body(date_range, date_from, date_to)
+    if out.exists() and not out.is_dir():
+        raise _fail(f'Not a folder: {out}')
+    # Before anything is quoted or charged: a folder that already holds zip files of an export
+    # would clash with the new ones (their names are task-files-<date>[-part-NN-of-MM].zip).
+    existing = sorted(out.glob(EXPORT_ZIP_GLOB)) if out.is_dir() else []
+    if existing and not force:
+        raise _fail(
+            f'{out} already holds {", ".join(p.name for p in existing)}. Use an empty folder '
+            '(--out), or --force to replace files of the same name. Nothing was charged.'
+        )
+
+    quote = _call('post', '/exports/quote', json=body)
+    if quote['file_count'] == 0:
+        raise _fail(
+            'There are no files to download in this range. Use `todo export-xlsx '
+            f'{current_environment()} --out tasks.xlsx` for the task list.'
+        )
+    _describe_quote(quote)
+    if quote['frozen']:
+        raise _fail('Storage is paused until you add credits.')
+    if not quote['affordable']:
+        raise _fail(
+            f'That costs {_credits(quote["cost"])} and your balance is {quote["balance"]}. '
+            'Top up your credits on the website.'
+        )
+
+    # `--yes` accepts whatever it costs (no `expected_cost` is sent); otherwise the amount that was
+    # shown and confirmed is sent, so a cost that changed meanwhile is refused, not charged. A free
+    # export is not asked about.
+    create_body = body
+    if not yes:
+        if quote['cost'] > 0 and not typer.confirm(
+            f'This costs {_credits(quote["cost"])}. Continue?'
+        ):
+            raise _fail('Cancelled; nothing was charged.')
+        create_body = {**body, 'expected_cost': quote['cost']}
+
+    created = _request('post', '/exports', json=create_body)
+    if created.status_code == 409:
+        # Another export is being prepared, or the cost changed since it was quoted: either way
+        # nothing was charged, and the message says which.
+        raise _fail(_refused_creating(created))
+    _check(created)
+    export = created.json()
+    if export['charged_credits']:
+        _say(f'Charged {_credits(export["charged_credits"])}.')
+    _say(f'Export {export["id"]} started.')
+
+    export = _wait_for_export(export['id'], wait, _fetch_hint(export['id'], out))
+    if export['status'] != 'ready':
+        refunded = export['refunded_credits']
+        raise _fail(
+            f'The export {export["status"]}'
+            + (f' and {_credits(refunded)} were refunded.' if refunded else '.')
+        )
+    if export['skipped_count']:
+        _say(
+            f'{export["skipped_count"]} file(s) had vanished and were left out '
+            f'({_credits(export["refunded_credits"])} refunded).'
+        )
+    _download_export(export, out, force=force, paid=True)
+
+
+@app.command(name='exports')
+def todo_exports(
+    environment: EnvironmentAnnotation,
+    limit: int = typer.Option(20, '--limit', help='Max exports to show (1-100).'),
+    offset: int = typer.Option(0, '--offset', help='Number of exports to skip.'),
+):
+    """
+    List your exports of files (see `export-files`), newest first.
+
+    Example:
+        todo exports local
+    """
+    select_environment(environment)
+    body = _call('get', '/exports', params={'limit': limit, 'offset': offset})
+    exports = body['results']
+    if not exports:
+        _say('No exports.')
+        return
+
+    table = Table(title='Your Exports')
+    table.add_column('ID', style='cyan', no_wrap=True)
+    table.add_column('Created', style='white', no_wrap=True)
+    table.add_column('Status', style='green', no_wrap=True)
+    table.add_column('Files', style='white', justify='right')
+    table.add_column('Charged', style='magenta', justify='right')
+    table.add_column('Expires', style='white', no_wrap=True)
+    for export in exports:
+        table.add_row(
+            export['id'],
+            export['created_at'][:10],
+            export['status'],
+            str(export['file_count']),
+            str(export['charged_credits']),
+            (export['expires_at'] or '')[:10],
+        )
+    _console().print(table)
+
+    shown_through = body['offset'] + len(exports)
+    if shown_through < body['count']:
+        _say(
+            f'Showing {body["offset"] + 1}-{shown_through} of {body["count"]}. '
+            f'Use --offset {shown_through} to see more.'
+        )
+
+
+@app.command(name='export-get')
+def todo_export_get(environment: EnvironmentAnnotation, export_id: str):
+    """
+    Show one export: its status, what it was made from, the cost and its zip files.
+
+    Example:
+        todo export-get local 1b6e2f4a-...
+    """
+    select_environment(environment)
+    export = _call('get', _export_path(export_id))
+
+    console = _console()
+    selection = '; '.join(export['filters']['summary']) or 'every task'
+    files = f'{export["file_count"]}'
+    if export['skipped_count']:
+        files += f' ({export["skipped_count"]} left out: gone when zipped)'
+    ready_parts = sum(1 for part in export['parts'] if part['built'])
+    rows = [
+        ('ID', export['id']),
+        ('Status', export['status']),
+        ('Selection', selection),
+        ('Files', files),
+        ('Size', _size_text(export['total_bytes'])),
+        ('Zip files', f'{export["part_count"]} ({ready_parts} written)'),
+        ('Charged', _credits(export['charged_credits'])),
+        ('Refunded', _credits(export['refunded_credits']) if export['refunded_credits'] else ''),
+        ('Created', export['created_at']),
+        ('Ready', export['ready_at'] or ''),
+        ('Expires', export['expires_at'] or ''),
+    ]
+    for label, value in rows:
+        if value:
+            console.print(f'[cyan]{label}:[/cyan] {escape(str(value))}', highlight=False)
+
+    if export['parts']:
+        table = Table(title='Zip files')
+        table.add_column('#', style='cyan', justify='right', no_wrap=True)
+        table.add_column('Name', style='white')
+        table.add_column('Files', style='white', justify='right')
+        table.add_column('Size', style='white', justify='right')
+        table.add_column('Written', style='green', no_wrap=True)
+        for part in export['parts']:
+            table.add_row(
+                str(part['number']),
+                part['filename'],
+                str(part['file_count']),
+                _size_text(part['size_bytes']) if part['built'] else '',
+                'yes' if part['built'] else 'no',
+            )
+        console.print(table)
+
+
+@app.command(name='export-download')
+def todo_export_download(
+    environment: EnvironmentAnnotation,
+    export_id: str,
+    out: Path = typer.Option(
+        Path('.'), '--out', '-o', help='The folder to save the zip files in (created if needed).'
+    ),
+    force: bool = typer.Option(False, '--force', help='Replace zip files that already exist.'),
+    wait: float = typer.Option(
+        EXPORT_WAIT_MINUTES, '--wait', help='Minutes to wait if it is still being prepared.'
+    ),
+):
+    """
+    Download the zip files of an export (waits for it if it is still being prepared). Each is
+    written to a temporary file and renamed when complete. A file that is already there with the
+    right size is skipped, so an interrupted download can be finished by running this again; one
+    with a different size is refused unless you pass --force. Use a folder of its own for each
+    export: files are told apart by name and size only (there is no checksum), so a zip file of
+    another export with the same name and size would be taken for this one. No credits are charged.
+
+    Example:
+        todo export-download local 1b6e2f4a-... --out ./my-task-files
+    """
+    select_environment(environment)
+    get_headers(CLI)
+    if out.exists() and not out.is_dir():
+        raise _fail(f'Not a folder: {out}')
+    export = _call('get', _export_path(export_id))
+    if export['status'] == 'building':
+        export = _wait_for_export(export_id, wait, _fetch_hint(export_id, out))
+    if export['status'] != 'ready':
+        raise _fail(
+            f'This export is {export["status"]}, so there is nothing to download. '
+            'Start a new one with `export-files`.'
+        )
+    _download_export(export, out, force=force, resume=True)
+
+
+@app.command(name='export-delete')
+def todo_export_delete(
+    environment: EnvironmentAnnotation,
+    export_id: str,
+    yes: YesAnnotation = False,
+):
+    """
+    Delete an export: its zip files are removed now. Nothing is refunded. An export that is still
+    being prepared can't be deleted.
+
+    Example:
+        todo export-delete local 1b6e2f4a-...
+    """
+    select_environment(environment)
+    get_headers(CLI)
+    _confirm('The zip files are deleted now and nothing is refunded. Delete?', yes)
+    _call('delete', _export_path(export_id))
+    _say('Deleted.')
+
+
+def _content_disposition_name(response) -> str | None:
+    """The file name of a `Content-Disposition: attachment; filename="..."` header, if any."""
+    match = re.search(r'filename="?([^";]+)"?', response.headers.get('Content-Disposition', ''))
+    return Path(match.group(1).replace('\\', '/')).name if match else None
+
+
+@app.command(name='export-xlsx')
+def todo_export_xlsx(
+    environment: EnvironmentAnnotation,
+    out: Path = typer.Option(
+        ..., '--out', '-o', help='Where to write the workbook: a file, or an existing folder.'
+    ),
+    date_range: str | None = typer.Option(
+        None, '--range', help='As for `export-files`: tasks created in this range.'
+    ),
+    date_from: str | None = typer.Option(None, '--from', help='Earliest creation date.'),
+    date_to: str | None = typer.Option(None, '--to', help='Latest creation date, inclusive.'),
+    force: bool = typer.Option(False, '--force', help='Replace the file if it exists.'),
+):
+    """
+    Export the tasks created in a date range as a spreadsheet (tasks.xlsx: a Tasks sheet and a
+    Comments sheet, with the attached files' names). Free; the Trash is never exported. It is
+    written to a temporary file next to --out and renamed into place only when complete.
+
+    Example:
+        todo export-xlsx local --out tasks.xlsx
+        todo export-xlsx local --out ./exports --range this-year
+        todo export-xlsx local --out q3.xlsx --from 2026-07-01 --to 2026-09-30 --force
+    """
+    select_environment(environment)
+    get_headers(CLI)
+    params = _range_body(date_range, date_from, date_to)
+    # Checked before the request: it spends one of the few per-minute exports.
+    into_folder = out.is_dir()
+    if not into_folder and not out.parent.is_dir():
+        raise _fail(f'Not a folder: {out.parent}')
+    if not into_folder and out.exists() and not force:
+        raise _fail(f'{out} already exists. Use --force to replace it.')
+
+    import requests
+
+    response = _request(
+        'get',
+        '/export.xlsx',
+        params=params,
+        stream=True,
+        timeout=FILE_DOWNLOAD_TIMEOUT_SECONDS,
+    )
+    try:
+        _check(response)
+        target = out / (_content_disposition_name(response) or 'tasks.xlsx') if into_folder else out
+        if into_folder and target.exists() and not force:
+            raise _fail(f'{target} already exists. Use --force to replace it.')
+        partial = target.with_name(f'.{target.name}.part')
+        size = 0
+        try:
+            with partial.open('wb') as fh:
+                for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_BYTES):
+                    fh.write(chunk)
+                    size += len(chunk)
+            partial.replace(target)
+        except (requests.exceptions.RequestException, OSError) as e:
+            partial.unlink(missing_ok=True)
+            raise _fail(f'Export failed, nothing written to {target}: {e}') from e
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+    finally:
+        response.close()
+    _say(f'Wrote {target} ({size:,} bytes).')
 
 
 if __name__ == '__main__':

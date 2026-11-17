@@ -423,6 +423,35 @@ class TestRateLimit:
         assert second.status_code == 429 and second['HX-Retarget'] == '#export-msg'
         assert not ReceiptExport.objects.exists()
 
+    def test_over_the_files_limit_nothing_is_read_or_spent(
+        self, web, funded_user, three, settings, monkeypatch
+    ):
+        from apps.core import ratelimit
+        from apps.receipts.views import exports as views
+
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'RECEIPTS_EXPORT_DIALOG_USER': (5, 60),
+        }
+        assert post_new(web).status_code == 200
+        ReceiptExport.objects.update(status=ExportStatus.READY)
+        reads: list[int] = []
+        real = views.prepare_export
+        monkeypatch.setattr(
+            views, 'prepare_export', lambda *a, **k: reads.append(1) or real(*a, **k)
+        )
+        dialog_left = ratelimit.peek_user(funded_user, 'RECEIPTS_EXPORT_DIALOG_USER').remaining
+
+        for data in ({}, {}, {'confirm_cost': '1'}):
+            limited = post_new(web, **data)
+            assert limited.status_code == 429 and limited['HX-Retarget'] == '#export-msg'
+
+        assert reads == []  # not one whole-list read
+        assert (
+            ratelimit.peek_user(funded_user, 'RECEIPTS_EXPORT_DIALOG_USER').remaining == dialog_left
+        )
+        assert ReceiptExport.objects.count() == 1
+
     def test_opening_the_dialog_is_limited(self, web, three):
         first = web.get(reverse(NEW), **HTMX)
         second = web.get(reverse(NEW), **HTMX)

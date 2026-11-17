@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
 from apps.billing.services import add_credits, get_balance, spend_credits
+from apps.core import ratelimit
 
 from ..models import ExportStatus, ReceiptExport, ReceiptStatus
 from ..services import exports as svc
@@ -323,6 +324,30 @@ class TestCreate:
         ReceiptsAccount.objects.filter(pk=funded_user.pk).update(frozen_at=None)
         add_credits(funded_user, 100, description='top up', source='test')
         assert post(client, '/exports', auth).status_code == 201
+
+    def test_over_the_files_limit_nothing_is_read_or_spent(
+        self, client, auth, three, funded_user, settings, monkeypatch
+    ):
+        limit_rule(settings, 'RECEIPTS_EXPORT_FILES_USER')
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'RECEIPTS_EXPORT_DIALOG_USER': (5, 60),
+        }
+        assert post(client, '/exports', auth).status_code == 201
+        ReceiptExport.objects.update(status=ExportStatus.READY)
+        reads: list[int] = []
+        real = svc.prepare_export
+        monkeypatch.setattr(svc, 'prepare_export', lambda *a, **k: reads.append(1) or real(*a, **k))
+        dialog_left = ratelimit.peek_user(funded_user, 'RECEIPTS_EXPORT_DIALOG_USER').remaining
+
+        for body in ({}, {}, {'expected_cost': 1}):
+            assert post(client, '/exports', auth, body).status_code == 429
+
+        assert reads == []  # not one whole-list read
+        assert (
+            ratelimit.peek_user(funded_user, 'RECEIPTS_EXPORT_DIALOG_USER').remaining == dialog_left
+        )
+        assert ReceiptExport.objects.count() == 1
 
     def test_refusals_that_read_the_list_spend_the_dialog_budget(
         self, client, auth, three, funded_user, settings

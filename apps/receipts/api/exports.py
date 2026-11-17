@@ -93,13 +93,16 @@ def create_export(request, payload: ReceiptExportCreateSchema):
 
     400 for a bad layout or filter or when no file matches; 402 while the account is frozen or the
     balance can't pay; 409 while another export is being prepared (one at a time) or the cost
-    changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend, or over
-    `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list read of a refused request spends."""
+    changed; 429 over `RECEIPTS_EXPORT_FILES_USER`, which a refused request does not spend and which
+    is told before anything is read, or over `RECEIPTS_EXPORT_DIALOG_USER`, which the whole-list
+    read of a refused request spends."""
     filters, layout = _selection(request, payload)
     # `check_export` reads and plans the whole list, so it is bounded like the quote is: over the
     # dialog budget nothing is read; a refusal (which still read the list) spends one hit of it.
-    # A refusal spends none of `RECEIPTS_EXPORT_FILES_USER`.
+    # `RECEIPTS_EXPORT_FILES_USER` is peeked here too, so a request it would refuse reads nothing
+    # and spends nothing; a refusal spends none of it, and the hit after the check settles a race.
     ratelimit.enforce(ratelimit.peek_user(request.auth, 'RECEIPTS_EXPORT_DIALOG_USER'))
+    ratelimit.enforce(ratelimit.peek_user(request.auth, 'RECEIPTS_EXPORT_FILES_USER'))
     try:
         with mapped_errors():
             prepared = services.check_export(

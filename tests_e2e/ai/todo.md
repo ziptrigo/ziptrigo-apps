@@ -38,16 +38,18 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 - **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and **Settings**
   `/todo/settings/` (default due time, default reminder and channel, what tasks cost, the storage line, the email
   address with Copy and Regenerate, accepted senders, recent emails);
-- **Exports** (issue #326, TODO-70 to TODO-73): the To-do block of the account page's App actions -- **Download files**
+- **Exports** (issue #326, TODO-70 to TODO-77): the To-do block of the account page's App actions -- **Download files**
   (the task files and comment files as zip files, 3 credits per file, with `tasks.xlsx`) and **Export XLSX** (the task
   list as a spreadsheet, free) -- the dialog, the zip's folders and the workbook, the export's pages, refunds and
-  paused storage;
+  paused storage -- and the same exports through the JWT API (`/api/todo/exports`, `/api/todo/export.xlsx`; TODO-74,
+  TODO-75) and the `inv todo` commands (`export-files` and companions; TODO-76, TODO-77);
 - credits: the first 10 tasks of a calendar month are free, then 10 credits each; subtasks and occurrences count;
 - access control: logged-out visitors, another user's task numbers, attachments and filters.
 
 Not covered here: inbound email itself (SES drops mail in S3 under `todo/inbound/`; the "Recent emails" list
 therefore stays empty here, and the parser is unit-tested), the JWT API beyond the state, blocker and activity calls of
-TODO-55, TODO-59 and TODO-60, and the `inv todo` CLI (unit tests), the
+TODO-55, TODO-59 and TODO-60 (and the exports', TODO-74 and TODO-75), and the `inv todo` CLI (unit tests; the exports'
+commands are TODO-76 and TODO-77), the
 daily trash purge and the real daily storage metering (unit tests; TODO-31 freezes the storage with a shell step
 instead), a real AI model.
 
@@ -1419,6 +1421,64 @@ shell (`python tests_e2e/ai/manage.py shell -c "..."`); without one mark them **
 | 6 | As another user open `/todo/exports/<id>/` and its `/parts/1/download/`. | A 404 page for each; the other user's `/todo/exports/` does not list it. |
 | 7 | (Shell) set an export's `expires_at` in the past and run `from apps.todo import jobs; jobs.purge_exports()`. | The export reads **Expired** ("These zip files were deleted <date>..."), its download button is gone and its objects are deleted. |
 
+### TODO-74 Exports through the API: quote, create, poll, other users
+
+**Purpose:** `/api/todo/exports` does what the dialog does, with the same costs, refusals and ownership (issue #326, PR 2).
+**Preconditions:** TODO-71 done and its export deleted (step 8); `qa.user@example.com` (`F`) with `N` files on live tasks and
+comments and balance `B0`, the price at `3`; `BASE=http://localhost:8765`; a bearer token `T` for `F`
+(`curl -s -X POST $BASE/api/auth/login -H 'Content-Type: application/json' -d '{"email":"<F>","password":"<P>"}'`); another
+user `G` with a token `TG`. The server runs tasks inline, so an export is `ready` when its `POST` answers.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `curl -s -X POST $BASE/api/todo/exports/quote -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{}'`. | 200 `{"file_count": N, "total_bytes": ..., "part_count": 1, "price_per_file": 3, "cost": 3N, "balance": B0, "affordable": true, "frozen": false, "retention_days": 30, "part_bytes": ...}`. Nothing is charged. With `{"date_range":"this_month"}` or `{"date_from":"2026-01-01","date_to":"2026-12-31"}` the count follows the dialog's **Task created** range; with `{"date_range":"custom","date_from":"2001-01-01","date_to":"2001-12-31"}` it is 0. |
+| 2 | The same endpoint with `{"date_range":"next_decade"}`, `{"date_from":"soon"}`, `{"date_from":"20260101"}`, `{"date_from":"2026-W01-1"}`, `{"date_range":"this_month","date_from":"2026-01-01"}`, `{"date_from":"2026-02-01","date_to":"2026-01-01"}` and `{"expected_cost":1}`. | 400 for the first six (`date_range must be one of: any, last_15_days, ...`, `date_from must be a date like 2026-10-09.` for the three malformed ones (only `YYYY-MM-DD` is read: the compact and ISO-week forms are refused too), `date_from and date_to go with date_range=custom, not with this_month.`, `date_from must not be after date_to.`), 422 for the unknown key; nothing is charged. |
+| 3 | `POST /api/todo/exports` with `{"expected_cost": 1}`. | **409** `{"detail": "The cost changed: it is now 3N credits. Send expected_cost=3N to confirm it."}`; no export, nothing charged. |
+| 4 | `POST /api/todo/exports` with `{"expected_cost": <3N>}`. | **201**: `status` (`ready` here), `file_count` N, `charged_credits` 3N, `refunded_credits` 0, `parts` with one entry `{number: 1, filename: "task-files-<date>.zip", size_bytes, file_count: N, built: true}`, `expires_at` in 30 days, `filters` `{summary: [], params: {}}`, and no `layout`. Balance `B0 - 3N`. **Record** the id as `AX`. |
+| 5 | `GET /api/todo/exports` and `GET /api/todo/exports/<AX>`. | The list is `{count, limit, offset, results}`, newest first, with `AX`; the single answer is the same object. As `G` (`TG`): the list does not have `AX` and `GET /exports/<AX>`, `.../parts/1/url` and `DELETE /exports/<AX>` are all **404**; a malformed id is 422. |
+| 6 | `POST /api/todo/exports` with `{"date_from":"2001-01-01","date_to":"2001-12-31"}`. | **400** `No files in this range; use Export XLSX for the task list.`; nothing is charged. |
+| 7 | (Shell step) start one that stays "preparing" (TODO-73 step 4), then `POST /api/todo/exports` again and `DELETE /api/todo/exports/<that id>`. | The `POST`: **409** `An export is already being prepared. Wait for it to finish first.`; the `DELETE`: **409** `This export is still being prepared.`. `GET` on it shows `status: building` and `parts[0].built: false`. Finish it by building it by hand, as RCPT-70 step 4 does but with `from apps.todo.services import exports as e`. |
+| 8 | Pause storage (TODO-31's shell step) and `POST /api/todo/exports`; then unpause. Spend the balance below 3N (or raise the price above it) and `POST` again. | Frozen: **402** `Storage is paused: top up your credits to upload or download files.`; short of credits: **402** `Insufficient credits`; no export is created and nothing is charged. |
+
+### TODO-75 Exports through the API: a zip's URL, delete and the quick workbook
+
+**Purpose:** a part's URL is short-lived and never the key, deleting removes the files, and `GET /api/todo/export.xlsx` is the free quick export.
+**Preconditions:** TODO-74 through step 4 (`AX` ready, tokens `T` and `TG`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `GET /api/todo/exports/<AX>/parts/1/url`; then `curl -s -o part1.zip "<url>"` (no `Authorization` header); then `.../parts/2/url`. | 200 `{"url": "<storage URL>", "filename": "task-files-<date>.zip", "size_bytes": ..., "expires_in": 900}` (no object key in any field); the zip downloads, is `size_bytes` long and opens as in TODO-71 step 4; part 2: **404** `There is no such file in this export.` As `G`: **404**. |
+| 2 | `curl -s -o tasks.xlsx "$BASE/api/todo/export.xlsx" -H "Authorization: Bearer $T" -D -`. | 200, `Content-Disposition: attachment; filename="tasks-<today>.xlsx"`, `Cache-Control: private, no-store`; the workbook opens as in TODO-72 step 2 (file names, not paths). The balance is unchanged and no export is created. |
+| 3 | The same with `?date_range=last_15_days`, `?date_from=2001-01-01&date_to=2001-12-31` and `?date_range=bogus`. | The first two narrow the Tasks sheet like the website's range (the second is just the header row); the last is a **400**. Without a token: **401**. |
+| 4 | `DELETE /api/todo/exports/<AX>`, then `GET` it and `DELETE` it again. | 204 (the zip's S3 object is gone, nothing refunded); then **404** twice; it is no longer in `GET /api/todo/exports`. |
+
+### TODO-76 Exports through the CLI: `inv todo export-files`
+
+**Purpose:** the command line asks before it spends, waits, downloads safely and can finish an interrupted run (issue #326, PR 2).
+**Preconditions:** a shell in the repo root; `TODO_PASSWORD='QaE2e-Passw0rd!'` exported; `API_BASE_URL=http://localhost:8765`;
+`inv todo <command> local ...` with `local` the environment; `F` as in TODO-74.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `inv todo login local <F>`, then `inv todo export-files local --out ./zips` and answer `n`. | The quote lines: `N files (<size>) in 1 zip file of about 100.0 MB each, with a tasks.xlsx of the tasks and comments.` and `Cost: 3N credits (3 per file). Your balance is B0. They stay available for 30 days.`; the question `This costs 3N credits. Continue? [y/N]`; `n` exits 1 `Cancelled; nothing was charged.`; no export, no `./zips`, balance unchanged. |
+| 2 | Run it again and answer `y`. | `Charged 3N credits.`, `Export <id> started.`, `Preparing your zip files (Ctrl-C stops waiting...)...`; the zip is downloaded to `./zips/task-files-<date>.zip` (no `.task-files-...part` left); `Downloaded 1 zip file to ./zips.` The balance fell by 3N once. The zip opens as in TODO-71 step 4. |
+| 3 | `inv todo export-files local --out ./zips --yes` (the file from step 2 is still there). | The folder already holds `task-files-<date>.zip`: exit 1 `... Use an empty folder (--out), or --force ... Nothing was charged.`; no export is made. With `--force` it is charged, prepared and replaces the file. |
+| 4 | `inv todo export-files local --out ./z3 --range this-year --yes`, then with `--from 2001-01-01 --to 2001-12-31`, then with `--range this-month --from 2026-01-01` and `--range bogus`. | The first charges for the files of tasks created this year and downloads; the 2001 range: exit 1 `There are no files to download in this range. Use `todo export-xlsx local --out tasks.xlsx` for the task list.`; the last two exit 1 before any request (`--from and --to go with --range custom, not with another range.`, `Choose --range any, last-15-days, ...`). |
+| 5 | Set **Export per file** to `0` (admin) and run `inv todo export-files local --out ./z4`. | No question (`This costs...` is not asked); the export is created with `expected_cost` 0 and downloaded; nothing is charged. Set it back to `3`. |
+| 6 | (Shell step) start one that stays "preparing" (TODO-73 step 4), then `inv todo export-download local <id> --out ./z2` and press Ctrl-C after a few seconds. | `Preparing your zip files...`, `Written so far: 0 of 1 zip files.`; Ctrl-C exits 130 with `Stopped waiting. The export is still being prepared. Fetch it later with: todo export-download local <id> --out ./z2`. Then build it by hand (as TODO-74 step 7 says) and run that command: the zip is downloaded and no credits are charged. Running it a third time says `already downloaded, skipped`. |
+
+### TODO-77 Exports through the CLI: `exports`, `export-get`, `export-delete` and `export-xlsx`
+
+**Purpose:** the companions list, inspect and delete exports, and `export-xlsx` writes the free workbook safely.
+**Preconditions:** TODO-76; at least one ready export `<id>`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `inv todo exports local`, then `inv todo export-get local <id>`. | A table (id, created, status, files, charged, expires) and, for `export-get`, `Status: ready`, `Selection: every task` or `Task created: ...`, the size, `Charged: 3N credits` and the table of zip files. |
+| 2 | `inv todo export-delete local <id>` answering `n` then `y`; then `export-delete` on the same id again, and on one that is still being prepared. | `n` exits 1 `Cancelled.`; `y` prints `Deleted.`; again: `404: Not Found` (exit 1); the preparing one: `409: This export is still being prepared.` `--yes` skips the question. |
+| 3 | `inv todo export-xlsx local --out tasks.xlsx`, then again, then again with `--force`. | `Wrote tasks.xlsx (<n> bytes).` and the workbook opens as in TODO-72 step 2; the second exits 1 `tasks.xlsx already exists. Use --force to replace it.` **before** any request (the website's budget is untouched); `--force` replaces it. No credits are charged and no `.tasks.xlsx.part` is left behind. |
+| 4 | `inv todo export-xlsx local --out ./exports --range last-15-days` (an existing folder), then `--from 2001-01-01 --to 2001-12-31 --out old.xlsx`, then `--out ./nope/t.xlsx`. | The first writes `./exports/tasks-<today>.xlsx`; the second a workbook with only the header rows; the last exits 1 `Not a folder: nope` before any request. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it
@@ -1433,7 +1493,8 @@ shell (`python tests_e2e/ai/manage.py shell -c "..."`); without one mark them **
   the shell steps (the scheduler does not run on this server).
 - **A reminder email to an unconfirmed address** ("not sent: your email address is not confirmed"): reaching it
   needs an email change through the JWT API, which is out of scope here; unit-tested.
-- **Rate limits** (switched off on this server), the rest of the JWT API `/api/todo/` and the `inv todo` CLI (unit tests). The
+- **Rate limits** (switched off on this server), the rest of the JWT API `/api/todo/` and the `inv todo` CLI (unit tests;
+  only the exports' API and CLI are driven here, TODO-74 to TODO-77). The
   activity log's entries made through the email intake (automatic, with the files), the phone's Complete
   button and the daily purge, and the channel each is recorded under, are unit-tested (`test_activity_log.py`); the
   API's own endpoints are exercised only by TODO-55, TODO-59 and TODO-60 (every status code is unit-tested).
