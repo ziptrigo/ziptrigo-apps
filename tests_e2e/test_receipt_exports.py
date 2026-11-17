@@ -46,8 +46,8 @@ def test_download_files_confirm_the_cost_download_the_zip_and_delete_it(
 
     # The buttons live on the account page (App actions), not on the dashboard.
     page.goto(f'{url}/receipts/')
-    expect(page.locator('#export-files-link')).to_have_count(0)
-    expect(page.locator('#export-link')).to_have_count(0)
+    expect(page.locator('#receipts-export-files')).to_have_count(0)
+    expect(page.locator('#receipts-export-csv')).to_have_count(0)
     page.goto(f'{url}/account/')
     block = page.locator('[data-app-actions=receipts]')
     expect(block).to_contain_text('Download files')
@@ -57,7 +57,7 @@ def test_download_files_confirm_the_cost_download_the_zip_and_delete_it(
     block.locator('select[name=date_range]').select_option('any')
     expect(block.locator('#receipts-export-from')).to_be_hidden()
 
-    page.click('#export-files-link')
+    page.click('#receipts-export-files')
     dialog = page.locator('#export-modal [role=dialog]')
     expect(dialog).to_contain_text('All your receipts')
     expect(dialog).to_contain_text(re.compile(r'\d+ files?'))

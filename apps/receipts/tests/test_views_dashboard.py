@@ -410,7 +410,10 @@ class TestListPartial:
         content = web.get(reverse('receipts:list'), {'q': 'x'}, **HX).content.decode()
 
         assert 'id="receipt-tabs" hx-swap-oob="true"' in content
-        assert 'id="export-link"' not in content and 'id="export-files-link"' not in content
+        assert (
+            'id="receipts-export-csv"' not in content
+            and 'id="receipts-export-files"' not in content
+        )
         assert '<html' not in content
 
     def test_the_full_page_has_no_oob_duplicates(self, web, make):

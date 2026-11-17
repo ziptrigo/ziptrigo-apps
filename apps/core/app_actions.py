@@ -1,16 +1,23 @@
 """Per-app actions on the account page's "Apps" section (`{% app_actions %}`).
 
 Each product may register an `actions` callable on its `ProductApp` (`apps.core.products`) that
-takes the signed-in user and returns an `AppActions`: a template and the context to render it
-with, or `None` when there is nothing to show. `core` lays the blocks out (one per product, in the
-user's order, a heading with the app's icon and name); it can't import a product, so the product
-owns its block's markup. Like the Costs page's providers, a provider must not create the
-product's account row just by being asked.
+takes the request of the account page (`request.user` is signed in) and returns an `AppActions`:
+a template, the context to render it with and the static scripts it needs, or `None` when there
+is nothing to show. `core` lays the blocks out (one per product, in the user's order, a heading
+with the app's icon and name); it can't import a product, so the product owns its block's markup.
+Like the Costs page's providers, a provider must not create the product's account row just by
+being asked.
+
+A block's scripts are collected by the tag, each path once however many blocks ask for it, and
+written as classic (not deferred) `<script>` tags before the blocks, so an `alpine:init` listener
+in one is registered before the deferred Alpine starts.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+from django.http import HttpRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +30,9 @@ class AppActions:
 
     context: dict[str, Any] = field(default_factory=dict)
 
+    scripts: tuple[str, ...] = ()
+    """Static paths (`{% static %}` names) of the scripts the block needs, loaded once each."""
 
-ActionsProvider = Callable[[Any], AppActions | None]
-"""Takes the signed-in user (`core` can't name `accounts.User`); `None` = nothing to show."""
+
+ActionsProvider = Callable[[HttpRequest], AppActions | None]
+"""Takes the account page's request (its user is signed in); `None` = nothing to show."""

@@ -14,18 +14,20 @@ register = template.Library()
 logger = logging.getLogger(__name__)
 
 
-def _blocks(context: Context) -> list[dict[str, Any]]:
+def _blocks(context: Context) -> tuple[list[dict[str, Any]], list[str]]:
+    """The products' blocks, and the scripts they need (each once, in the order first asked)."""
     request = context.get('request')
     user = getattr(request, 'user', None)
-    if user is None or not getattr(user, 'is_authenticated', False):
-        return []
+    if request is None or user is None or not getattr(user, 'is_authenticated', False):
+        return [], []
     blocks: list[dict[str, Any]] = []
+    scripts: list[str] = []
     # Every product, switched-off ones too: an app hidden from the menu still has the user's data.
     for product, _visible in products_for(user):
         if product.actions is None:
             continue
         try:
-            actions = product.actions(user)
+            actions = product.actions(request)
             if actions is None:
                 continue
             html: SafeString | None = mark_safe(
@@ -34,18 +36,22 @@ def _blocks(context: Context) -> list[dict[str, Any]]:
         except Exception:
             logger.exception('Actions of %s failed', product.label)
             html = None
+        else:
+            scripts.extend(path for path in actions.scripts if path not in scripts)
         blocks.append({'product': product, 'html': html})
-    return blocks
+    return blocks, scripts
 
 
 @register.simple_tag(takes_context=True)
 def app_actions(context: Context) -> SafeString:
     """The "App actions" subsection, or nothing when no product has actions to show."""
-    blocks = _blocks(context)
+    blocks, scripts = _blocks(context)
     if not blocks:
         return mark_safe('')
     return mark_safe(
         render_to_string(
-            'core/partials/app_actions.html', {'blocks': blocks}, request=context.get('request')
+            'core/partials/app_actions.html',
+            {'blocks': blocks, 'scripts': scripts},
+            request=context.get('request'),
         )
     )

@@ -715,8 +715,10 @@ until it runs, and a `<noscript>` Save button covers no JS (ordering needs JS). 
 
 **App actions** (issue #315 follow-up) are the account page's per-app area under the apps list, before "Notifications on
 this device": things done now and then with an app's data. It is a registry like the Costs page's: a product gives its
-`ProductApp` an `actions` provider (`apps.core.app_actions`: `ActionsProvider = Callable[[user], AppActions | None]`, an
-`AppActions(template, context)`; `None` = nothing to show), and `{% load app_actions %}{% app_actions %}`
+`ProductApp` an `actions` provider (`apps.core.app_actions`: `ActionsProvider = Callable[[request], AppActions | None]`,
+called with the account page's request, an `AppActions(template, context, scripts)`; `None` = nothing to show;
+`scripts` are static paths the tag writes once each, as classic scripts before the blocks, so a block can bring an
+Alpine component; a block's query fields on the account page take a prefix of its app, like Receipts' `receipts_`), and `{% load app_actions %}{% app_actions %}`
 (`apps/core/templatetags/app_actions.py`, included by `accounts/account.html` inside `<section id="apps">`) walks
 `products_for(user)` (every product, **switched-off ones included**, in the user's order), renders each product's template
 with the request inside a block with its icon and name (`core/partials/app_actions.html`, subheading "App actions"), and
@@ -3671,10 +3673,13 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `partials/account_actions.html`). A GET form (`#receipts-export-form`, action `receipts:export`) holds a
     **Receipt date** select (the dashboard's `DATE_RANGES`; Custom shows the two core date pickers, disabled and so
     unsent otherwise; ids `receipts-export-*`) and the buttons: **Export CSV** submits it, **Download files**
-    (`#export-files-link`, `hx-include="closest form"`) fetches `GET /receipts/exports/new/?date_range=...` into
-    `#export-modal` (inside the block; `fragmentModal`, a classic script `receipts/js/common.js` the block loads
-    itself, like the vendor rename dialog; a non-htmx GET redirects to `/account/#apps`, spending nothing; the
-    only filter is the date range, the rest of `parse_filters` still works for a hand-made URL; the dialog scans the list to quote it, so it spends `RECEIPTS_EXPORT_DIALOG_USER`): "N files (size) in P zip files of about 100 MB", the filters in words, the layout radios
+    (`#receipts-export-files`, `hx-include="closest form"`) fetches `GET /receipts/exports/new/?date_range=...` into
+    `#export-modal` (inside the block; `fragmentModal` from `receipts/js/common.js`, which the provider lists in
+    `AppActions.scripts`, like the vendor rename dialog; a non-htmx GET redirects to `/account/#apps`, spending
+    nothing, and a confirm refused without htmx goes back there with its range preselected, `?receipts_date_range=`
+    / `receipts_date_from` / `receipts_date_to`, the block's prefixed query fields; the only filter is the date range,
+    the rest of `parse_filters` still works for a hand-made URL; the dialog scans the list to quote it, so it spends
+    `RECEIPTS_EXPORT_DIALOG_USER`): "N files (size) in P zip files of about 100 MB", the filters in words, the layout radios
     (Year / Vendor default, with an example path each), "This costs C credits (3 per file). Your balance is
     B.", a Top up link when short, `Download for C credits`, and `confirm_cost` posted back. A refusal is a
     **422 that re-renders the form in place** (`partials/export_form.html`); a changed cost shows the new

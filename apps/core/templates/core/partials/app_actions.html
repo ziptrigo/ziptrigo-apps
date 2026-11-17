@@ -1,9 +1,12 @@
 {% comment %}
 The account page's "App actions" (`{% app_actions %}`, apps/core/templatetags/app_actions.py): one block per product
 that registered an `actions` provider, in the user's order. `blocks` is a list of {product, html}; `html` is the
-product's own markup, or None when its provider failed.
+product's own markup, or None when its provider failed. `scripts` are the static paths the blocks asked for, each
+once: classic scripts, so an `alpine:init` listener in one exists before the deferred Alpine starts.
 {% endcomment %}
-<div id="app-actions" class="mt-8">
+{% load static %}
+{% for path in scripts %}<script src="{% static path %}"></script>
+{% endfor %}<div id="app-actions" class="mt-8">
   <h3 class="mb-1 text-sm font-medium">App actions</h3>
   <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">Things you do now and then with an app's data.</p>
   <div class="grid gap-3">

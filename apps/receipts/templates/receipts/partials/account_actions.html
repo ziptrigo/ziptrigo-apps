@@ -1,11 +1,8 @@
-{% load static %}
 {% comment %} Receipts' block of the account page's "App actions" (`apps.core.app_actions`): Download files (the zip
    export, issue #315) and Export CSV, both of the receipts in a receipt-date range. The form is a plain GET to the CSV;
    the Download files button fetches the dialog into #export-modal with the same fields (`hx-include`). The dialog is
-   the `fragmentModal` component, which this page doesn't load, so it comes from here (a classic script, so its
-   `alpine:init` listener exists before the deferred Alpine starts). Custom shows the two date fields; hidden they are
-   disabled, so they aren't sent. {% endcomment %}
-<script src="{% static 'receipts/js/common.js' %}"></script>
+   the `fragmentModal` component of `receipts/js/common.js`, which the provider asks core to load
+   (`AppActions.scripts`). Custom shows the two date fields; hidden they are disabled, so they aren't sent. {% endcomment %}
 <p class="mb-3 text-sm text-gray-600 dark:text-gray-300">Download your receipt files as zip files, or a CSV list of your receipts.</p>
 <form id="receipts-export-form" method="get" action="{% url 'receipts:export' %}">
     <fieldset data-range="{{ date_range }}" x-data="{ range: $el.dataset.range }">
@@ -18,20 +15,20 @@
                 <option value="{{ value }}" {% if date_range == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
-            <div x-show="range === 'custom'" style="display: none" class="flex items-center gap-2">
-                {% include 'core/components/date_picker.html' with name='date_from' id='receipts-export-from' hidden_id='receipts-export-from-value' aria_label='Receipt date from' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True disabled=True %}
+            <div x-show="range === 'custom'" {% if not custom %}style="display: none"{% endif %} class="flex items-center gap-2">
+                {% include 'core/components/date_picker.html' with name='date_from' id='receipts-export-from' hidden_id='receipts-export-from-value' value=date_from aria_label='Receipt date from' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True disabled=custom|yesno:',True' %}
                 <span class="text-gray-500 dark:text-gray-400" aria-hidden="true">&ndash;</span>
-                {% include 'core/components/date_picker.html' with name='date_to' id='receipts-export-to' hidden_id='receipts-export-to-value' aria_label='Receipt date to' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True disabled=True %}
+                {% include 'core/components/date_picker.html' with name='date_to' id='receipts-export-to' hidden_id='receipts-export-to-value' value=date_to aria_label='Receipt date to' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True disabled=custom|yesno:',True' %}
             </div>
         </div>
     </fieldset>
     <div class="mt-3 flex flex-wrap items-center gap-3">
-        <button type="button" id="export-files-link"
+        <button type="button" id="receipts-export-files"
                 hx-get="{% url 'receipts:export-new' %}" hx-include="closest form" hx-target="#export-modal" hx-swap="innerHTML"
                 class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
             <i class="fas fa-file-zipper mr-2" aria-hidden="true"></i>Download files
         </button>
-        <button type="submit" id="export-link"
+        <button type="submit" id="receipts-export-csv"
                 class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
             <i class="fas fa-download mr-2" aria-hidden="true"></i>Export CSV
         </button>

@@ -1,12 +1,12 @@
 {% load receipts_ui %}
-{% comment %} Everything under the filters: the list card. This is what the
+{% comment %} Everything under the filters: the list card, the pager and the refresh poller. This is what the
    tabs, filters, sort links and pager swap into #receipt-list; it sits inside the filter form, so
    the hidden inputs below keep the tab and sort when a filter changes. {% endcomment %}
 {% if parsed.tab != 'all' %}<input type="hidden" name="status" value="{{ parsed.tab }}">{% endif %}
 {% if parsed.params.sort %}<input type="hidden" name="sort" value="{{ parsed.params.sort }}">{% endif %}
 {% if vendor_filter %}<input type="hidden" name="vendor" value="{{ vendor_filter.pk }}">{% endif %}
 
-{% if oob_export %}
+{% if oob_tabs %}
 {% include 'receipts/partials/tabs.html' with oob=True %}
 {% endif %}
 
