@@ -1501,3 +1501,705 @@ def test_vendor_merge_api_error_exits_nonzero(token_file, monkeypatch):
     result = runner.invoke(receipts.app, ['vendor-merge', 'local', '12', '13', '--yes'])
 
     assert result.exit_code == 1 and '404' in result.output
+
+
+# -- Exports: all the files as zip files (issue #315) -----------------------------------------
+
+EXPORT_ID = '22222222-2222-2222-2222-222222222222'
+API = 'http://localhost:8000/api/receipts'
+STORAGE_URL = 'https://storage.test/part-1.zip?signed'
+ZIP_BYTES = b'PK-the-first-zip-file'
+
+
+def make_export(status='ready', parts=1, built=True, **fields) -> dict:
+    export = {
+        'id': EXPORT_ID,
+        'status': status,
+        'layout': 'year_vendor',
+        'filters': {'summary': [], 'params': {}},
+        'file_count': 3,
+        'skipped_count': 0,
+        'total_bytes': 70,
+        'part_count': parts,
+        'price_per_file': 3,
+        'charged_credits': 9,
+        'refunded_credits': 0,
+        'parts': [
+            {
+                'number': n,
+                'filename': f'receipts-2026-11-17-part-{n}.zip',
+                'size_bytes': len(ZIP_BYTES),
+                'file_count': 3,
+                'built': built,
+            }
+            for n in range(1, parts + 1)
+        ],
+        'created_at': '2026-11-17T09:00:00Z',
+        'ready_at': '2026-11-17T09:00:30Z' if status == 'ready' else None,
+        'expires_at': '2026-12-17T09:00:30Z' if status == 'ready' else None,
+    }
+    export.update(fields)
+    return export
+
+
+def make_quote(**fields) -> dict:
+    quote = {
+        'file_count': 3,
+        'total_bytes': 70,
+        'part_count': 1,
+        'price_per_file': 3,
+        'cost': 9,
+        'balance': 100,
+        'affordable': True,
+        'frozen': False,
+        'retention_days': 30,
+        'part_bytes': 100 * 1024 * 1024,
+    }
+    quote.update(fields)
+    return quote
+
+
+class FakeSite:
+    """The export endpoints and the storage URL, as `requests.<method>` replacements. A route is
+    a response, a list of responses (served in order, the last one repeated) or a function of the
+    call's keyword arguments."""
+
+    def __init__(self, monkeypatch, routes: dict):
+        self.routes = routes
+        self.calls: list[tuple[str, str, dict]] = []
+        for method in ('get', 'post', 'delete'):
+            monkeypatch.setattr(f'requests.{method}', self._handler(method))
+
+    def _handler(self, method):
+        def handle(url, **kwargs):
+            key = (method, url.removeprefix(API) if url.startswith(API) else url)
+            self.calls.append((method, key[1], kwargs))
+            route = self.routes[key]
+            if callable(route):
+                return route(**kwargs)
+            if isinstance(route, list):
+                return route.pop(0) if len(route) > 1 else route[0]
+            return route
+
+        return handle
+
+    def made(self, method, path) -> list[dict]:
+        return [kw for m, p, kw in self.calls if (m, p) == (method, path)]
+
+
+def ok(body, **kwargs):
+    return FakeResponse(200, body, **kwargs)
+
+
+def site_for_a_ready_export(monkeypatch, overrides: dict | None = None) -> FakeSite:
+    routes = {
+        ('post', '/exports/quote'): ok(make_quote()),
+        ('post', '/exports'): FakeResponse(201, make_export('building', built=False)),
+        ('get', f'/exports/{EXPORT_ID}'): [
+            ok(make_export('building', built=False)),
+            ok(make_export()),
+        ],
+        ('get', f'/exports/{EXPORT_ID}/parts/1/url'): ok(
+            {
+                'url': STORAGE_URL,
+                'filename': 'receipts-2026-11-17-part-1.zip',
+                'size_bytes': len(ZIP_BYTES),
+                'expires_in': 900,
+            }
+        ),
+        ('get', STORAGE_URL): lambda **kw: FakeResponse(200, content=ZIP_BYTES),
+    }
+    routes.update(overrides or {})
+    return FakeSite(monkeypatch, routes)
+
+
+@pytest.fixture(autouse=True)
+def _wide_terminal(monkeypatch):
+    """Rich wraps a long log line (a path, a message) at the terminal's width; keep it on one."""
+    monkeypatch.setenv('COLUMNS', '400')
+
+
+class TestExportFiles:
+    def test_quotes_asks_creates_waits_and_downloads(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+        out = tmp_path / 'zips'
+
+        result = runner.invoke(
+            receipts.app,
+            [
+                'export-files',
+                'local',
+                '--out',
+                str(out),
+                '--layout',
+                'vendor-year',
+                '--status',
+                'processed',
+                '--vendor',
+                '12',
+                '--q',
+                'acme',
+                '--from',
+                '2026-01-01',
+                '--to',
+                '2026-12-31',
+                '--duplicates',
+            ],
+            input='y\n',
+        )
+
+        assert result.exit_code == 0, result.output
+        selection = {
+            'layout': 'vendor_year',
+            'status': 'processed',
+            'vendor': 12,
+            'q': 'acme',
+            'date_from': '2026-01-01',
+            'date_to': '2026-12-31',
+            'duplicates': True,
+        }
+        assert site.made('post', '/exports/quote')[0]['json'] == selection
+        assert site.made('post', '/exports')[0]['json'] == {**selection, 'expected_cost': 9}
+        assert 'This costs 9 credits. Continue?' in result.output
+        assert (out / 'receipts-2026-11-17-part-1.zip').read_bytes() == ZIP_BYTES
+        assert sorted(p.name for p in out.iterdir()) == ['receipts-2026-11-17-part-1.zip']
+        assert 'Downloaded 1 zip file' in result.output
+
+    def test_the_api_token_goes_to_the_site_and_never_to_storage(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+
+        runner.invoke(receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes'])
+
+        for kwargs in site.made('post', '/exports') + site.made('get', f'/exports/{EXPORT_ID}'):
+            assert kwargs['headers'] == {'Authorization': 'Bearer tok'}
+        (storage_call,) = site.made('get', STORAGE_URL)
+        assert 'headers' not in storage_call
+        assert storage_call['stream'] is True
+
+    def test_yes_skips_the_question_and_sends_no_expected_cost(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 0, result.output
+        assert 'Continue?' not in result.output
+        assert 'expected_cost' not in site.made('post', '/exports')[0]['json']
+
+    def test_declining_creates_nothing(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path)], input='n\n'
+        )
+
+        assert result.exit_code == 1
+        assert 'nothing was charged' in result.output
+        assert site.made('post', '/exports') == []
+
+    def test_a_free_export_asks_nothing_and_confirms_zero(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(
+            monkeypatch, {('post', '/exports/quote'): ok(make_quote(cost=0, price_per_file=0))}
+        )
+
+        result = runner.invoke(receipts.app, ['export-files', 'local', '--out', str(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        assert 'Continue?' not in result.output
+        assert site.made('post', '/exports')[0]['json']['expected_cost'] == 0
+
+    @pytest.mark.parametrize(
+        ('quote', 'message'),
+        [
+            (make_quote(file_count=0, cost=0), 'There are no files to download'),
+            (make_quote(frozen=True), 'paused until you add credits'),
+            (make_quote(affordable=False, balance=5), 'balance is 5'),
+        ],
+    )
+    def test_a_quote_that_cannot_go_ahead_stops_before_asking(
+        self, token_file, tmp_path, monkeypatch, quote, message
+    ):
+        site = site_for_a_ready_export(monkeypatch, {('post', '/exports/quote'): ok(quote)})
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 1 and message in result.output
+        assert site.made('post', '/exports') == []
+
+    def test_a_bad_layout_or_a_file_as_the_folder_fails_before_any_request(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+        a_file = tmp_path / 'file'
+        a_file.write_text('x')
+
+        bad_layout = runner.invoke(receipts.app, ['export-files', 'local', '--layout', 'sideways'])
+        bad_out = runner.invoke(receipts.app, ['export-files', 'local', '--out', str(a_file)])
+
+        assert bad_layout.exit_code == 1 and 'year-vendor or vendor-year' in bad_layout.output
+        assert bad_out.exit_code == 1 and 'Not a folder' in bad_out.output
+        assert site.calls == []
+
+    def test_the_layout_accepts_underscores_and_any_case(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+        runner.invoke(
+            receipts.app,
+            ['export-files', 'local', '--out', str(tmp_path), '--yes', '--layout', 'Vendor_Year'],
+        )
+        assert site.made('post', '/exports/quote')[0]['json'] == {'layout': 'vendor_year'}
+
+    @pytest.mark.parametrize(
+        ('response', 'message'),
+        [
+            (
+                FakeResponse(409, {'detail': 'An export is already being prepared.'}),
+                'An export is already being prepared',
+            ),
+            (
+                FakeResponse(409, {'detail': 'The cost changed: it is now 12 credits.'}),
+                'now 12 credits',
+            ),
+            (FakeResponse(402, {'detail': 'Insufficient credits'}), 'top up your credits'),
+            (FakeResponse(429, {'detail': 'Slow down'}, headers={'Retry-After': '3000'}), '50 min'),
+        ],
+    )
+    def test_a_refusal_when_creating_is_shown_and_nothing_is_downloaded(
+        self, token_file, tmp_path, monkeypatch, response, message
+    ):
+        site = site_for_a_ready_export(monkeypatch, {('post', '/exports'): response})
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 1 and message in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_it_reports_the_progress_while_waiting(self, token_file, tmp_path, monkeypatch):
+        building = make_export('building', parts=3, built=False)
+        halfway = make_export('building', parts=3, built=False)
+        halfway['parts'][1]['built'] = True
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): [
+                    ok(building),
+                    ok(halfway),
+                    ok(make_export(parts=1)),
+                ]
+            },
+        )
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 0, result.output
+        assert 'Written so far: 0 of 3 zip files' in result.output
+        assert 'Written so far: 1 of 3 zip files' in result.output
+
+    def test_a_failed_export_is_reported_with_its_refund(self, token_file, tmp_path, monkeypatch):
+        failed = make_export('failed', built=False, refunded_credits=9, parts=1)
+        failed['parts'] = []
+        site = site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(failed)})
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 1
+        assert 'failed and 9 credits were refunded' in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_ctrl_c_stops_waiting_and_says_how_to_fetch_it_later(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): ok(make_export('building', built=False))},
+        )
+
+        def interrupt(seconds):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(receipts.time, 'sleep', interrupt)
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path / 'my zips'), '--yes']
+        )
+
+        assert result.exit_code == 130
+        assert 'Stopped waiting' in result.output
+        assert f"receipts export-download local {EXPORT_ID} --out '" in result.output
+
+    def test_it_gives_up_waiting_after_the_time_it_was_given(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): ok(make_export('building', built=False))},
+        )
+
+        result = runner.invoke(
+            receipts.app,
+            ['export-files', 'local', '--out', str(tmp_path), '--yes', '--wait', '0.05'],
+        )
+
+        assert result.exit_code == 1
+        assert 'Still not ready after 3 seconds' in result.output
+        assert f'receipts export-download local {EXPORT_ID}' in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_a_dropped_poll_is_tried_again(self, token_file, tmp_path, monkeypatch):
+        import requests
+
+        calls = {'n': 0}
+
+        def poll(**kwargs):
+            calls['n'] += 1
+            if calls['n'] == 1:
+                raise requests.exceptions.ConnectionError('network down')
+            return ok(make_export())
+
+        site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): poll})
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 0, result.output
+        assert 'trying again' in result.output
+
+    def test_an_existing_zip_is_refused_without_force_even_if_it_looks_complete(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+        existing = tmp_path / 'receipts-2026-11-17-part-1.zip'
+        existing.write_bytes(ZIP_BYTES)  # the very size: a new export is not "resumed"
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 1 and 'Use --force' in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_an_existing_zip_with_other_contents_is_refused_without_force(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(monkeypatch)
+        existing = tmp_path / 'receipts-2026-11-17-part-1.zip'
+        existing.write_bytes(b'something else entirely')
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+
+        assert result.exit_code == 1
+        assert 'Use --force' in result.output and 'export-download' not in result.output
+        assert existing.read_bytes() == b'something else entirely'
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_force_replaces_it(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(monkeypatch)
+        existing = tmp_path / 'receipts-2026-11-17-part-1.zip'
+        existing.write_bytes(b'something else entirely')
+
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes', '--force']
+        )
+
+        assert result.exit_code == 0, result.output
+        assert existing.read_bytes() == ZIP_BYTES
+
+    def test_files_that_vanished_are_mentioned(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(
+                    make_export(skipped_count=1, refunded_credits=3)
+                )
+            },
+        )
+        result = runner.invoke(
+            receipts.app, ['export-files', 'local', '--out', str(tmp_path), '--yes']
+        )
+        assert result.exit_code == 0
+        assert '1 file(s) had vanished' in result.output and '3 credits refunded' in result.output
+
+    def test_it_needs_a_login(self, logged_out):
+        result = runner.invoke(receipts.app, ['export-files', 'local'])
+        assert result.exit_code != 0
+
+
+class TestExportDownload:
+    def test_a_ready_export_is_downloaded(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(
+            monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())}
+        )
+
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path / 'z')]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / 'z' / 'receipts-2026-11-17-part-1.zip').read_bytes() == ZIP_BYTES
+        assert site.made('post', '/exports') == []  # nothing is created or charged
+
+    def test_it_waits_for_one_still_being_prepared(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(monkeypatch)
+
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert 'Preparing your zip files' in result.output
+        assert len(site.made('get', f'/exports/{EXPORT_ID}')) == 2  # the first look, one poll
+        assert (tmp_path / 'receipts-2026-11-17-part-1.zip').exists()
+
+    def test_a_file_that_is_already_complete_is_skipped(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(
+            monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())}
+        )
+        done = tmp_path / 'receipts-2026-11-17-part-1.zip'
+        done.write_bytes(ZIP_BYTES)
+
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert 'already downloaded, skipped' in result.output
+        assert site.made('get', STORAGE_URL) == []
+
+    def test_a_file_of_another_size_is_refused_without_force(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site = site_for_a_ready_export(
+            monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())}
+        )
+        existing = tmp_path / 'receipts-2026-11-17-part-1.zip'
+        existing.write_bytes(b'other')
+
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+
+        assert result.exit_code == 1 and 'Use --force' in result.output
+        assert existing.read_bytes() == b'other' and site.made('get', STORAGE_URL) == []
+
+    def test_force_downloads_again_even_if_complete(self, token_file, tmp_path, monkeypatch):
+        site = site_for_a_ready_export(
+            monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())}
+        )
+        (tmp_path / 'receipts-2026-11-17-part-1.zip').write_bytes(ZIP_BYTES)
+
+        result = runner.invoke(
+            receipts.app,
+            ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path), '--force'],
+        )
+
+        assert result.exit_code == 0 and len(site.made('get', STORAGE_URL)) == 1
+
+    def test_an_interrupted_run_is_finished_by_running_it_again(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        export = make_export(parts=2)
+        export['parts'][1]['filename'] = 'receipts-2026-11-17-part-2.zip'
+        bodies = {1: ZIP_BYTES, 2: ZIP_BYTES}
+        urls = {n: f'https://storage.test/part-{n}.zip' for n in (1, 2)}
+        routes = {('get', f'/exports/{EXPORT_ID}'): ok(export)}
+        for n in (1, 2):
+            routes[('get', f'/exports/{EXPORT_ID}/parts/{n}/url')] = ok(
+                {
+                    'url': urls[n],
+                    'filename': f'receipts-2026-11-17-part-{n}.zip',
+                    'size_bytes': len(ZIP_BYTES),
+                    'expires_in': 900,
+                }
+            )
+        import requests
+
+        broken = FakeResponse(200, content=bodies[2])
+        broken.fail_mid_stream = requests.exceptions.ChunkedEncodingError('reset by peer')
+        routes[('get', urls[1])] = lambda **kw: FakeResponse(200, content=bodies[1])
+        routes[('get', urls[2])] = lambda **kw: broken
+        FakeSite(monkeypatch, routes)
+
+        first = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+
+        assert first.exit_code == 1
+        assert '1 of 2 zip files failed' in first.output and 'reset by peer' in first.output
+        assert (tmp_path / 'receipts-2026-11-17-part-1.zip').exists()
+        assert not (tmp_path / 'receipts-2026-11-17-part-2.zip').exists()
+        assert not list(tmp_path.glob('.receipts-*.part'))  # no cut-off file left behind
+
+        routes[('get', urls[2])] = lambda **kw: FakeResponse(200, content=bodies[2])
+        second = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+
+        assert second.exit_code == 0, second.output
+        assert (tmp_path / 'receipts-2026-11-17-part-2.zip').read_bytes() == ZIP_BYTES
+
+    def test_a_download_of_the_wrong_size_is_not_kept(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(make_export()),
+                ('get', STORAGE_URL): lambda **kw: FakeResponse(200, content=b'PK-short'),
+            },
+        )
+
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+
+        assert result.exit_code == 1
+        assert 'received 8 bytes, expected 21' in result.output
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['.receipts_token.local']
+
+    def test_a_storage_error_is_reported(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(make_export()),
+                ('get', STORAGE_URL): FakeResponse(403, text='expired'),
+            },
+        )
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+        assert result.exit_code == 1 and 'storage failed (403)' in result.output
+
+    def test_a_refused_url_is_reported_with_the_apis_message(
+        self, token_file, tmp_path, monkeypatch
+    ):
+        site_for_a_ready_export(
+            monkeypatch,
+            {
+                ('get', f'/exports/{EXPORT_ID}'): ok(make_export()),
+                ('get', f'/exports/{EXPORT_ID}/parts/1/url'): FakeResponse(
+                    402, {'detail': 'Your receipts are paused until you add credits.'}
+                ),
+            },
+        )
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+        assert result.exit_code == 1 and 'paused until you add credits' in result.output
+
+    @pytest.mark.parametrize('status', ['failed', 'expired'])
+    def test_an_ended_export_has_nothing_to_download(
+        self, token_file, tmp_path, monkeypatch, status
+    ):
+        ended = make_export(status)
+        ended['parts'] = []
+        site_for_a_ready_export(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(ended)})
+
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+
+        assert result.exit_code == 1 and f'is {status}' in result.output
+
+    def test_an_unknown_export_is_the_apis_404(self, token_file, tmp_path, monkeypatch):
+        site_for_a_ready_export(
+            monkeypatch,
+            {('get', f'/exports/{EXPORT_ID}'): FakeResponse(404, {'detail': 'Not Found'})},
+        )
+        result = runner.invoke(
+            receipts.app, ['export-download', 'local', EXPORT_ID, '--out', str(tmp_path)]
+        )
+        assert result.exit_code == 1 and '404' in result.output
+
+
+class TestExportListGetDelete:
+    def test_exports_lists_them(self, token_file, monkeypatch):
+        site = FakeSite(
+            monkeypatch,
+            {
+                ('get', '/exports'): ok(
+                    {'count': 3, 'limit': 1, 'offset': 0, 'results': [make_export()]}
+                )
+            },
+        )
+
+        result = runner.invoke(receipts.app, ['exports', 'local', '--limit', '1'])
+
+        assert result.exit_code == 0, result.output
+        assert site.made('get', '/exports')[0]['params'] == {'limit': 1, 'offset': 0}
+        assert EXPORT_ID in result.output and 'ready' in result.output
+        assert 'Use --offset 1 to see more' in result.output
+
+    def test_exports_with_none(self, token_file, monkeypatch):
+        FakeSite(
+            monkeypatch,
+            {('get', '/exports'): ok({'count': 0, 'limit': 20, 'offset': 0, 'results': []})},
+        )
+        result = runner.invoke(receipts.app, ['exports', 'local'])
+        assert result.exit_code == 0 and 'No exports' in result.output
+
+    def test_export_get_shows_everything_and_the_parts(self, token_file, monkeypatch):
+        export = make_export(skipped_count=1, refunded_credits=3)
+        export['filters']['summary'] = ['Vendor: Acme', 'Search: "[red]x[/red]"']
+        FakeSite(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(export)})
+
+        result = runner.invoke(receipts.app, ['export-get', 'local', EXPORT_ID])
+
+        assert result.exit_code == 0, result.output
+        out = result.output
+        assert 'Status: ready' in out and 'Charged: 9 credits' in out
+        assert 'Refunded: 3 credits' in out and '1 left out' in out
+        assert 'Vendor: Acme; Search: "[red]x[/red]"' in out  # shown as typed, not as markup
+        assert 'receipts-2026-11-17-part-1.zip' in out
+        assert 'Expires: 2026-12-17T09:00:30Z' in out
+
+    def test_export_get_of_everything(self, token_file, monkeypatch):
+        FakeSite(monkeypatch, {('get', f'/exports/{EXPORT_ID}'): ok(make_export())})
+        result = runner.invoke(receipts.app, ['export-get', 'local', EXPORT_ID])
+        assert 'Selection: everything' in result.output
+
+    def test_export_delete_asks_first(self, token_file, monkeypatch):
+        site = FakeSite(monkeypatch, {('delete', f'/exports/{EXPORT_ID}'): FakeResponse(204)})
+
+        declined = runner.invoke(receipts.app, ['export-delete', 'local', EXPORT_ID], input='n\n')
+        assert declined.exit_code == 1 and site.made('delete', f'/exports/{EXPORT_ID}') == []
+
+        accepted = runner.invoke(receipts.app, ['export-delete', 'local', EXPORT_ID], input='y\n')
+        assert accepted.exit_code == 0 and 'Deleted.' in accepted.output
+        assert len(site.made('delete', f'/exports/{EXPORT_ID}')) == 1
+
+    def test_export_delete_yes_skips_the_question(self, token_file, monkeypatch):
+        site = FakeSite(monkeypatch, {('delete', f'/exports/{EXPORT_ID}'): FakeResponse(204)})
+        result = runner.invoke(receipts.app, ['export-delete', 'local', EXPORT_ID, '--yes'])
+        assert result.exit_code == 0 and len(site.calls) == 1
+
+    def test_export_delete_while_building_shows_the_409(self, token_file, monkeypatch):
+        FakeSite(
+            monkeypatch,
+            {
+                ('delete', f'/exports/{EXPORT_ID}'): FakeResponse(
+                    409, {'detail': 'This export is still being prepared.'}
+                )
+            },
+        )
+        result = runner.invoke(receipts.app, ['export-delete', 'local', EXPORT_ID, '--yes'])
+        assert result.exit_code == 1 and 'still being prepared' in result.output
+
+
+def test_size_text():
+    assert receipts._size_text(884) == '884 B'
+    assert receipts._size_text(1536) == '1.5 KB'
+    assert receipts._size_text(100 * 1024 * 1024) == '100.0 MB'
+    assert receipts._size_text(3 * 1024**3) == '3.0 GB'

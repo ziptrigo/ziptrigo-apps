@@ -19,10 +19,11 @@ and in-app notification, the effect of the Receipts settings (price 0, the daily
 re-run without enough credits, phone width, dark mode and keyboard use. RCPT-63 to RCPT-70: **Download files**
 (issue #315): the dialog and its cost, confirming and opening the zip, a cost that changed, several zip files, folder
 and file names, a file that has gone, a failed build and its refund (these use **shell steps**), and the rules around
-an export's life (one at a time, paused storage, delete, expiry, other users' exports).
+an export's life (one at a time, paused storage, delete, expiry, other users' exports). RCPT-71 and RCPT-72: the same
+exports through the JWT API (`/api/receipts/exports`) and the `inv receipts` CLI (`export-files` and companions).
 
 Out of scope: inbound email through real SES (the shell steps feed `.eml` files to the real intake
-instead), the JWT API and the CLI, rate limits (off on this server), real AI extraction, and anything
+instead), the rest of the JWT API and the CLI (only the exports', RCPT-71 and RCPT-72), rate limits (off on this server), real AI extraction, and anything
 listed under "Out of scope" at the end of this file.
 
 ## Preconditions
@@ -1331,6 +1332,42 @@ second and third failures.) It prints the id, `failed`, the charge and the same 
 | 7 | As `F` open `X1` and click **Delete**, then **Delete** in the dialog ("Delete this export? The zip files are deleted now and you will not get the credits back."). | Back on `/receipts/exports/` with "The export was deleted."; it is no longer listed; opening its URL is a 404; the credits were not refunded. |
 | 8 | Open a ready export's download link, copy the S3 URL it redirected to, delete the export, then open that URL again (shell: nothing else). | The old link fails (the object is gone). |
 | 9 | (Shell step) expire one: `python tests_e2e/ai/manage.py shell -c "from django.utils import timezone; from datetime import timedelta; from apps.receipts.models import ReceiptExport; from apps.receipts import jobs; e = ReceiptExport.objects.filter(status='ready').first(); ReceiptExport.objects.filter(pk=e.pk).update(expires_at=timezone.now()-timedelta(hours=1)); jobs.purge_exports(); e.refresh_from_db(); print(e.pk, e.status)"`. | Prints `expired`. Its page says "Expired" and "These zip files were deleted <date>. To get your files again, start a new export from the dashboard."; no download button; it stays in `/receipts/exports/` with an **Expired** pill. In admin (ADM-66) the export has no parts left. |
+
+### RCPT-71 Download files through the API: quote, create, poll, download, delete
+
+**Purpose:** `/api/receipts/exports` does what the dialog does, with the same costs, refusals and ownership.
+**Preconditions:** RCPT-64 done and its export deleted (RCPT-70 step 7); `F` with `N` live receipts and balance `B0`; a bearer token
+`T` for `F` (`curl -s -X POST $BASE/api/auth/login -H 'Content-Type: application/json' -d '{"email":"<F>","password":"<P>"}'`);
+`BASE=http://localhost:8765`; another user `G` with a token `TG`. The server runs tasks inline, so an export is `ready` when
+its `POST` answers.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `curl -s -X POST $BASE/api/receipts/exports/quote -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"layout":"vendor_year"}'`. | 200 `{"file_count": N, "total_bytes": ..., "part_count": 1, "price_per_file": 3, "cost": 3N, "balance": B0, "affordable": true, "frozen": false, "retention_days": 30, "part_bytes": ...}`. Nothing is charged (`/billing/credits/`). With `{"layout":"sideways"}`, `{"status":"nope"}` or `{"date_from":"soon"}`: 400 (`layout: Choose how to organize the files.`, ...). With `{"vendor": <a vendor id>}` or `{"q":"staples"}` the counts shrink like the dashboard's filters. |
+| 2 | Same body to `POST /api/receipts/exports` with `"expected_cost": 1`. | **409** `{"detail": "The cost changed: it is now 3N credits. Send expected_cost=3N to confirm it."}`; no export, nothing charged. |
+| 3 | `POST /api/receipts/exports` with `{"layout":"vendor_year","expected_cost":<3N>}`. | **201**: `status` (`ready` here), `layout`, `file_count` N, `charged_credits` 3N, `refunded_credits` 0, `parts` with one entry `{number: 1, filename: "receipts-<date>.zip", size_bytes, file_count: N, built: true}`, `expires_at` in 30 days, `filters` `{summary: [], params: {}}`. Balance `B0 - 3N`. **Record** the id as `AX`. A second `POST` without `expected_cost` is accepted at the live cost (the first is already ready, so nothing blocks it); delete the extra export afterwards. |
+| 4 | `GET /api/receipts/exports` and `GET /api/receipts/exports/<AX>`. | The list is `{count, limit, offset, results}`, newest first, with `AX`; the single answer is the same object. As `G` (`TG`): the list is empty of `AX` and `GET /exports/<AX>`, `.../parts/1/url` and `DELETE /exports/<AX>` are all **404**. |
+| 5 | `GET /api/receipts/exports/<AX>/parts/1/url`; then `curl -s -o part1.zip "<url>"` (no `Authorization` header); then `.../parts/2/url`. | 200 `{"url": "<storage URL>", "filename": ..., "size_bytes": ..., "expires_in": 900}` (no key of the object in any field); the zip downloads, is `size_bytes` long and opens as in RCPT-64 step 5; part 2: **404** `There is no such file in this export.` |
+| 6 | (Shell step) start one that stays "preparing" (RCPT-70 step 1), then `POST /api/receipts/exports` again and `DELETE /api/receipts/exports/<that id>`. | The `POST`: **409** `An export is already being prepared. Wait for it to finish first.`; the `DELETE`: **409** `This export is still being prepared.`. `GET` on it shows `status: building` and `parts[0].built: false`. Finish it (RCPT-70 step 4). |
+| 7 | Freeze `F` (RCPT-44) and `POST /api/receipts/exports`, `GET .../parts/1/url`; then lift it. Spend the balance down below 3N (or use a price above it) and `POST` again. | Both frozen calls: **402** `Your receipts are paused until you add credits.`; short of credits: **402** `Insufficient credits`; no export is created and nothing is charged. |
+| 8 | With `{"q":"no such vendor"}` to `POST /exports`. | **400** `There are no files to download with these filters.` |
+| 9 | `DELETE /api/receipts/exports/<AX>`, then `GET` it and `DELETE` it again. | 204 (the zip's S3 object is gone, nothing refunded); then **404** twice; it is no longer in the list. |
+
+### RCPT-72 Download files through the CLI: `inv receipts export-files` and companions
+
+**Purpose:** the command line asks before it spends, waits, downloads safely and can finish an interrupted run.
+**Preconditions:** a shell in the repo root; `RECEIPTS_PASSWORD='QaE2e-Passw0rd!'` exported; `API_BASE_URL=http://localhost:8765`;
+`inv receipts <command> local ...` with `local` the environment; `F` as in RCPT-71 with at least two vendors.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `inv receipts login local <F>`, then `inv receipts export-files local --out ./zips` and answer `n`. | The quote lines: `N files (<size>) in 1 zip file of about 100.0 MB each, with a receipts.csv of their data.` and `Cost: 3N credits (3 per file). Your balance is B0. They stay available for 30 days.`; the question `This costs 3N credits. Continue? [y/N]`; `n` exits 1 `Cancelled; nothing was charged.`; no export, no `./zips`, balance unchanged. |
+| 2 | Run it again and answer `y`. | `Charged 3N credits.`, `Export <id> started.`, `Preparing your zip files (Ctrl-C stops waiting...)...`; the zip is downloaded to `./zips/receipts-<date>.zip` (no `.receipts-...part` left); `Downloaded 1 zip file to ./zips.` The balance fell by 3N once. The zip opens as in RCPT-64 step 5. |
+| 3 | `inv receipts export-files local --out ./zips --yes` (the file from step 2 is still there). | No question (`--yes`); it is charged and prepared, then refused before downloading: exit 1 `.../receipts-<date>.zip already exists. Use --force to replace it.`; the file is untouched. The new export is listed by `exports` (its zip can be fetched with `export-download` into another folder). With `--force` the file is replaced. |
+| 4 | `inv receipts export-files local --out ./zips --vendor <a vendor id> --layout year-vendor --yes --force`, with `--from`/`--to` that match nothing, then with a bad `--layout sideways`. | The first charges `3 x` that vendor's files and downloads; no match: exit 1 `There are no files to download with these filters.`; the bad layout: exit 1 `Choose --layout year-vendor or vendor-year.` before any request. |
+| 5 | `inv receipts exports local`, then `inv receipts export-get local <id>`. | A table (id, created, status, files, charged, expires) and, for `export-get`, `Status: ready`, `Selection: everything` or the filter lines (a vendor name with `[brackets]` shows as typed), the size, `Charged: 3N credits`, and the table of zip files. |
+| 6 | (Shell step) start one that stays "preparing" (RCPT-70 step 1), then `inv receipts export-download local <id> --out ./z2` and press Ctrl-C after a few seconds. | `Preparing your zip files...`, `Written so far: 0 of 1 zip files.`; Ctrl-C exits 130 with `Stopped waiting. The export is still being prepared. Fetch it later with: receipts export-download local <id> --out ./z2`. Then build it (RCPT-70 step 4) and run that command: the zip is downloaded and no credits are charged. Running it a third time says `already downloaded, skipped`. |
+| 7 | `inv receipts export-delete local <id>` answering `n` then `y`; then `export-delete` on the same id again, and on one that is still being prepared. | `n` exits 1 `Cancelled; nothing was deleted.`; `y` prints `Deleted.`; again: `404: Not Found` (exit 1); the preparing one: `409: This export is still being prepared.` |
 
 ## Out of scope
 
