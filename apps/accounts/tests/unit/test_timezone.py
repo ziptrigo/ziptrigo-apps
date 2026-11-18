@@ -498,6 +498,7 @@ def test_the_default_skip_prefixes(settings):
         '/t/',
         '/n/',
         '/w/',
+        '/q/',
         '/static/',
         '/api/',
         '/sw.js',

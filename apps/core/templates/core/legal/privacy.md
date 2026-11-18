@@ -11,7 +11,7 @@ ZipTrigo is operated by **{{ operator_name }}**, an individual based in the {{ o
 ### 1.1 Information you give us
 
 - **Account information:** your email address, your name and your password. We store only a one-way hash of your password, never the password itself. We also store the preferences you set, such as your time zone, theme, and date and time format, and the date and version of the Terms of Use you accepted.
-- **QR codes:** the content each code encodes (such as a URL or text) and its settings.
+- **QR codes:** the content each code encodes (such as a URL or text) and its settings. If you share a QR code with a link, we also keep the link (with the label and expiry you set), and anyone who has the link can see the QR code, what it encodes and download it without signing in.
 - **File transfers:** the files you upload with their names and sizes, the recipient email addresses, the optional message, the expiry and download-limit settings, and an optional download password (stored as a hash). If you send a transfer without an account, we collect the email address you give us so we can confirm it before the transfer is sent.
 - **File requests:** if you ask other people for files with a request link, the title, message and settings of the request, an optional password (stored as a hash), and the email addresses of the people you invite. When someone uploads to your request, we store the files and the name they give or, if they are signed in, their account name and email address, and show them to you next to each file. We also store the IP address the upload came from; only our staff can see it, and it is removed after 90 days. If you upload to someone else's request, that person (and our staff, for abuse and support) can see this information.
 - **Receipts:** the receipts and invoices you upload or send by email, the details read from them (vendor, amount, date, category and, where present, the last 4 digits of a payment method), and your notes. For receipts sent by email we also keep the sender's address, the subject, and a copy of the message with its attachments removed.
@@ -31,6 +31,7 @@ If you choose **Sign in with Microsoft**, Microsoft shares with us your name, yo
 
 - **Download records:** we record the IP address and time of each download of a transfer, so the sender can see download activity and we can investigate abuse. We keep the same record when files are downloaded from a file request.
 - **Shared notes:** when someone opens a shared note we do not record who they are; the page is not stored by search engines and is not cached. If a shared note is edited through an editable link, we record the time of the edit.
+- **Shared QR codes:** when someone opens a shared QR code we do not record who they are; the page is not stored by search engines and is not cached. A scan of the code itself is counted as for any tracked code.
 - **Shared events:** when someone opens a shared World Time event we do not record who they are; the page is not stored by search engines and is not cached. The time in the visitor's own time zone is worked out in their browser.
 - **Short link clicks:** when someone follows a short link we record the time, the website they came from (its host name only), their country, their type of device, browser and operating system, and whether the visit looks automated. We do not store the visitor's IP address. We store a keyed, one-way hash of it that changes every day, used only to count unique visitors per day.
 - **QR code scans:** for tracked QR codes we count how many times a code was scanned. We do not record who scanned it.
@@ -70,7 +71,7 @@ ZipTrigo's use of information received from Google APIs adheres to the [Google A
 
 We share personal information only:
 
-- **With the people you choose:** the recipients of a transfer receive an email with your name or email address, your message and a download link. Anyone who has the address of a short link, a tracked QR code, a transfer, a file request, a shared note or a shared World Time event can open it; a file request's owner chooses who may upload to it (anyone with the link, anyone signed in, or only the people invited).
+- **With the people you choose:** the recipients of a transfer receive an email with your name or email address, your message and a download link. Anyone who has the address of a short link, a tracked QR code, a transfer, a file request, a shared note, a shared QR code or a shared World Time event can open it; a file request's owner chooses who may upload to it (anyone with the link, anyone signed in, or only the people invited).
 - **With service providers** that process data for us:
     - Amazon Web Services (file storage, and sending and receiving email);
     - a server hosting provider in the United States;

@@ -44,7 +44,8 @@ apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), cred
                       credits"), the Costs page listing every app's prices (see "Costs page").
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
                       to superusers; admin triage by status.
-apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
+apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links, share links with the
+                      public `/q/<code>` pages (issue #5, see "QR code specifics" > "Sharing").
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs, and file requests (issue
                       #306: a link for other people to upload files to you, see "File requests").
@@ -689,7 +690,7 @@ registered product (checkbox, icon and name only, plus a drag handle; one column
 `JSONField`s, `User.app_order` (every product label in the user's order, switched-off apps keep their
 place) and `User.hidden_apps` (the labels switched off), both `default=list` and `db_default=[]` (the
 #102 lesson; migration `0007`). A switched-off app leaves the header menu and the home page cards and
-nothing else: its pages, emails, notifications, public links (`/go/`, `/s/`, `/t/`, `/n/`, `/w/`) and jobs keep
+nothing else: its pages, emails, notifications, public links (`/go/`, `/s/`, `/t/`, `/n/`, `/w/`, `/q/`) and jobs keep
 working and a direct link opens it. `core` can't import `accounts`, so
 `apps.core.products.products_for(user)` reads the two attributes off the user with `getattr` (the way
 `base.html` reads `user.theme`): every registered product as `(product, visible)` in the user's order,
@@ -766,7 +767,7 @@ activates the signed-in user's zone and deactivates it again after the response 
 is read after that, in UTC), which is why every product's `|date`/`localtime()` output follows the
 user; see "Templates and static files" for how it relates to the browser-side helpers. It never
 touches `request.user` (a session and a user query) for a path starting with one of
-`settings.TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` = `('/go/', '/s/', '/t/', '/n/', '/w/', '/static/', '/api/')`: the
+`settings.TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` = `('/go/', '/s/', '/t/', '/n/', '/w/', '/q/', '/static/', '/api/')`: the
 public redirects, download page and shared notes, static files and the JWT API, none of which has a session
 zone, so they render in `TIME_ZONE` (UTC) even for a signed-in owner (a visitor's browser-side
 `{% local_time %}` is unaffected). A new hot public prefix goes in that setting. **Behaviour change
@@ -1106,7 +1107,7 @@ the Android app wants one). Code: `services/login_otp.py` (its docstring is the 
   comes *from* the accept page: the bell's polling would reload it). Never gated: the accept page,
   logout, the two documents, `accounts:timezone`, `/admin/` (staff are never locked out of it; the
   site itself still asks them), `/__e2e__/` and `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` (`/go/`, `/s/`,
-  `/t/`, `/n/`, `/w/`, `/static/`, `/api/`, the service worker). **The JWT API is not gated** (decided: accounts
+  `/t/`, `/n/`, `/w/`, `/q/`, `/static/`, `/api/`, the service worker). **The JWT API is not gated** (decided: accounts
   are created in the browser), so the Android app works for an account that has yet to accept on
   the web.
 - *Tests.* The gate is **off in every test** (root `conftest.py` patches
@@ -1786,7 +1787,10 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   a known code still redirects, only the scan-count write is skipped, protecting
   `QRCode.scan_count`'s accuracy under a shared-IP/NAT burst rather than shedding load, and an
   unknown one is still a 404, never a 429, since a real visitor must never see an error just
-  because someone else scanned the same code), and every file_transfer surface called
+  because someone else scanned the same code), `QR_SHARE_VIEW_IP` and `QR_SHARE_USER` (sharing a QR
+  code, issue #5: the public `/q/<code>` pages per IP, charged before the lookup like `/go/`'s, but
+  over it a plain 429 page; the owner's share dialog per user, validated first and charged after;
+  see "QR code specifics" > "Sharing"), and every file_transfer surface called
   out in issue #53 (anonymous upload/confirm endpoints, logged-in uploads, the download page,
   password attempts on it -- per IP *and* per transfer, so brute-forcing one transfer is throttled
   even from many IPs -- and the manage link), plus abuse reports (issue #59: `FT_REPORT_IP` strict
@@ -2369,6 +2373,97 @@ longest short code) with both colours together, scale 1 and no border, so a payl
 a QR code (`MAX_CONTENT_LENGTH` counts characters, capacity is bytes: 1,000 emoji fit no level) is
 a 400 before anything is saved; the web editor's form calls `check_content_fits` for the same
 reason and its views turn a late `ValidationError` into a 422.
+
+**Sharing** (issue #5, PR 1 of 4: copy-link sharing; sending by email, reports and takedown, and the JWT API and CLI
+are later PRs of the same issue). The owner of a QR code makes a **share link**, `<BASE_URL>/q/<code>`, that shows the
+code (image, name, what it encodes) to anyone who has the address, with no account, and lets them download the PNG.
+Sharing is free (the Costs page says so, `services/costs.py`). The link shows the QR code **as it is now**, not a
+snapshot: renaming it changes what the link shows, deleting it stops every link of it. It is Notes' share link
+(`apps/notes/models/link.py`, `services/links.py`) without a mode and without editing. Code: `models/share.py`,
+`limits.py`, `services/share.py`, `views/share.py` (owner), `views/public.py` and `public_urls.py` (public),
+`forms/share.py`, templates `qr_code/shared.html` and `qr_code/partials/share_*.html`, migration `0002_share_links`.
+
+- **`QRShareLink`** (UUID, `qrcode` `CASCADE` with `related_name='share_links'`, `code` unique and not editable:
+  `secrets.token_urlsafe(16)`, 22 characters, case-sensitive, never reused, `label` up to `LINK_LABEL_MAX` 100 -- the
+  owner's own reminder, never shown publicly --, `expires_at`, `revoked_at`, `created_at`; index `(qrcode, revoked_at)`).
+  A link is **active** while it is not revoked and has not expired (`is_active`) and **works** (`services.share.
+  is_available`) while it is active and its QR code is not deleted (later also not taken down). A revoked link is never
+  re-activated. At most `MAX_ACTIVE_LINKS_PER_CODE` (10, `limits.py`: the app has no settings singleton) links are
+  active per code ("A QR code can have at most 10 active links."; revoked and expired ones don't count, extending an
+  expired one counts it again). The migration only adds a table, so the container still serving during a deploy reads
+  nothing that changed.
+- **Services** (`services/share.py`, exported as `services.share`; refusals are `ValidationError`s keyed by field, `__all__`
+  for none; lock order: the `QRCode` row, then the link; `owner_of(qrcode)` types `created_by` for `ty`). `create_link(qrcode,
+  *, label='', expires_on=None)`, `update_link(link, *, label=None, expires_on=UNCHANGED, clear_expiry=False)` and
+  `revoke_link(link)` (idempotent, final, **always allowed**, also for a deleted code); `check_create` / `check_update` are the
+  same refusals with no lock and no write, which the views run **before** charging `QR_SHARE_USER` (validated first, charged
+  after). `expires_on` is a date = the end of that day in the owner's zone (`local_datetime`, not in the past: "Choose a date
+  that has not passed."), or a date-time (that instant; naive = the owner's zone), as Notes' links take them (the API of a later
+  PR needs the latter); the date a link already expires on is no change, so an expired link's label can be edited. A deleted
+  code is refused ("This QR code was deleted."), decided again under the lock. `get_available(code)` returns the link with its
+  code and the code's owner loaded, or `None` for **every** reason alike (unknown, over `MAX_CODE_LENGTH`, revoked, expired,
+  code deleted). `list_links(qrcode)` (active first, newest first, each with `url`, `state`, `expiry_value`: one query),
+  `link_url` (`BASE_URL` + `/q/<code>`, never read from a request), `with_active_link_flag(queryset)` (one `Exists`, for the
+  dashboard's icon).
+- **The owner's dialog.** The QR app has no detail page, so the panel is a dialog: the dashboard row menu's **Share** item
+  (between Duplicate and Download) and the editor's **Share** button (edit mode only, next to the heading) `hx-get`
+  `qr_code:share` (`/qr/share/<id>/`) into a `#qr-share-modal` host, with the shared `fragmentModal` (`core/js/fragment_modal.js`,
+  which both pages load as a classic script). The response is `partials/share_modal.html` (the overlay) around
+  `#qr-share-panel` (`partials/share_panel.html`, the content every action re-renders: htmx `hx-target="#qr-share-panel"`). A
+  non-htmx GET redirects to the dashboard with `?share=<id>`, which opens the dialog on load (`hx-trigger="load"` on the host,
+  only for an id that is the user's, non-deleted code). `POST .../new/` (`share-create`), `.../<link>/edit/` (`share-edit`: a
+  field missing from the POST is left alone, a posted empty `expires_on` removes the expiry) and `.../<link>/revoke/`
+  (`share-revoke`). A refusal is a 422 with `Label: message` lines in `#qr-share-msg` (`partials/share_messages.html`, field
+  errors under the fields: the usual convention); the dialog lists links active first, then revoked/expired greyed with their
+  state, each with its address and **Copy link** (the shared `copyText`), the label, the expiry, **Edit** and **Revoke**. **Revoke
+  goes through the shared confirmation modal** (`confirmModal`, a plain POST: a flash "Link revoked." and the dashboard with
+  `?share=<id>`, so the dialog is open again); the panel gives that modal its own `x-data="confirmModal"` scope wrapped around the
+  link list **only**, because `confirmModal` and `fragmentModal` both define `close()` and the inner one would shadow the Close
+  button's. The overlay's Escape handler skips while the confirmation shows (`#confirm-modal-title` visible), so Escape closes
+  only the confirmation. A plain (non-htmx) action flashes and redirects the same way. Each action's answer also carries an
+  out-of-band `<span id="qr-shared-<id>">` that swaps the dashboard row's link icon ("Shared", shown while the code has an active
+  link; the dashboard renders the same span from `with_active_link_flag`: one subquery, no query per row). Another user's code or
+  link, a deleted code, and a link under another code are a 404. There is no "QR code of the link" popup: the thing shared is itself
+  a QR code.
+- **The public pages** (`public_urls.py`, `app_name = 'q'`, root-mounted in `config/urls.py` next to `/n/` and `/w/`: `/q/<code>`
+  and `/q/<code>/image`, paths spelled without a trailing slash, one is accepted; the code is `[A-Za-z0-9_-]+`). `/q/` is in
+  `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES`, so the pages are never terms-gated, load no session and render in UTC with the public date
+  wording. **The page** (`qr_code/shared.html`, extending `core/base.html` like the shared note and event pages): the name, the QR
+  image, **Download**, and **This QR code leads to** (a URL code: `original_url` for a tracked code, else its content) or **This
+  QR code contains** (a text code) as plain text with **Copy** -- never a clickable link, with a note saying so; "Expires <time>"
+  (`{% local_time %}`) when the link has an expiry. Nothing about the owner, the label, the scan count or other links; everything
+  is escaped. **The image** is `QRCodeGenerator.render_png(qrcode)`, the owner's own settings, always PNG; `?download=1` makes it
+  an attachment named after the code (`slugify(name)` or `qr-code`); it carries `X-Content-Type-Options: nosniff`. A tracked
+  code's image still encodes `/go/<code>`, so **a scan of a shared copy counts in `scan_count`** like any scan. **Every answer**:
+  `Cache-Control: no-store, private`, `Referrer-Policy: strict-origin` (not `no-referrer`: with it a browser sends `Origin: null`
+  on a same-origin form POST and Django's CSRF check refuses it, which the report form to come would hit), `X-Robots-Tag:
+  noindex, nofollow` and a `noindex` meta. **Every link that doesn't work** gets the existing standalone `qr_code/unavailable.html`,
+  404, rendered from no context, byte for byte the same for every reason and the same page `/go/<code>` shows for an unknown code
+  (a test pins it; it makes at most one query). `QR_SHARE_VIEW_IP` (120/min per IP) is charged **before** the lookup on both URLs,
+  so made-up codes spend it too, and the page and the image share it; over it a plain 429 page (`Retry-After`, the same
+  headers). A code appears in access logs like `/n/<code>`'s does. nginx counts `/q/` in its main per-IP zone: nothing changed in
+  the `infra` repo.
+- **Admin** (`admin.py`): the read-only `QRShareLinkAdmin` (no add, change or delete) and the links as a read-only inline on
+  `QRCodeAdmin`. **Never a full code**: only the first 6 characters (`abc123...`) are listed, the search doesn't look in it, and
+  `_NoCodeLookupMixin.lookup_allowed` (Notes' `ReadOnlyModelAdmin.lookup_allowed`, copied: products can't import each other) refuses
+  any query-string lookup with a `code` part (`?code__startswith=`, `?share_links__code=`...), which Django would otherwise accept
+  and use to narrow a code down a character at a time; `short_code` lookups stay allowed. `QRCodeAdmin` allows delete, so it
+  overrides `get_deleted_objects` to drop the share links' read-only admin from `perms_needed` for a caller who holds
+  `qr_code.delete_qrsharelink` (a superuser does), and `qr_code.qrsharelink` is in `accounts.admin.CASCADE_WITH_USER_MODELS` so
+  deleting a **user** with shared codes keeps working (`qr_code`'s other models have admins that allow delete, so the app is not in
+  `CASCADE_WITH_USER_APP_LABELS`). Deleting a user or a QR code cascades its links.
+- **Privacy Policy**: `privacy.md` says a share link shows the QR code to anyone who has it and that the link (with its label and
+  expiry) is kept, and has a "Shared QR codes" line next to the shared notes and events ones; `TERMS_VERSION` is **not** bumped
+  (the owner decides; the lines about recipient email addresses and reports come with the PRs that store them).
+- **Not in this PR** (issue #5's later PRs): sending the link by email (recipients, `QR_SHARE_EMAIL_USER`), reports and takedown
+  (a takedown will not stop a tracked code's `/go/` redirect, which is printed on physical codes), the JWT API and `inv qrcode`
+  commands. No "save a copy" for a signed-in visitor.
+- **Tests**: `apps/qr_code/tests/test_share_links.py` (rules, expiry in the owner's zone, the cap, availability, query counts),
+  `test_share_panel.py` (the dashboard item and icon, the dialog, create/edit/revoke, refusals, 404s, rate limits),
+  `test_share_public.py` (every unavailable case identical, headers, image and download, a tracked code's image and scan count,
+  the rate limit), `test_share_admin.py` (masked code, refused lookups, read-only, deleting a code or user with links), helpers in
+  `share_support.py`; the Playwright `tests_e2e/test_qr_share.py` (share from the dashboard and the editor, copy, a second anonymous
+  context opens, downloads, Escape and revoke); the AI plan cases QR-32 to QR-37 and ADM-68.
 
 File transfer specifics: the send page's file upload endpoints
 (`apps/file_transfer/views/uploads.py`, and their anonymous twins in `views/anonymous.py`) are a
@@ -8106,7 +8201,7 @@ on a page looks like; keep them apart:
   variable holds the formats active for the request (`activate`, `deactivate`, `get_active`, default
   `PUBLIC`, and the `override(formats)` context manager). `TimezoneMiddleware` activates the signed-in
   user's (`formats_for(user)`, duck-typed on `date_format` / `time_format`) and deactivates after the
-  response; it skips `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` (`/go/`, `/s/`, `/t/`, `/n/`, `/w/`, `/static/`, `/api/`), so
+  response; it skips `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` (`/go/`, `/s/`, `/t/`, `/n/`, `/w/`, `/q/`, `/static/`, `/api/`), so
   **public pages and the API render `PUBLIC` for everyone**, a signed-in owner included. Any other
   page an anonymous visitor reaches renders `PUBLIC` too. **Messages are always public**: an email, a
   notification or a push is written by a job or for someone who may have no account, so it passes

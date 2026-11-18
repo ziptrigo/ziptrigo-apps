@@ -1,0 +1,38 @@
+{% extends 'core/base.html' %}
+{% load local_time %}
+
+{% block title %}{{ qrcode.name }} - ZipTrigo{% endblock %}
+
+{% block extra_css %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+{% comment %} A shared QR code, for anyone who has the link (issue #5). Shows nothing about the owner, the link's label, the scan count
+   or any other link. Needs `qrcode`, `link`, `is_url`, `shown_text` (where a URL code leads, or the text of a text code) and `page_url`. {% endcomment %}
+<div class="container mx-auto px-4 py-8 max-w-2xl">
+    <h1 class="mb-2 break-words text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ qrcode.name }}</h1>
+    {% if link.expires_at %}<p class="mb-4 text-xs text-gray-500 dark:text-gray-400">Expires {% local_time link.expires_at %}</p>{% endif %}
+
+    <div class="mb-6 flex justify-center rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
+        <img src="{% url 'q:image' link.code %}" alt="QR code: {{ qrcode.name }}" data-qr-image
+             class="h-auto w-full max-w-xs rounded-md bg-white">
+    </div>
+
+    <div class="mb-6 flex flex-wrap items-center gap-2">
+        <a href="{% url 'q:image' link.code %}?download=1" download rel="nofollow"
+           class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+            <i class="fas fa-download mr-2" aria-hidden="true"></i>Download</a>
+    </div>
+
+    <section aria-labelledby="qr-shared-what" class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6">
+        <h2 id="qr-shared-what" class="mb-2 text-sm font-medium text-gray-500 dark:text-gray-400">{% if is_url %}This QR code leads to{% else %}This QR code contains{% endif %}</h2>
+        <div x-data="copyText" class="flex flex-wrap items-start gap-2">
+            <p x-ref="text" data-qr-text class="min-w-0 flex-1 whitespace-pre-wrap break-all text-sm text-gray-900 dark:text-gray-100">{{ shown_text }}</p>
+            <button type="button" @click="copy()"
+                    class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+                <span x-text="copied ? 'Copied' : 'Copy'">Copy</span></button>
+        </div>
+        {% if is_url %}<p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Shown as text, not a link: check where it goes before you open it.</p>{% endif %}
+    </section>
+</div>
+{% endblock %}

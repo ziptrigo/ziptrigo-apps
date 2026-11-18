@@ -10,6 +10,10 @@ from .views import (
     qrcode_image,
     qrcode_preview,
     qrcode_short_code,
+    share_create,
+    share_edit,
+    share_panel,
+    share_revoke,
 )
 
 app_name = 'qr_code'
@@ -25,4 +29,8 @@ urlpatterns = [
     path('duplicate/<uuid:qr_id>/', qrcode_duplicate, name='duplicate'),
     path('image/<uuid:qr_id>/', qrcode_image, name='image'),
     path('delete/<uuid:qr_id>/', qrcode_delete, name='delete'),
+    path('share/<uuid:qr_id>/', share_panel, name='share'),
+    path('share/<uuid:qr_id>/new/', share_create, name='share-create'),
+    path('share/<uuid:qr_id>/<uuid:link_id>/edit/', share_edit, name='share-edit'),
+    path('share/<uuid:qr_id>/<uuid:link_id>/revoke/', share_revoke, name='share-revoke'),
 ]

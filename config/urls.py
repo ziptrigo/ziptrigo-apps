@@ -44,6 +44,8 @@ urlpatterns = [
     path('', include('apps.notes.public_urls')),
     # Shared World Time events live at the root too (`/w/<code>`).
     path('', include('apps.world_time.public_urls')),
+    # Shared QR codes live at the root too (`/q/<code>`, issue #5).
+    path('', include('apps.qr_code.public_urls')),
     path('', include('apps.core.urls')),
 ]
 

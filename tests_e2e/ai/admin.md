@@ -1132,6 +1132,22 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | 6 | Delete a throwaway user who made an export from `/admin/accounts/user/`. | The delete page lists the user's exports among the objects removed and is allowed; afterwards the export rows and the zip objects are gone. |
 | 7 | `/admin/core/scheduledjob/`. | `todo.purge_exports` (daily, "Deletes the zip files of to-do exports once their retention days have passed...") and `todo.retry_exports` (every 5 minutes, "Resumes to-do exports whose build stalled...") are listed. |
 
+### ADM-68 QR share links in the admin never show a code
+
+**Purpose:** a QR share link's code is the capability to its QR code, so no admin page shows it in full (issue #5).
+**Preconditions:** Session A (`qa.admin`); `qr_code.md` QR-32 to QR-34 done: `QA Text` has an active link, an expired one and a revoked one.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/`, find **QR share links** in the QR codes group. | A **View** entry, no Add. |
+| 2 | `/admin/qr_code/qrsharelink/`. | A list with **Code** (only the first 6 characters and `...`), **QR code** (a link to its admin page), **Owner** (`qa.user@example.com`), **Now** (`active`, `revoked`, `expired`, or `active (QR code unavailable)` for a link of a deleted code), **Label**, **Expires at**, **Created at**. No full 22-character code anywhere in the page source. |
+| 3 | Search for the QR code's name and for `qa.user@example.com`. | Each narrows the list; searching for a full code (copy it from the owner's dialog) finds **nothing**. |
+| 4 | Open a link. | Every field read-only, again only the first 6 characters; no Save, no Delete. `/admin/qr_code/qrsharelink/add/` and `.../<id>/delete/` are 403. |
+| 5 | `/admin/qr_code/qrcode/<id>/change/` of `QA Text`. | A read-only **QR share links** table at the bottom (code hint, label, now, expires, revoked, created), no add or delete controls; no full code in the page source. |
+| 6 | Try `/admin/qr_code/qrsharelink/?code__startswith=<first character of a code>`, `?code__exact=...` and `/admin/qr_code/qrcode/?share_links__code__startswith=...`. | Each answers Django's "bad lookup" error (HTTP 400, or a redirect to `?e=1`), never a filtered list. A harmless lookup such as `/admin/qr_code/qrcode/?short_code__startswith=a` still works. |
+| 7 | Delete `QA Text` from `/admin/qr_code/qrcode/<id>/delete/` as the superuser (a copy made for this step). | The confirmation lists the QR code and its share links among the objects removed and is allowed; afterwards the links are gone and their addresses give the neutral page. |
+| 8 | Delete a throwaway user who has a shared QR code from `/admin/accounts/user/`. | The delete page lists the user's QR codes and share links and is allowed; afterwards both are gone. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

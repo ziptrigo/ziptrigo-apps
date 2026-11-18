@@ -116,7 +116,7 @@ MIDDLEWARE = [
 ]
 # Paths `TimezoneMiddleware` leaves alone: it would otherwise resolve `request.user` (a session and
 # a user query) on the hot public ones. The short links, the download page and the shared note
-# pages (`/n/<code>`, issue #260) serve visitors, not accounts, static files render nothing, and
+# pages (`/n/<code>`, issue #260) and shared QR codes (`/q/<code>`, issue #5) serve visitors, not accounts, static files render nothing, and
 # the API authenticates with JWTs, not sessions, so none of them has a saved zone to activate;
 # they render in `TIME_ZONE` (UTC).
 # The service worker, the manifest and the push answer endpoint (issue #239) are fetched by the
@@ -127,6 +127,7 @@ TIMEZONE_MIDDLEWARE_SKIP_PREFIXES = (
     '/t/',
     '/n/',
     '/w/',
+    '/q/',
     '/static/',
     '/api/',
     '/sw.js',
@@ -427,6 +428,14 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # burst, not to shed load (an increment is already one cheap `UPDATE`; the redirect itself is
     # the expensive-if-anything part, and that never gets skipped).
     'QR_REDIRECT_IP': (120, 60),
+    # Sharing a QR code (issue #5). The shared pages `/q/<code>` and `/q/<code>/image`, public:
+    # per IP, charged *before* the code is looked up so made-up codes spend it too; over it a
+    # plain 429 page. A person opening a shared code stays far below it; a script guessing codes
+    # (128 bits: it never will) or scraping one does not.
+    'QR_SHARE_VIEW_IP': (120, 60),
+    # The owner's share panel: creating, editing and revoking a link. Per user, validated first
+    # and charged after (a refused form spends nothing).
+    'QR_SHARE_USER': (60, 60),
     # -- short_url (issue #162): the `/s/<code>` redirect and the owner's pages --
     # `/s/<code>` redirects: public and high-traffic by design, so as generous as `/go/<code>`.
     # Same behaviour over the limit (`apps/short_url/views/redirect.py`): charged *before* the

@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AnonymousUser
 from django.http import Http404, HttpResponse
@@ -7,7 +9,18 @@ from django.utils.text import slugify
 from apps.accounts.http import MaybeAuthenticatedHttpRequest
 
 from ..models import QRCode
-from ..services import QRCodeGenerator
+from ..services import QRCodeGenerator, share
+
+
+def _share_to_open(request: MaybeAuthenticatedHttpRequest, user) -> UUID | None:
+    """The id in `?share=<id>` when it is one of the user's QR codes: the dashboard then opens its
+    share dialog on load (where a plain POST of the dialog goes back to)."""
+    try:
+        qr_id = UUID(request.GET.get('share', ''))
+    except ValueError:
+        return None
+    owned = QRCode.objects.filter(id=qr_id, created_by=user, deleted_at__isnull=True)
+    return qr_id if owned.exists() else None
 
 
 @login_required
@@ -33,7 +46,8 @@ def dashboard(request: MaybeAuthenticatedHttpRequest) -> HttpResponse:
         qrcodes = qrcodes.order_by('-created_at')
 
     context = {
-        'qrcodes': qrcodes,
+        'qrcodes': share.with_active_link_flag(qrcodes),
+        'open_share': _share_to_open(request, user),
         'query': query,
         'sort': 'name' if sort == 'name' else 'newest',
         'sort_options': [('newest', 'Newest'), ('name', 'Name')],

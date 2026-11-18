@@ -1,3 +1,4 @@
+from . import share
 from .management import (
     check_content_fits,
     create_qrcode,
@@ -11,6 +12,7 @@ from .management import (
 from .qrcode import QRCodeGenerator
 
 __all__ = [
+    'share',
     'check_content_fits',
     'QRCodeGenerator',
     'create_qrcode',
