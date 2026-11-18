@@ -9,8 +9,9 @@ validation (a malformed id, an unknown key in a body: every body is `extra='forb
 the site-wide rate limiter, with `Retry-After`.
 
 Rate limits are the web's, so the budgets are shared: creating and changing a link spend
-`QR_SHARE_USER` (checked first, charged after the refusals that need no lock, so a refused
-request spends nothing); emailing and resending spend `QR_SHARE_EMAIL_USER`, one hit per email,
+`QR_SHARE_USER`, charged only after the refusals that need no lock (`check_create` /
+`check_update`) and just before the write, so a refused request spends nothing, and a `PATCH`
+that would change nothing spends nothing either; emailing and resending spend `QR_SHARE_EMAIL_USER`, one hit per email,
 which the service charges once nothing else can refuse the request. **Revoking is never rate
 limited** and is allowed whatever the code's state.
 """
@@ -31,6 +32,7 @@ from apps.core import ratelimit
 from ..models import QRCode, QRShareLink, QRShareRecipient
 from ..schemas import (
     QRCodeShareEmailSchema,
+    QRCodeShareErrorSchema,
     QRCodeShareLinkCreateSchema,
     QRCodeShareLinkSchema,
     QRCodeShareLinkUpdateSchema,
@@ -38,13 +40,18 @@ from ..schemas import (
 from ..services import QRCodeTakenDownError, share, share_emails
 from .qrcode import router
 
+_API_FIELDS = {'expires_on': 'expires_at'}  # the services' field names that differ from the API's
+
 
 def _detail(exc: ValidationError) -> str:
-    """One readable line for a `ValidationError`: `field: message` pairs when the service keyed its
-    errors by field, a message that belongs to no field plain."""
+    """One readable line for a `ValidationError`: `field: message` pairs (the field named as the
+    API's request body names it) when the service keyed its errors by field, a message that
+    belongs to no field plain."""
     if hasattr(exc, 'error_dict'):
         return ' '.join(
-            message if field_name == '__all__' else f'{field_name}: {message}'
+            message
+            if field_name == '__all__'
+            else f'{_API_FIELDS.get(field_name, field_name)}: {message}'
             for field_name, messages in exc.message_dict.items()
             for message in messages
         )
@@ -73,6 +80,13 @@ def _owned_qrcode(request, qr_id: UUID) -> QRCode:
     )
 
 
+_ERRORS = {
+    400: QRCodeShareErrorSchema,
+    404: QRCodeShareErrorSchema,
+    409: QRCodeShareErrorSchema,
+}
+
+
 def _people() -> Prefetch:
     return Prefetch('recipients', queryset=QRShareRecipient.objects.order_by('created_at', 'pk'))
 
@@ -94,6 +108,7 @@ def _data(link: QRShareLink) -> dict:
         'expires_at': link.expires_at,
         'revoked_at': link.revoked_at,
         'active': link.is_active(),
+        'state': share.state(link),
         'recipients': [
             {'id': person.pk, 'email': person.email, 'last_sent_at': person.last_sent_at}
             for person in link.recipients.all()
@@ -112,7 +127,11 @@ def _charge(request) -> None:
     ratelimit.enforce(ratelimit.hit_user(request.auth, 'QR_SHARE_USER'))
 
 
-@router.get('/{uuid:qr_id}/links', response=list[QRCodeShareLinkSchema], auth=JWTAuth())
+@router.get(
+    '/{uuid:qr_id}/links',
+    response={200: list[QRCodeShareLinkSchema], 404: QRCodeShareErrorSchema},
+    auth=JWTAuth(),
+)
 def list_links(request, qr_id: UUID):
     """The QR code's share links: the active ones first (newest first), then the revoked and
     expired ones. Works for a code staff took down (none of its links work then)."""
@@ -120,7 +139,9 @@ def list_links(request, qr_id: UUID):
     return [_data(link) for link in share.list_links(qrcode)]
 
 
-@router.post('/{uuid:qr_id}/links', response={201: QRCodeShareLinkSchema}, auth=JWTAuth())
+@router.post(
+    '/{uuid:qr_id}/links', response={201: QRCodeShareLinkSchema, **_ERRORS}, auth=JWTAuth()
+)
 def create_link(request, qr_id: UUID, payload: QRCodeShareLinkCreateSchema):
     """Make a share link: anyone with the address (`url`) can see the QR code and download it.
     `expires_at` is a date (the end of that day in your time zone) or a date-time, not in the
@@ -134,11 +155,28 @@ def create_link(request, qr_id: UUID, payload: QRCodeShareLinkCreateSchema):
     return 201, _again(qrcode, link)
 
 
-@router.patch('/{uuid:qr_id}/links/{uuid:link_id}', response=QRCodeShareLinkSchema, auth=JWTAuth())
+def _real_changes(link: QRShareLink, changes: dict) -> dict:
+    """The part of `changes` that would alter the link (the services' own no-op rules)."""
+    real: dict = {}
+    if 'label' in changes and share.clean_label(changes['label']) != link.label:
+        real['label'] = changes['label']
+    if changes.get('clear_expiry') and link.expires_at is not None:
+        real['clear_expiry'] = True
+    if 'expires_on' in changes and share.expiry_changes(link, changes['expires_on']):
+        real['expires_on'] = changes['expires_on']
+    return real
+
+
+@router.patch(
+    '/{uuid:qr_id}/links/{uuid:link_id}',
+    response={200: QRCodeShareLinkSchema, **_ERRORS},
+    auth=JWTAuth(),
+)
 def update_link(request, qr_id: UUID, link_id: UUID, payload: QRCodeShareLinkUpdateSchema):
     """Change a link's `label` or `expires_at`; only the fields present are applied, and an
     explicit `null` clears either. A revoked link cannot be changed (400); the code never
-    changes. A body with nothing in it changes nothing and spends no budget."""
+    changes. A body that would change nothing (nothing in it, the same label, the expiry it
+    already has, `null` for a link with no expiry) answers the link and spends no budget."""
     qrcode = _owned_qrcode(request, qr_id)
     link = _owned_link(qrcode, link_id)
     fields = payload.model_dump(exclude_unset=True)
@@ -153,13 +191,20 @@ def update_link(request, qr_id: UUID, link_id: UUID, payload: QRCodeShareLinkUpd
     if changes:
         with _mapped_errors():
             share.check_update(link, **changes)
-            _charge(request)
-            share.update_link(link, **changes)
-        link = _owned_link(qrcode, link_id)
+            real = _real_changes(link, changes)
+            if real:
+                _charge(request)
+                share.update_link(link, **real)
+        if real:
+            link = _owned_link(qrcode, link_id)
     return _data(link)
 
 
-@router.delete('/{uuid:qr_id}/links/{uuid:link_id}', response={204: None}, auth=JWTAuth())
+@router.delete(
+    '/{uuid:qr_id}/links/{uuid:link_id}',
+    response={204: None, 404: QRCodeShareErrorSchema},
+    auth=JWTAuth(),
+)
 def revoke_link(request, qr_id: UUID, link_id: UUID):
     """Revoke a link: it stops working for good (idempotent, never rate limited, and allowed
     whatever the QR code's state: a leaked link can always be killed). A revoked link is never
@@ -172,7 +217,7 @@ def revoke_link(request, qr_id: UUID, link_id: UUID):
 
 @router.post(
     '/{uuid:qr_id}/links/{uuid:link_id}/email',
-    response=QRCodeShareLinkSchema,
+    response={200: QRCodeShareLinkSchema, **_ERRORS},
     auth=JWTAuth(),
 )
 def email_link(request, qr_id: UUID, link_id: UUID, payload: QRCodeShareEmailSchema):
@@ -194,7 +239,7 @@ def email_link(request, qr_id: UUID, link_id: UUID, payload: QRCodeShareEmailSch
 
 @router.post(
     '/{uuid:qr_id}/links/{uuid:link_id}/recipients/{uuid:recipient_id}/resend',
-    response=QRCodeShareLinkSchema,
+    response={200: QRCodeShareLinkSchema, **_ERRORS},
     auth=JWTAuth(),
 )
 def resend_to_recipient(request, qr_id: UUID, link_id: UUID, recipient_id: UUID):

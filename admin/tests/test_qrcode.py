@@ -115,6 +115,7 @@ LINK = {
     'expires_at': None,
     'revoked_at': None,
     'active': True,
+    'state': 'active',
     'recipients': [],
     'created_at': '2026-11-09T09:00:00Z',
 }
@@ -189,8 +190,20 @@ LINKS_PATH = f'/qr/{QR_ID}/links'
 
 
 def test_links_lists_them_with_their_state_and_people(api):
-    revoked = {**LINK, 'id': 'r' * 8, 'revoked_at': '2026-11-10T09:00:00Z', 'active': False}
-    expired = {**LINK, 'id': 'e' * 8, 'expires_at': '2026-11-01T09:00:00Z', 'active': False}
+    revoked = {
+        **LINK,
+        'id': 'r' * 8,
+        'revoked_at': '2026-11-10T09:00:00Z',
+        'active': False,
+        'state': 'revoked',
+    }
+    expired = {
+        **LINK,
+        'id': 'e' * 8,
+        'expires_at': '2026-11-01T09:00:00Z',
+        'active': False,
+        'state': 'expired',
+    }
     api.on('get', LINKS_PATH, ApiResponse(200, [EMAILED, revoked, expired]))
 
     result = invoke('links', 'local', QR_ID)

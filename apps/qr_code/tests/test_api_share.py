@@ -179,10 +179,12 @@ class TestList:
             'expires_at',
             'revoked_at',
             'active',
+            'state',
             'recipients',
             'created_at',
         }
         assert data[1]['active'] is False and data[1]['revoked_at'] is not None
+        assert [item['state'] for item in data] == ['active', 'revoked']
 
     def test_the_list_is_three_queries_whatever_the_number_of_links(self, client, qrcode, auth):
         for n in range(MAX_ACTIVE_LINKS_PER_CODE):
@@ -264,7 +266,7 @@ class TestCreate:
         response = post(client, links_url(qrcode), {'expires_at': '2020-01-01'}, **auth)
 
         assert response.status_code == 400
-        assert response.json()['detail'] == 'expires_on: Choose a date that has not passed.'
+        assert response.json()['detail'] == 'expires_at: Choose a date that has not passed.'
         assert not QRShareLink.objects.exists()
 
     def test_a_long_label_is_a_400(self, client, qrcode, auth):
@@ -471,6 +473,11 @@ class TestEmail:
         assert too_many.status_code == 400 and 'at most 20 people' in too_many.json()['detail']
         assert not QRShareRecipient.objects.exists() and sent == []
 
+    def test_an_over_long_address_is_a_422(self, client, qrcode, link, auth):
+        url = links_url(qrcode, link.pk, 'email')
+        long = 'a' * 320 + '@example.com'
+        assert post(client, url, {'emails': [long]}, **auth).status_code == 422
+
     def test_an_empty_list_and_unknown_keys_are_a_422(self, client, qrcode, link, auth):
         url = links_url(qrcode, link.pk, 'email')
         assert post(client, url, {'emails': []}, **auth).status_code == 422
@@ -644,6 +651,32 @@ class TestRateLimits:
             assert patch(client, url, {}, **auth).status_code == 200
 
         assert post(client, links_url(qrcode), {}, **auth).status_code == 201
+
+    def test_a_patch_that_changes_nothing_spends_nothing(self, client, qrcode, auth):
+        day = (timezone.now() + timedelta(days=9)).date()
+        dated = share.create_link(qrcode, label='Sam', expires_on=day)
+        plain = share.create_link(qrcode)
+        before = dated.expires_at
+        for _ in range(8):
+            same = patch(
+                client,
+                links_url(qrcode, dated.pk),
+                {'label': 'Sam', 'expires_at': day.isoformat()},
+                **auth,
+            )
+            assert same.status_code == 200 and same.json()['label'] == 'Sam'
+            cleared = patch(client, links_url(qrcode, plain.pk), {'expires_at': None}, **auth)
+            assert cleared.status_code == 200
+        dated.refresh_from_db()
+
+        assert dated.expires_at == before
+        assert ratelimit.peek_user(qrcode.created_by, 'QR_SHARE_USER').remaining == 3
+
+    def test_a_real_patch_after_no_ops_still_spends_one(self, client, qrcode, link, auth):
+        url = links_url(qrcode, link.pk)
+        patch(client, url, {'label': ''}, **auth)
+        assert patch(client, url, {'label': 'new'}, **auth).status_code == 200
+        assert ratelimit.peek_user(qrcode.created_by, 'QR_SHARE_USER').remaining == 2
 
     def test_a_taken_down_code_spends_no_budget(self, client, qrcode, auth):
         staff_takedown(qrcode)

@@ -288,12 +288,6 @@ def _expiry(value: str) -> str:
         ) from None
 
 
-def _link_state(link: dict) -> str:
-    if link['revoked_at']:
-        return 'revoked'
-    return 'active' if link['active'] else 'expired'
-
-
 def _people(link: dict) -> str:
     return ', '.join(person['email'] for person in link['recipients'])
 
@@ -323,7 +317,7 @@ def qrcode_links(environment: EnvironmentAnnotation, qr_id: QRIdAnnotation):
             link['id'],
             link['url'],
             Text(link['label']),
-            _link_state(link),
+            link['state'],
             (link['expires_at'] or '')[:10],
             Text(_people(link)),
         )
@@ -352,9 +346,9 @@ def qrcode_share(
         qrcode share local 1b6e2f4a-...
         qrcode share local 1b6e2f4a-... --label "for Sam" --expires 2026-12-31 --to sam@example.com
     """
-    select_environment(environment)
     if message and not to:
         raise typer.BadParameter('--message goes with --to.')
+    select_environment(environment)
     payload: dict = {}
     if label:
         payload['label'] = label

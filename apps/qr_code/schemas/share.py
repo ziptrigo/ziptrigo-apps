@@ -2,7 +2,7 @@
 
 import re
 from datetime import date, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from ninja import Schema
@@ -44,11 +44,20 @@ class QRCodeShareRecipientSchema(Schema):
     last_sent_at: datetime | None
 
 
+class QRCodeShareErrorSchema(Schema):
+    """The body of a 400, 404 or 409: one line saying what was refused. A 400 reads `field:
+    message` when the refusal belongs to a field of the request (`expires_at`, `label`, `emails`,
+    `message`) and is the message alone otherwise."""
+
+    detail: str
+
+
 class QRCodeShareLinkSchema(Schema):
     """One share link of a QR code. `url` is the address to hand out (`<site>/q/<code>`); anyone
     who has it sees the QR code as it is now and can download it. `label` is the owner's own
     reminder of who it is for, never shown publicly. `active` means not revoked and not expired;
-    the link *works* only while its QR code is also not deleted or taken down. A revoked link is
+    the link *works* only while its QR code is also not deleted or taken down. `state` is `revoked`,
+    `expired` or `active` (the same fact as `active` and `revoked_at`, ready to show). A revoked link is
     never active again. `recipients` are the people it was emailed to, oldest first."""
 
     id: UUID
@@ -57,6 +66,7 @@ class QRCodeShareLinkSchema(Schema):
     expires_at: datetime | None
     revoked_at: datetime | None
     active: bool
+    state: Literal['active', 'expired', 'revoked']
     recipients: list[QRCodeShareRecipientSchema]
     created_at: datetime
 
@@ -87,5 +97,7 @@ class QRCodeShareEmailSchema(Schema):
 
     model_config = ConfigDict(extra='forbid')
 
-    emails: list[str] = Field(min_length=1, max_length=MAX_RECIPIENTS_PER_LINK * 5)
+    emails: list[Annotated[str, Field(max_length=320)]] = Field(
+        min_length=1, max_length=MAX_RECIPIENTS_PER_LINK * 5
+    )
     message: str = ''

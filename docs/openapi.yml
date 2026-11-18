@@ -497,6 +497,12 @@ paths:
                   $ref: '#/components/schemas/QRCodeShareLinkSchema'
                 title: Response
                 type: array
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
       description: 'The QR code''s share links: the active ones first (newest first), then the revoked and
 
         expired ones. Works for a code staff took down (none of its links work then).'
@@ -522,6 +528,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QRCodeShareLinkSchema'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
       description: 'Make a share link: anyone with the address (`url`) can see the QR code and download it.
 
         `expires_at` is a date (the end of that day in your time zone) or a date-time, not in the
@@ -565,11 +589,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QRCodeShareLinkSchema'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
       description: 'Change a link''s `label` or `expires_at`; only the fields present are applied, and an
 
         explicit `null` clears either. A revoked link cannot be changed (400); the code never
 
-        changes. A body with nothing in it changes nothing and spends no budget.'
+        changes. A body that would change nothing (nothing in it, the same label, the expiry it
+
+        already has, `null` for a link with no expiry) answers the link and spends no budget.'
       tags:
       - QR Codes
       requestBody:
@@ -601,6 +645,12 @@ paths:
       responses:
         '204':
           description: No Content
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
       description: 'Revoke a link: it stops working for good (idempotent, never rate limited, and allowed
 
         whatever the QR code''s state: a leaked link can always be killed). A revoked link is never
@@ -636,6 +686,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QRCodeShareLinkSchema'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
       description: 'Email the link to up to 20 people (in all, per link) with an optional message. Needs a
 
         confirmed email address on your account. An address already on the link is a resend and obeys
@@ -686,6 +754,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QRCodeShareLinkSchema'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRCodeShareErrorSchema'
       description: 'Email one person the link again (without a message), subject to the 10-minute cooldown and
 
         the same budget as `email`.'
@@ -7393,7 +7479,9 @@ components:
 
         reminder of who it is for, never shown publicly. `active` means not revoked and not expired;
 
-        the link *works* only while its QR code is also not deleted or taken down. A revoked link is
+        the link *works* only while its QR code is also not deleted or taken down. `state` is `revoked`,
+
+        `expired` or `active` (the same fact as `active` and `revoked_at`, ready to show). A revoked link is
 
         never active again. `recipients` are the people it was emailed to, oldest first.'
       properties:
@@ -7422,6 +7510,13 @@ components:
         active:
           title: Active
           type: boolean
+        state:
+          enum:
+          - active
+          - expired
+          - revoked
+          title: State
+          type: string
         recipients:
           items:
             $ref: '#/components/schemas/QRCodeShareRecipientSchema'
@@ -7438,6 +7533,7 @@ components:
       - expires_at
       - revoked_at
       - active
+      - state
       - recipients
       - created_at
       title: QRCodeShareLinkSchema
@@ -7465,6 +7561,20 @@ components:
       - email
       - last_sent_at
       title: QRCodeShareRecipientSchema
+      type: object
+    QRCodeShareErrorSchema:
+      description: 'The body of a 400, 404 or 409: one line saying what was refused. A 400 reads `field:
+
+        message` when the refusal belongs to a field of the request (`expires_at`, `label`, `emails`,
+
+        `message`) and is the message alone otherwise.'
+      properties:
+        detail:
+          title: Detail
+          type: string
+      required:
+      - detail
+      title: QRCodeShareErrorSchema
       type: object
     QRCodeShareLinkCreateSchema:
       additionalProperties: false
@@ -7517,6 +7627,7 @@ components:
       properties:
         emails:
           items:
+            maxLength: 320
             type: string
           maxItems: 100
           minItems: 1

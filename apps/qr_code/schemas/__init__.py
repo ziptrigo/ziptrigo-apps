@@ -8,6 +8,7 @@ from .qrcode import (
 )
 from .share import (
     QRCodeShareEmailSchema,
+    QRCodeShareErrorSchema,
     QRCodeShareLinkCreateSchema,
     QRCodeShareLinkSchema,
     QRCodeShareLinkUpdateSchema,
@@ -20,6 +21,7 @@ __all__ = [
     'QRCodeSchema',
     'QRCodePreviewSchema',
     'QRCodeShareEmailSchema',
+    'QRCodeShareErrorSchema',
     'QRCodeShareLinkCreateSchema',
     'QRCodeShareLinkSchema',
     'QRCodeShareLinkUpdateSchema',

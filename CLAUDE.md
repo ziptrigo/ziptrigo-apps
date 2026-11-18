@@ -2585,16 +2585,19 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
   label, expires_at, revoked_at, active, recipients: [{id, email, last_sent_at}], created_at}` (`url` is `BASE_URL` + `/q/<code>`;
   `active` is not revoked and not expired, whether it *works* also depends on the code). `expires_at` is a bare date (the end of that
   day in the owner's zone) or an ISO date-time (naive: the owner's zone), `null` clears it (`label: null` clears the label); `PATCH`
-  applies only the keys sent, an empty `PATCH` changes nothing and spends nothing; every body is `extra='forbid'`. `DELETE` revokes
+  applies only the keys sent, a `PATCH` that would change nothing (empty, the same label, the expiry the link already has, `null` for
+  no expiry) answers the link and spends nothing; every body is `extra='forbid'`; each address of `emails` is at most 320 characters. `DELETE` revokes
   (204, idempotent, **never rate limited**, allowed on a taken-down code). `email` answers the link (with its people read afresh);
   the people are two queries for any number of links. `QRCodeSchema` gains `has_active_link` (an active link on a code that is not
   taken down: the list annotates it, `share.with_active_link_flag`, so it is no query per row), `taken_down` and `takedown_reason`
   (`null` unless taken down; never the internal note).
   - *Status codes* (documented in `api/share.py`): **400** a service refusal (`field: message`, a message that belongs to no field
-    plain: the cap, a revoked link, the unconfirmed owner, the cooldown, "This link no longer works."); **404** another user's code,
+    plain: the cap, a revoked link, the unconfirmed owner, the cooldown, "This link no longer works."; a field is named as the request body
+    names it, so a past date is `expires_at: ...`); **404** another user's code,
     link or recipient, a link of another code, a deleted code (never 403); **409** a taken-down code (`QRCodeTakenDownError`, caught
     by type, not by text: create, change, email and resend; listing and revoking still work); **422** ninja's own (a malformed id,
-    an unknown key, an empty `emails`); **429** the site handler with `Retry-After`.
+    an unknown key, an empty `emails`); **429** the site handler with `Retry-After`. The spec declares 400, 404 and 409 as a
+    `QRCodeShareErrorSchema` (`{detail}`) on the endpoints that can answer them.
   - *Budgets are the web's*: create and change check first (`check_create` / `check_update`, no lock, no write), then charge
     `QR_SHARE_USER`, then write, so a refused request spends nothing; `email` and `resend` pass `charge_share_emails` bound to the user
     to the service, which spends `QR_SHARE_EMAIL_USER` once per email after every other refusal (a request that does not fit emails
@@ -2603,7 +2606,7 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
     directly): `links <env> <qr-id>` (table: id, url, label, state, expiry, the people emailed), `share <env> <qr-id> [--label
     --expires 2026-12-31 --to a@x --to b@y --message ...]` (makes the link and prints its address and id; with `--to` it then emails
     it, and if that fails it says the link was made but not emailed and exits 1; `--message` without `--to` is a usage error; a bad
-    `--expires` is refused before any request) and `unshare <env> <qr-id> <link-id> [--yes]` (asks first). User text is printed
+    `--expires` and `--message` without `--to` are refused before any request) and `unshare <env> <qr-id> <link-id> [--yes]` (asks first). User text is printed
     escaped. Tests: `apps/qr_code/tests/test_api_share.py` (every endpoint and status, other users' 404s, refusals that spend no
     budget, the 409s, revoke never limited, the new fields, query counts) and `admin/tests/test_qrcode.py`.
 - **Not done**: a "save a copy" for a signed-in visitor.
