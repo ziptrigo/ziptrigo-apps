@@ -303,11 +303,19 @@ class TestReading:
         )
         assert listed[0].expires_field_id == f'expires-{live.pk}'
 
-    def test_list_links_makes_one_query(self, qrcode, django_assert_num_queries):
-        for _ in range(4):
-            share.create_link(qrcode, expires_on=tomorrow())
-        with django_assert_num_queries(1):
-            share.list_links(qrcode)
+    def test_list_links_makes_two_queries_whatever_the_links_and_people(
+        self, qrcode, django_assert_num_queries
+    ):
+        """The links, and the people each was emailed to in one prefetch."""
+        from apps.qr_code.models import QRShareRecipient
+
+        for i in range(4):
+            link = share.create_link(qrcode, expires_on=tomorrow())
+            for j in range(3):
+                QRShareRecipient.objects.create(link=link, email=f'p{i}{j}@example.com')
+        with django_assert_num_queries(2):
+            listed = share.list_links(qrcode)
+            assert sum(len(link.recipients.all()) for link in listed) == 12
 
     def test_the_active_flag_is_one_subquery(self, user, qrcode, django_assert_num_queries):
         other = make_qrcode(user, name='Other')

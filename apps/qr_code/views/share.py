@@ -6,12 +6,16 @@ each action re-renders its content (`#qr-share-panel`). A refusal is the usual 4
 message` lines in `#qr-share-msg`. Without htmx every action is a plain POST that flashes a message
 and goes back to the page it came from (the editor, else the dashboard) with the dialog open
 (`?share=<id>`). Changes spend `QR_SHARE_USER`,
-validated first and charged after. A deleted code has no dialog (it is a 404), so nothing here reaches
+validated first and charged after. **Emailing a link** (`share_email`) and **resending** to a person
+(`share_resend`) spend `QR_SHARE_EMAIL_USER` instead, one hit per email, charged by the service
+once nothing else can refuse the request (`services.share_emails`); over it the 429 says how long
+to wait. A deleted code has no dialog (it is a 404), so nothing here reaches
 one. **Revoking is never rate limited** (World Time's event delete is the same): an owner who learns
 that a link leaked must be able to kill it right after a burst of changes. Another user's code or
 link is a 404.
 """
 
+from functools import partial
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -30,13 +34,18 @@ from apps.core.field_errors import ErrorLines, form_lines
 from apps.core.field_errors import validation_lines as core_validation_lines
 from apps.core.htmx import is_htmx
 
-from ..forms import ShareLinkForm
-from ..limits import MAX_ACTIVE_LINKS_PER_CODE
-from ..models import QRCode, QRShareLink
-from ..services import share
+from ..forms import ShareEmailForm, ShareLinkForm
+from ..limits import MAX_ACTIVE_LINKS_PER_CODE, MAX_RECIPIENTS_PER_LINK, SHARE_MESSAGE_MAX
+from ..models import QRCode, QRShareLink, QRShareRecipient
+from ..services import share, share_emails
 
 SHARE_MSG = '#qr-share-msg'
-FIELD_LABELS = {'label': 'Label', 'expires_on': 'Expires on'}
+FIELD_LABELS = {
+    'label': 'Label',
+    'expires_on': 'Expires on',
+    'emails': 'Email addresses',
+    'message': 'Message',
+}
 
 
 def dashboard_share_url(qrcode: QRCode) -> str:
@@ -76,9 +85,19 @@ def validation_lines(exc: ValidationError) -> ErrorLines:
     return core_validation_lines(exc, FIELD_LABELS)
 
 
-def panel_context(qrcode: QRCode) -> dict:
+def _owned_recipient(link: QRShareLink, recipient_id: UUID) -> QRShareRecipient:
+    recipient = get_object_or_404(QRShareRecipient, pk=recipient_id, link=link)
+    recipient.link = link  # the link, its code and the owner are already loaded
+    return recipient
+
+
+def panel_context(qrcode: QRCode, notice: str = '') -> dict:
     items = share.list_links(qrcode)
     return {
+        'notice': notice,
+        'can_email': bool(share.owner_of(qrcode).email_confirmed),
+        'max_recipients': MAX_RECIPIENTS_PER_LINK,
+        'message_max': SHARE_MESSAGE_MAX,
         'qrcode': qrcode,
         'links': items,
         'active_count': sum(1 for link in items if link.state == 'active'),
@@ -87,14 +106,19 @@ def panel_context(qrcode: QRCode) -> dict:
     }
 
 
-def _panel(request: HttpRequest, qrcode: QRCode, *, template: str = 'share_panel') -> HttpResponse:
-    return render(request, f'qr_code/partials/{template}.html', panel_context(qrcode))
+def _panel(
+    request: HttpRequest, qrcode: QRCode, *, template: str = 'share_panel', notice: str = ''
+) -> HttpResponse:
+    return render(request, f'qr_code/partials/{template}.html', panel_context(qrcode, notice))
 
 
-def _done(request: AuthenticatedHttpRequest, qrcode: QRCode, message: str) -> HttpResponse:
-    """The panel again for htmx; a flash and back to the page it came from otherwise."""
+def _done(
+    request: AuthenticatedHttpRequest, qrcode: QRCode, message: str, *, notice: bool = False
+) -> HttpResponse:
+    """The panel again for htmx (with `message` as a notice in its message slot when `notice`); a
+    flash and back to the page it came from otherwise."""
     if is_htmx(request):
-        return _panel(request, qrcode)
+        return _panel(request, qrcode, notice=message if notice else '')
     messages.success(request, message)
     return redirect(back_url(request, qrcode))
 
@@ -191,3 +215,59 @@ def share_revoke(request: AuthenticatedHttpRequest, qr_id: UUID, link_id: UUID) 
     link = _owned_link(qrcode, link_id)
     share.revoke_link(link)
     return _done(request, qrcode, 'Link revoked.')
+
+
+def _email_limited(request: AuthenticatedHttpRequest, exc: ratelimit.RateLimitExceeded):
+    """The 429 for a send or resend that doesn't fit the user's hourly budget: the message says
+    how long to wait."""
+    result = ratelimit.RateLimitResult(allowed=False, remaining=0, retry_after=exc.retry_after)
+    return ratelimit.web_response(request, result, exc.message, retarget=SHARE_MSG)
+
+
+def _people(count: int) -> str:
+    return '1 person' if count == 1 else f'{count} people'
+
+
+@login_required
+@require_POST
+def share_email(request: AuthenticatedHttpRequest, qr_id: UUID, link_id: UUID) -> HttpResponse:
+    """Email a link to the addresses typed (and an optional message). Every refusal comes before
+    the budget is charged (`services.share_emails.send_link`); the budget is
+    `QR_SHARE_EMAIL_USER`, one hit per email."""
+    qrcode = owned_qrcode(request, qr_id)
+    link = _owned_link(qrcode, link_id)
+    form = ShareEmailForm(request.POST)
+    if not form.is_valid():
+        return _refused(request, qrcode, form_lines(form))
+    try:
+        people = share_emails.send_link(
+            link,
+            form.addresses(),
+            message=form.cleaned_data['message'],
+            charge=partial(share_emails.charge_share_emails, request.user),
+        )
+    except ratelimit.RateLimitExceeded as exc:
+        return _email_limited(request, exc)
+    except ValidationError as exc:
+        return _refused(request, qrcode, validation_lines(exc))
+    return _done(request, qrcode, f'Emailed the link to {_people(len(people))}.', notice=True)
+
+
+@login_required
+@require_POST
+def share_resend(
+    request: AuthenticatedHttpRequest, qr_id: UUID, link_id: UUID, recipient_id: UUID
+) -> HttpResponse:
+    """Email one person the link again (without a message), subject to the cooldown."""
+    qrcode = owned_qrcode(request, qr_id)
+    link = _owned_link(qrcode, link_id)
+    recipient = _owned_recipient(link, recipient_id)
+    try:
+        share_emails.resend(
+            recipient, charge=partial(share_emails.charge_share_emails, request.user)
+        )
+    except ratelimit.RateLimitExceeded as exc:
+        return _email_limited(request, exc)
+    except ValidationError as exc:
+        return _refused(request, qrcode, validation_lines(exc))
+    return _done(request, qrcode, f'Sent the email to {recipient.email} again.', notice=True)

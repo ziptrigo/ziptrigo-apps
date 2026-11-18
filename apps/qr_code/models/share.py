@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from ..limits import LINK_LABEL_MAX
@@ -29,6 +30,8 @@ class QRShareLink(models.Model):
 
     pk: uuid.UUID
     qrcode_id: uuid.UUID
+    # The reverse accessor of `QRShareRecipient.link` (the people the link was emailed to).
+    recipients: 'Manager'
     # Set by `services.share.list_links` for the owner's panel (not stored).
     url: str
     state: str
@@ -64,3 +67,35 @@ class QRShareLink(models.Model):
     def is_active(self, now: datetime | None = None) -> bool:
         """Not revoked and not expired (the QR code's own state is not looked at)."""
         return not self.is_revoked and not self.is_expired(now)
+
+
+class QRShareRecipient(models.Model):
+    """A person a share link was emailed to (issue #5): the link, their address and when they were
+    last emailed, which drives the resend cooldown. The address is stored with its domain
+    lower-cased and the local part as typed; a person is one row per link, ignoring case. Deleted
+    with the link (and so with the QR code and the owner)."""
+
+    objects: ClassVar['Manager']
+    DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
+
+    pk: uuid.UUID
+    link_id: uuid.UUID
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    link = cast(
+        'QRShareLink',
+        models.ForeignKey(QRShareLink, on_delete=models.CASCADE, related_name='recipients'),
+    )
+    email = cast(str, models.EmailField())
+    last_sent_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(Lower('email'), 'link', name='qr_share_recipient_unique')
+        ]
+        verbose_name = 'QR share recipient'
+        verbose_name_plural = 'QR share recipients'
+
+    def __str__(self) -> str:
+        return self.email

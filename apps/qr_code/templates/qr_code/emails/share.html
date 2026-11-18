@@ -1,0 +1,7 @@
+<div style="font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: #2c3432; line-height: 1.5;">
+  <p style="margin: 0 0 4px; font-size: 18px; font-weight: 600;">{{ owner_name }} shared a QR code with you</p>
+  <p style="margin: 0 0 16px; color: #475a53;">{{ owner_name }} shared the QR code "{{ name }}" with you.</p>
+  {% if message %}<div style="margin: 0 0 16px; padding: 8px 16px; border-left: 4px solid #8fa89e; background: #f4f7f6; white-space: pre-line;">{{ message }}</div>{% endif %}
+  <p><a href="{{ link }}" style="color: #3b4a47;">See the QR code</a></p>
+  <p style="color: #5a736a; font-size: 12px;">Anyone with this link can see the QR code and download it. You don't need an account.{% if expires_at %} The link expires on {{ expires_at }}.{% endif %}</p>
+</div>

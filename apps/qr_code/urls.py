@@ -12,7 +12,9 @@ from .views import (
     qrcode_short_code,
     share_create,
     share_edit,
+    share_email,
     share_panel,
+    share_resend,
     share_revoke,
 )
 
@@ -33,4 +35,10 @@ urlpatterns = [
     path('share/<uuid:qr_id>/new/', share_create, name='share-create'),
     path('share/<uuid:qr_id>/<uuid:link_id>/edit/', share_edit, name='share-edit'),
     path('share/<uuid:qr_id>/<uuid:link_id>/revoke/', share_revoke, name='share-revoke'),
+    path('share/<uuid:qr_id>/<uuid:link_id>/email/', share_email, name='share-email'),
+    path(
+        'share/<uuid:qr_id>/<uuid:link_id>/recipients/<uuid:recipient_id>/resend/',
+        share_resend,
+        name='share-resend',
+    ),
 ]

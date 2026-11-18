@@ -8,7 +8,14 @@ from .pages import (
 )
 from .public import shared_image, shared_page
 from .redirect import redirect_short_url
-from .share import share_create, share_edit, share_panel, share_revoke
+from .share import (
+    share_create,
+    share_edit,
+    share_email,
+    share_panel,
+    share_resend,
+    share_revoke,
+)
 
 __all__ = [
     'dashboard',
@@ -23,7 +30,9 @@ __all__ = [
     'redirect_short_url',
     'share_create',
     'share_edit',
+    'share_email',
     'share_panel',
+    'share_resend',
     'share_revoke',
     'shared_image',
     'shared_page',

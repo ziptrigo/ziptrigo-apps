@@ -11,8 +11,9 @@ def cost_section(user: object) -> CostSection:
                 'Tracked codes and their scan counts included.',
             ),
             free(
-                'Share a QR code with a link',
-                'Anyone who has the link can see and download the code. Revoke it when you like.',
+                'Share a QR code by link or email',
+                'Anyone who has the link can see and download the code. Revoke it when you like. '
+                'Emailing a link is free too, up to 30 emails an hour.',
             ),
         ]
     )

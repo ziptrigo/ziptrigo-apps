@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, cast
 from django.conf import settings
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Q, QuerySet
+from django.db.models import Exists, OuterRef, Prefetch, Q, QuerySet
 from django.urls import reverse
 from django.utils import timezone
 
@@ -27,7 +27,7 @@ from apps.accounts.models import User as UserModel
 from apps.accounts.services.timezones import local_datetime, user_tz
 
 from ..limits import LINK_LABEL_MAX, MAX_ACTIVE_LINKS_PER_CODE
-from ..models import QRCode, QRShareLink
+from ..models import QRCode, QRShareLink, QRShareRecipient
 from .text import clean_line
 
 if TYPE_CHECKING:
@@ -154,9 +154,16 @@ def state(link: QRShareLink, now: datetime | None = None) -> str:
 def list_links(qrcode: QRCode) -> list[QRShareLink]:
     """The QR code's links for the owner's panel: active ones first (newest first), then the
     revoked and expired ones. Each carries `url`, `state` and `expiry_value` (the ISO date a date
-    field is prefilled with), none of which is stored."""
+    field is prefilled with), none of which is stored. The people each link was emailed to are
+    prefetched (`link.recipients.all()`, oldest first): two queries for the whole list."""
     now = timezone.now()
-    links = list(QRShareLink.objects.filter(qrcode=qrcode).order_by('-created_at', 'pk'))
+    links = list(
+        QRShareLink.objects.filter(qrcode=qrcode)
+        .prefetch_related(
+            Prefetch('recipients', queryset=QRShareRecipient.objects.order_by('created_at', 'pk'))
+        )
+        .order_by('-created_at', 'pk')
+    )
     for link in links:
         link.qrcode = qrcode  # already loaded: no query per link
         link.url = link_url(link)
@@ -282,7 +289,7 @@ def create_link(
     raise RuntimeError('Could not generate a free share link code')  # pragma: no cover
 
 
-def _locked_link(link: QRShareLink) -> tuple[QRCode, QRShareLink]:
+def locked_link(link: QRShareLink) -> tuple[QRCode, QRShareLink]:
     """The link's QR code and the link, locked in that order."""
     qrcode = _locked_qrcode(link.qrcode)
     fresh = QRShareLink.objects.select_for_update().get(pk=link.pk)
@@ -307,7 +314,7 @@ def update_link(
             cap is reached.
     """
     with transaction.atomic():
-        qrcode, fresh = _locked_link(link)
+        qrcode, fresh = locked_link(link)
         require_shareable(qrcode)
         if fresh.is_revoked:
             raise _error(NON_FIELD_ERRORS, REVOKED_MESSAGE)
@@ -340,7 +347,7 @@ def revoke_link(link: QRShareLink) -> QRShareLink:
     down), and never rate limited: revoking only reduces what is exposed, so an owner who learns
     that a link leaked can kill it. (Creating and changing links keep their refusals.)"""
     with transaction.atomic():
-        _, fresh = _locked_link(link)
+        _, fresh = locked_link(link)
         if fresh.revoked_at is None:
             fresh.revoked_at = timezone.now()
             fresh.save(update_fields=['revoked_at'])

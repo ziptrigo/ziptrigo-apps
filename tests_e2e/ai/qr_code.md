@@ -16,6 +16,8 @@ The QR code product's web UI (`apps/qr_code`):
 - sharing a QR code (issue #5): the dashboard row's **Share** item and the editor's **Share** button, the share dialog (create, copy,
   label, expiry, edit, revoke), the "Shared" icon, and the public pages `/q/<code>` and `/q/<code>/image` with the neutral unavailable
   page for every link that doesn't work (QR-32 to QR-37);
+- sending a share link by email: the **Send by email** form in the dialog, the people a link was sent to, **Resend**, the 10-minute
+  cooldown, the cap of 20 people, and every refusal (QR-38 to QR-40; the email itself is MAIL-31 in `emails.md`);
 - the "too long for a QR code" refusal, including the advice to turn on tracking for a long URL;
 - access control: logged-out visitors, another user's QR code ids;
 - that creating and sharing QR codes costs no credits;
@@ -31,7 +33,8 @@ checks it.
 
 - The test server is running at `http://localhost:8765`, freshly restarted (empty database), as
   described in [`README.md`](README.md). Rate limiting is off. This file needs neither S3 nor
-  email: QR images are rendered on demand from the database, and the QR product sends no mail.
+  email except for QR-38 to QR-40, which send the share email: run those in the default real-services mode (the emails are read at
+  `/__e2e__/mail/`, see `emails.md` "Preconditions"). QR images are rendered on demand from the database.
 - The server's `BASE_URL` is `http://localhost:8765`, so every short URL reads
   `http://localhost:8765/go/<code>` (8 letters/digits, case-sensitive).
 - Cases run in order; later ones reuse QR codes created earlier.
@@ -584,6 +587,55 @@ visitor's system setting.
 | 4 | Inside the dialog `Tab` to **Revoke**, `Enter`, then `Tab`/`Shift+Tab`. | The confirmation takes the focus (on **Cancel**); `Escape` closes only it. |
 | 5 | Make an error (a past date) and look at the field. | The message is repeated under **Expires on** with a red border and `aria-invalid="true"`; the focus moves to the field. |
 
+### QR-38 Send a share link by email
+
+**Purpose:** the owner emails a link to people from the share dialog (issue #5).
+**Preconditions:** QR-32 done (`QA Text` has an active link `LINK_URL` labelled `for the printer`); `qa.user` has a confirmed email; real-services mode so the emails are delivered (`emails.md` "Reading mail"). Use addresses `a.<R>@example.com` and `b.<R>@example.com` (`R` a random suffix).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the share dialog of `QA Text`. | The active link has **Edit**, **Revoke** and **Send by email**; no "Emailed to" list yet. A revoked or expired link has no **Send by email**. |
+| 2 | Click **Send by email**. | A form opens under the link: **Email addresses** ("One per line, or separated by commas. A link can be emailed to at most 20 people."), **Message (optional)** and **Send email**. |
+| 3 | Type `A.<R>@Example.com, b.<R>@example.com` in the addresses and `Here is the door code` in the message; click **Send email**. | The dialog is redrawn with the green line "Emailed the link to 2 people." and an **Emailed to** list under the link: both addresses (the first with its domain lower-cased: `A.<R>@example.com`), each "sent <time>" and a **Resend** button. The form is closed again. |
+| 4 | `/__e2e__/mail/?to=a.<R>@example.com` (reload until it arrives). | One email: subject exactly `A QR code was shared with you`; body `<owner's name or "Someone"> shared the QR code "QA Text" with you.`, the message, `LINK_URL`. MAIL-31 checks the rest. Same for `b.<R>@`. |
+| 5 | Open the link from the email in a private window. | The public page of QR-33. |
+| 6 | Open the form again and type `a.<R>@example.com` once more (any case) and send. | Refused: the red line `Email addresses: "a.<R>@example.com" was emailed recently; you can resend in N minutes.` (N is 10 or 9), also under the field; nobody is added or emailed. |
+| 7 | Open the form and send an empty box. | `Email addresses: Enter at least one email address.` |
+| 8 | Send `not-an-address`, then `ok.<R>@example.com, nope`. | `Email addresses: "not-an-address" is not a valid email address.` and `Email addresses: "nope" is not a valid email address.`; the first request added nobody, and nor did the second (ok.<R> was not emailed). |
+| 9 | Type 501 characters in **Message**. | The browser stops at 500 (`maxlength`); the server's own limit, `Message: Keep the message to 500 characters or fewer.`, is unit-tested. |
+| 10 | Send `c.<R>@example.com` with a message of three lines separated by blank lines, containing `<b>x</b>`. | Sent. In the mailbox the text body keeps the line breaks (at most one blank line between paragraphs) and the HTML source shows `&lt;b&gt;x&lt;/b&gt;`. |
+
+### QR-39 Resend, the cooldown and the cap
+
+**Purpose:** a person can be emailed again, no sooner than every 10 minutes, and a link has at most 20 people (issue #5).
+**Preconditions:** QR-38 done.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Click **Resend** next to `b.<R>@example.com` right away. | The red line `This person was emailed recently; you can resend in N minutes.` (N is 10 or 9) in the dialog's message slot; no new email. |
+| 2 | Shell step: make that person's last send old: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.qr_code.models import QRShareRecipient as R; R.objects.filter(email__startswith='b.').update(last_sent_at=timezone.now()-timedelta(minutes=11))"`; click **Resend** again. | The green line `Sent the email to b.<R>@example.com again.`; a second email (same subject, the link, **no message**: a resend does not carry the first message) arrives; the "sent <time>" of that person is updated. |
+| 3 | Double-click **Resend** quickly on another person whose cooldown has passed (repeat step 2 for them). | One email only (the button disables while the request runs; a second request would be refused with the cooldown message). |
+| 4 | Send one address list with 18 more addresses (`p1.<R>@` to `p18.<R>@example.com`) in one go: 21 people in all with the 3 earlier ones. | Refused: `Email addresses: A link can be emailed to at most 20 people.`; nobody added or emailed. |
+| 5 | Send 17 addresses (`p1.<R>@` to `p17.<R>@example.com`). | Sent: "Emailed the link to 17 people." The list has 20 people. |
+| 6 | Send one more new address. | Refused with the same cap message. Typing an address already on the link (after its cooldown) is still allowed: it is a resend. |
+| 7 | Create a second link for `QA Text` and send it to `a.<R>@example.com`. | Allowed: the 20 people are per link; the second link has its own list. |
+
+### QR-40 Sending: who may and when it can't
+
+**Purpose:** only an owner with a confirmed email can send, only a working link is sent, and other users' links can't be reached (issue #5).
+**Preconditions:** QR-38 done; shell access.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Shell step: un-confirm the owner (`python tests_e2e/ai/manage.py shell -c "from apps.accounts.models import User as U; U.objects.filter(email='qa.user@example.com').update(email_confirmed=False)"`) and reopen the dialog. | Under each active link there is no **Send by email** button or **Resend**; the text `Confirm your email address to send a QR code by email.` with a link "Go to your account" is shown instead. A replayed send POST answers `Confirm your email address to send a QR code by email.` (422) and nothing is emailed. Copying and creating links still work. |
+| 2 | Re-confirm the owner (`email_confirmed=True`). | The form is back. |
+| 3 | Revoke the link and replay the send POST (`POST /qr/share/<TEXT_ID>/<link id>/email/` with `emails=x@example.com`, using the page's CSRF token). | `This link no longer works.` (422); nothing is emailed. The revoked link shows its "Emailed to" list without **Resend** buttons. |
+| 4 | Send to someone, then immediately revoke the link (or expire it with QR-34 step 10) before the email is delivered; or, in the shell, delete the person's row before it goes out. | No email arrives for a link that no longer works or a person who was removed: the queued email checks again when it runs. (Hard to time in real mode: mark **BLOCKED: timing** if the email was already delivered.) |
+| 5 | As `qa.broke`, replay `POST /qr/share/<TEXT_ID>/<link id>/email/` and `.../recipients/<person id>/resend/` for `qa.user`'s link. | 404 for both; nobody is emailed. |
+| 6 | Logged out, replay the same POSTs. | Redirected to the login page; nothing is sent. |
+| 7 | As the owner, replay the resend POST with a person id that belongs to another of the owner's links. | 404. |
+| 8 | Delete `QA Text` (QR-21) and open the admin's QR share recipients (ADM-68 step 9). | The people of its links are gone with it. |
+
 ## Out of scope
 
 - Size, border, error correction and colours: the editor has no controls for them (JWT API only,
@@ -592,4 +644,6 @@ visitor's system setting.
   (`/qr/image/<id>/`); the stored file is not reachable from the web UI.
 - The `/go/<code>` per-IP rate limit (`QR_REDIRECT_IP`): rate limiting is off on this server.
 - The JWT API `/api/qr/` and `inv qrcode`: unit-tested.
-- Sharing by email, reports and takedown of a shared QR code come with later changes of issue #5 and get their own cases then.
+- The per-user budget of emailed links (`QR_SHARE_EMAIL_USER`, 30 an hour): rate limiting is off on this server, so it is
+  unit-tested (`apps/qr_code/tests/test_share_emails.py`).
+- Reports and takedown of a shared QR code come with a later change of issue #5 and get their own cases then.
