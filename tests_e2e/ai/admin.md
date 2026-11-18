@@ -960,7 +960,7 @@ push configured (NOTIF-20's preconditions).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | `/admin/accounts/user/`, open `qa.user@example.com`. | Under **Status**, after the email confirmation fields: **Terms version** `2026-11-17` and **Terms accepted at** (`-` for the seeded accounts, which were marked accepted without a date; a date and time for an account registered during the run, see ACC-49). Neither is an input. |
+| 1 | `/admin/accounts/user/`, open `qa.user@example.com`. | Under **Status**, after the email confirmation fields: **Terms version** `2026-11-18` and **Terms accepted at** (`-` for the seeded accounts, which were marked accepted without a date; a date and time for an account registered during the run, see ACC-49). Neither is an input. |
 | 2 | Change **Name**, save, reopen. | Saved; the two terms values are unchanged. Restore the name. |
 
 ### ADM-56 Blockers: the links
