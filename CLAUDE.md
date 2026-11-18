@@ -45,7 +45,7 @@ apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), cred
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
                       to superusers; admin triage by status.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links, share links with the
-                      public `/q/<code>` pages (issue #5, see "QR code specifics" > "Sharing").
+                      public `/q/<code>` pages, emailing a link (issue #5, see "QR code specifics" > "Sharing").
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs, and file requests (issue
                       #306: a link for other people to upload files to you, see "File requests").
@@ -1787,9 +1787,10 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   a known code still redirects, only the scan-count write is skipped, protecting
   `QRCode.scan_count`'s accuracy under a shared-IP/NAT burst rather than shedding load, and an
   unknown one is still a 404, never a 429, since a real visitor must never see an error just
-  because someone else scanned the same code), `QR_SHARE_VIEW_IP`, `QR_SHARE_IMAGE_IP` and `QR_SHARE_USER` (sharing a QR
+  because someone else scanned the same code), `QR_SHARE_VIEW_IP`, `QR_SHARE_IMAGE_IP`, `QR_SHARE_USER` and `QR_SHARE_EMAIL_USER` (sharing a QR
   code, issue #5: the public `/q/<code>` page and, on its own looser rule, its image and download, per IP, charged before the lookup like `/go/`'s, but
-  over them a plain 429 page; the owner's share dialog per user, creating and editing only, validated first and charged after, **revoking is never rate limited**;
+  over them a plain 429 page; the owner's share dialog per user, creating and editing only, validated first and charged after, **revoking is never rate limited**; and `QR_SHARE_EMAIL_USER`, 30 an hour per user, **one hit per email queued**, the same shape as
+  `FT_RECIPIENT_EMAIL_USER`;
   see "QR code specifics" > "Sharing"), and every file_transfer surface called
   out in issue #53 (anonymous upload/confirm endpoints, logged-in uploads, the download page,
   password attempts on it -- per IP *and* per transfer, so brute-forcing one transfer is throttled
@@ -2374,14 +2375,15 @@ a QR code (`MAX_CONTENT_LENGTH` counts characters, capacity is bytes: 1,000 emoj
 a 400 before anything is saved; the web editor's form calls `check_content_fits` for the same
 reason and its views turn a late `ValidationError` into a 422.
 
-**Sharing** (issue #5, PR 1 of 4: copy-link sharing; sending by email, reports and takedown, and the JWT API and CLI
+**Sharing** (issue #5, PRs 1 and 2 of 4: copy-link sharing and sending by email; reports and takedown, and the JWT API and CLI
 are later PRs of the same issue). The owner of a QR code makes a **share link**, `<BASE_URL>/q/<code>`, that shows the
 code (image, name, what it encodes) to anyone who has the address, with no account, and lets them download the PNG.
 Sharing is free (the Costs page says so, `services/costs.py`). The link shows the QR code **as it is now**, not a
 snapshot: renaming it changes what the link shows, deleting it stops every link of it. It is Notes' share link
 (`apps/notes/models/link.py`, `services/links.py`) without a mode and without editing. Code: `models/share.py`,
 `limits.py`, `services/share.py`, `views/share.py` (owner), `views/public.py` and `public_urls.py` (public),
-`forms/share.py`, templates `qr_code/shared.html` and `qr_code/partials/share_*.html`, migration `0002_share_links`.
+`forms/share.py`, templates `qr_code/shared.html` and `qr_code/partials/share_*.html`, migration `0002_share_links`; sending by
+email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, migration `0003_share_recipients`.
 
 - **`QRShareLink`** (UUID, `qrcode` `CASCADE` with `related_name='share_links'`, `code` unique and not editable:
   `secrets.token_urlsafe(16)`, 22 characters, case-sensitive, never reused, `label` up to `LINK_LABEL_MAX` 100 -- the
@@ -2447,7 +2449,8 @@ snapshot: renaming it changes what the link shows, deleting it stops every link 
   view is one hit of the first (the image is its own budget: a crowd behind one NAT address, a classroom or an office, must not see an
   error); over either a plain 429 page (`Retry-After`, the same headers). A code appears in access logs like `/n/<code>`'s does. nginx counts `/q/` in its main per-IP zone: nothing changed in
   the `infra` repo.
-- **Admin** (`admin.py`): the read-only `QRShareLinkAdmin` (no add, change or delete) and the links as a read-only inline on
+- **Admin** (`admin.py`): the read-only `QRShareLinkAdmin` (no add, change or delete; the people a link was emailed to are a read-only
+  inline on its page) and the links as a read-only inline on
   `QRCodeAdmin`. **Never a full code**: only the first 6 characters (`abc123...`) are listed, the search doesn't look in it, and
   `_NoCodeLookupMixin.lookup_allowed` (Notes' `ReadOnlyModelAdmin.lookup_allowed`, copied: products can't import each other) refuses
   any query-string lookup with a `code` part (`?code__startswith=`, `?share_links__code=`...), which Django would otherwise accept
@@ -2456,18 +2459,77 @@ snapshot: renaming it changes what the link shows, deleting it stops every link 
   `qr_code.delete_qrsharelink` (a superuser does), and `qr_code.qrsharelink` is in `accounts.admin.CASCADE_WITH_USER_MODELS` so
   deleting a **user** with shared codes keeps working (`qr_code`'s other models have admins that allow delete, so the app is not in
   `CASCADE_WITH_USER_APP_LABELS`). Deleting a user or a QR code cascades its links.
+- **Sending a link by email** (PR 2; `services/share_emails.py`, the module docstring is the long version). Each active link
+  in the dialog has a **Send by email** form (`POST /qr/share/<qr>/<link>/email/`, `share-email`: **Email addresses**, separated by
+  commas, semicolons, spaces or new lines, and an optional **Message**) and, once people were emailed, an **Emailed to** list with
+  when each was last sent and a **Resend** button (`POST .../<link>/recipients/<recipient>/resend/`, `share-resend`). htmx answers
+  the panel again with a green notice in `#qr-share-msg` ("Emailed the link to 2 people.", "Sent the email to X again."); a refusal
+  is the usual 422 with `Label: message` lines (`Email addresses: ...`, `Message: ...`) and the field errors; without htmx a flash
+  and back to the dialog. An owner whose **email is not confirmed** sees "Confirm your email address to send a QR code by email."
+  once above the list of links, with a link to `accounts:resend-confirmation` (the page with the resend form; the account page has none), instead of the forms (an unconfirmed account must not be able to email strangers). Another user's
+  code, link or recipient is a 404, and a person of another link is too.
+  - **`QRShareRecipient`** (UUID, `link` `CASCADE` with `related_name='recipients'`, `email` with its domain lower-cased and the
+    local part as typed, `last_sent_at`, `created_at`; unique on `(link, Lower(email))`: one row per person per link ignoring
+    case). New table only (migration `0003_share_recipients`), so nothing the old container reads changed. The message is **kept
+    only with the task**: a first send passes it to the task as an argument, so a resend carries none (the panel and the tests say so),
+    but `django_tasks_db` persists the arguments in the task's result row until `core.purge_old_task_results` removes it (14 days), and
+    the Privacy Policy line says so. It cascades with the
+    link, the code and the owner (`qr_code.qrsharerecipient` is in `CASCADE_WITH_USER_MODELS`, though it has no admin of its own
+    -- only a read-only inline on `QRShareLinkAdmin`, with the same no-add/change/delete permissions).
+  - **`send_link(link, emails, *, message='', charge=None)` and `resend(recipient, *, charge=None)`** make **every refusal before
+    `charge`**, in this order (a refused request spends no budget): the link works (`share.is_available`, which already covers an owner whose
+    account can sign in: "This link no longer works."); the owner's email is confirmed (`require_sendable`); the addresses
+    (`clean_addresses`: a copy of file transfer's rule, since products can't import each other -- valid, de-duplicated ignoring case,
+    first spelling kept, domain lower-cased; "Enter at least one email address.", `"x" is not a valid email address.` cut to 80
+    characters, and more than 20 different ones refused as it goes so a huge list isn't all validated); the message (`clean_message`
+    in `services/text.py`: line endings normalised, control and format characters dropped -- zero-width and bidi overrides --,
+    white space inside a line collapsed, more than one blank line cut to one; at most `SHARE_MESSAGE_MAX` 500 characters
+    *after* cleaning); the cap (`MAX_RECIPIENTS_PER_LINK` 20 people on the link in all, existing ones counted, a resend at the cap is
+    fine: "A link can be emailed to at most 20 people."); and the cooldown of every address already on the link (`RESEND_COOLDOWN`,
+    10 minutes: typing an address again is a resend, and **one address still in its cooldown refuses the whole request**, naming it:
+    `"x" was emailed recently; you can resend in N minutes.`; a resend says `This person was emailed recently; ...`). All limits are in
+    `limits.py`.
+  - **Charging and writing.** `charge(n)` (`charge_share_emails`, bound to the user with `functools.partial` by the view) spends **one
+    hit of `QR_SHARE_EMAIL_USER` per email**, so a request for 5 addresses (a resend included) is 5 hits; a call that doesn't fit
+    raises `ratelimit.RateLimitExceeded` ("Too many requests. Please try again in N minutes.", `Retry-After`) and emails nobody. The
+    remaining budget is `peek`ed first, so a request that does not fit spends **no hit**; only a race with another request can pass the
+    peek and then run out part way, leaving the hits already made spent; the view answers it as a 429 retargeted to `#qr-share-msg`. Then one transaction with the QR
+    code and link rows locked (`share.locked_link`, the order of every share write) re-checks the link, the cap and, per address,
+    **creates the row or claims `last_sent_at` with a conditional `UPDATE`** (never or past the cooldown), so two quick clicks email the
+    person once: the loser gets the cooldown message and the transaction, with the rows it created, rolls back; an `IntegrityError`
+    from two requests adding one address is the same refusal. `enqueue_after_commit` queues one `send_share_email(link_id, email,
+    message, claimed_at)` task per address (`default` queue); `claimed_at` is the `last_sent_at` (ISO 8601) the request claimed, and the
+    task sends nothing when the person's current `last_sent_at` differs, so a duplicate run (tasks are at-least-once) or a run after a
+    newer resend stays quiet. The task arguments, the message included, are persisted with the task result (purged after 14 days like
+    every task result).
+  - **The email** (`send_share_email`, `qr_code/emails/share.{txt,html}`): fixed subject **`A QR code was shared with you`** (nothing the
+    owner typed is ever in a subject), body "<owner's account name> shared the QR code "<name>" with you." (the name, or "Someone" when
+    the account has none -- never the email address), the message if any, the absolute link (`share.link_url`, `BASE_URL`) and, for a
+    link with an expiry, "The link expires on <date, time> UTC." in the public wording (`format_utc`). The HTML part is autoescaped; the
+    text part has autoescape off and is plain text. **The task re-reads everything and sends nothing** when the link is gone,
+    revoked, expired, its code deleted, its owner can't sign in or has an unconfirmed email, or the person is no longer on the link (the
+    row is deleted). No in-app notification and no copy to the owner: the recipient may have no account. **Accepted risk:** the email
+    carries free text (the owner's name, the code's name, the message) to addresses the owner chose, so it could be used for phishing;
+    that is bounded by a confirmed owner email, the per-user budget, the per-person cooldown and the cap of 20 people per link, and PR 3
+    adds reports and takedown.
+  - **Not done:** the JWT API (`POST .../email` and `.../resend`, PR 4), an unsubscribe or "stop emailing me" for a recipient, and
+    storing the message so that a resend can repeat it.
 - **Privacy Policy**: `privacy.md` says a share link shows the QR code to anyone who has it and that the link (with its label and
-  expiry) is kept, and has a "Shared QR codes" line next to the shared notes and events ones; `TERMS_VERSION` is **not** bumped
-  (the owner decides; the lines about recipient email addresses and reports come with the PRs that store them).
-- **Not in this PR** (issue #5's later PRs): sending the link by email (recipients, `QR_SHARE_EMAIL_USER`), reports and takedown
-  (a takedown will not stop a tracked code's `/go/` redirect, which is printed on physical codes), the JWT API and `inv qrcode`
-  commands. No "save a copy" for a signed-in visitor.
+  expiry) is kept, has a "Shared QR codes" line next to the shared notes and events ones, and (PR 2) says the email addresses a link
+  was emailed to are kept with it, with when each was last emailed; `TERMS_VERSION` is **not** bumped (the owner decides; the line
+  about reports comes with the PR that stores them).
+- **Not in PRs 1 and 2** (issue #5's later PRs): reports and takedown (a takedown will not stop a tracked code's `/go/` redirect,
+  which is printed on physical codes), the JWT API and `inv qrcode` commands. No "save a copy" for a signed-in visitor.
 - **Tests**: `apps/qr_code/tests/test_share_links.py` (rules, expiry in the owner's zone, the cap, availability, query counts),
   `test_share_panel.py` (the dashboard item and icon, the dialog, create/edit/revoke, refusals, 404s, rate limits),
   `test_share_public.py` (every unavailable case identical, headers, image and download, a tracked code's image and scan count,
-  the rate limit), `test_share_admin.py` (masked code, refused lookups, read-only, deleting a code or user with links), helpers in
+  the rate limit), `test_share_admin.py` (masked code, refused lookups, read-only, deleting a code or user with links, the recipients
+  inline), `test_share_emails.py` (the order of checks and that a refusal spends nothing, the budget per email, the cooldown and its
+  race, the cap, the unconfirmed owner, the task skipping a dead link or a removed person, the rendered email with a hostile name and
+  message, the panel's forms, 429, 404s and constant query count), helpers in
   `share_support.py`; the Playwright `tests_e2e/test_qr_share.py` (share from the dashboard and the editor, copy, a second anonymous
-  context opens, downloads, Escape and revoke); the AI plan cases QR-32 to QR-37 and ADM-68.
+  context opens, downloads, Escape and revoke, and an emailed link shown at `/__e2e__/mail/`); the AI plan cases QR-32 to QR-40,
+  MAIL-31 and ADM-68.
 
 File transfer specifics: the send page's file upload endpoints
 (`apps/file_transfer/views/uploads.py`, and their anonymous twins in `views/anonymous.py`) are a

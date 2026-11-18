@@ -1147,6 +1147,8 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | 6 | Try `/admin/qr_code/qrsharelink/?code__startswith=<first character of a code>`, `?code__exact=...` and `/admin/qr_code/qrcode/?share_links__code__startswith=...`. | Each answers Django's "bad lookup" error (HTTP 400, or a redirect to `?e=1`), never a filtered list. A harmless lookup such as `/admin/qr_code/qrcode/?short_code__startswith=a` still works. |
 | 7 | Delete `QA Text` from `/admin/qr_code/qrcode/<id>/delete/` as the superuser (a copy made for this step). | The confirmation lists the QR code and its share links among the objects removed and is allowed; afterwards the links are gone and their addresses give the neutral page. |
 | 8 | Delete a throwaway user who has a shared QR code from `/admin/accounts/user/`. | The delete page lists the user's QR codes and share links and is allowed; afterwards both are gone. |
+| 9 | Email a link to two addresses from the owner's dialog (`qr_code.md` QR-38), then open that link at `/admin/qr_code/qrsharelink/<id>/change/`. | A read-only **QR share recipients** table at the bottom lists both addresses with when each was last emailed and created; no add, change or delete control, and a POST to the page is refused (403). The page, the list and the table show no full link code. |
+| 10 | Delete the QR code (or the user) that owns that link as the superuser. | The delete confirmation is allowed and does not ask for any permission about the recipients; afterwards the recipient rows are gone (there is no separate recipients admin). |
 
 ## Out of scope
 

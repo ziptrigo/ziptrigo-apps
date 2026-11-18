@@ -441,6 +441,13 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # after (a refused form spends nothing). Revoking is never rate limited: an owner who learns
     # that a link leaked must be able to kill it at once (World Time's event delete is the same).
     'QR_SHARE_USER': (60, 60),
+    # Emailing a share link, and resending it (issue #5): per user, **one hit per email queued**
+    # (a request for 5 addresses is 5 hits; `services.share_emails.charge_share_emails`, called by
+    # `send_link` / `resend` only after every other check, so a refused request spends nothing, and
+    # one that doesn't fit emails nobody). It bounds how much one account sends, not at whom: the
+    # cooldown per person (10 minutes) and the cap of 20 people per link limit that. Web and, in a
+    # later PR, `/api/qr/` share this budget.
+    'QR_SHARE_EMAIL_USER': (30, 3600),
     # -- short_url (issue #162): the `/s/<code>` redirect and the owner's pages --
     # `/s/<code>` redirects: public and high-traffic by design, so as generous as `/go/<code>`.
     # Same behaviour over the limit (`apps/short_url/views/redirect.py`): charged *before* the

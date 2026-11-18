@@ -14,3 +14,22 @@ def clean_line(value: object) -> str:
         if char.isspace() or unicodedata.category(char) not in ('Cc', 'Cf')
     )
     return ' '.join(text.split())
+
+
+def clean_message(value: object) -> str:
+    """`value` as a short multi-line message: line endings normalised to `\n`, control and format
+    characters dropped (a tab is a space; zero-width and bidirectional-override characters would
+    hide or reverse text in someone's inbox), white space inside a line collapsed, trailing space
+    removed, more than one blank line in a row cut to one, and the whole trimmed."""
+    text = str(value or '').replace('\r\n', '\n').replace('\r', '\n')
+    lines: list[str] = []
+    for raw in text.split('\n'):
+        kept = ''.join(
+            ' ' if char.isspace() else char
+            for char in raw
+            if char.isspace() or unicodedata.category(char) not in ('Cc', 'Cf')
+        )
+        line = ' '.join(kept.split())
+        if line or (lines and lines[-1]):
+            lines.append(line)
+    return '\n'.join(lines).strip()

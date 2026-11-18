@@ -62,6 +62,7 @@ Subjects are quoted from the code; `<...>` is filled in at send time.
 | 28 | `Your file request is done` | Someone **other than the owner** marks a file request done | The owner, if confirmed | MAIL-28 |
 | 29 | `Your receipts export is ready` | A Receipts "Download files" export finishes (issue #315) | The owner, if confirmed | MAIL-29 |
 | 30 | `Your to-do export is ready` | A To-do "Download files" export finishes (issue #326) | The owner, if confirmed | MAIL-30 |
+| 31 | `A QR code was shared with you` | **Send by email** or **Resend** on a QR code's share link (issue #5) | Each address typed, from a confirmed owner | MAIL-31 |
 
 Out of scope (see the end of the file): the Google / Microsoft wording of email 2, delivery
 failures, and rate-limited sends.
@@ -598,10 +599,27 @@ two paid notes; the admin spends the balance down to exactly 7; shell access.
 | 7 | Un-confirm `qa.user` (shell, as MAIL-28 step 8), make an export. | The export is ready and the bell has its notice (NOTIF-35) but **no email**. Re-confirm afterwards. |
 | 8 | A failed export (TODO-73 step 3). | **No email** is sent (the notice and the refund only). |
 
+### MAIL-31 QR code: "A QR code was shared with you"
+
+**Purpose:** the owner emails a QR code's share link to people (QR-38); the email has a fixed subject, names the owner and the code, carries the owner's message and the link, and nothing the owner typed is in the subject (issue #5).
+**Preconditions:** `qa.user@example.com` (confirmed, `MAIL_NAME` as its name: set it on `/account/` first, restore afterwards) owns a QR code named `MAIL <i>QR</i> & "Co"` with an active share link `L` (QR-32); an address `QSHARE` = `qa.mail.qshare.<R>@example.com`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In the share dialog click **Send by email**, type `QSHARE` and the message `Door code: <b>1234</b> & "thanks"` (two lines), send (QR-38 step 3). | "Emailed the link to 1 person." |
+| 2 | `/__e2e__/mail/?to=<QSHARE>` (reload until it arrives). | Exactly one email, subject exactly `A QR code was shared with you` (nothing from the owner's name, the code's name or the message). |
+| 3 | Text body. | First line `<MAIL_NAME> shared the QR code "MAIL <i>QR</i> & "Co"" with you.` (the typed text as typed), the message on its own lines (as typed, line break kept), `See it here: <BASE>/q/<22 characters>` (the link `L`), a blank line, `Anyone with this link can see the QR code and download it. You don't need an account.` No owner email, no credit or scan numbers. |
+| 4 | HTML source. | A heading `<MAIL_NAME_HTML> shared a QR code with you`, the sentence with the code's name escaped (`MAIL &lt;i&gt;QR&lt;/i&gt; &amp; ...`), the message in a quoted block with `&lt;b&gt;1234&lt;/b&gt;` and `&amp;` (no raw `<b>`), a link "See the QR code" to `<BASE>/q/<code>` and the same note under it. No raw `<script>` or `<i>`. |
+| 5 | Click the link signed out. | The public page of the code, with the name escaped (QR-33). |
+| 6 | Give the link an expiry (QR-34 step 3, e.g. 10 days ahead) and **Resend** to `QSHARE` after the cooldown (QR-39 step 2). | The new email adds `The link expires on <date>, <time> UTC.` in the public wording (`Dec 16, 2026, 11:59 PM UTC`, whatever the owner's date format; the text and HTML both). No message in a resend. |
+| 7 | Clear the owner's name (`/account/`, blank name) and send to `QSHARE` again after the cooldown. | The heading and sentence start `Someone shared ...`; the owner's email address appears nowhere in the email. |
+| 8 | Un-confirm the owner (as MAIL-28 step 8) and replay a send. | Refused in the dialog (QR-40 step 1) and **no email** is sent. Re-confirm afterwards. |
+| 9 | Revoke the link right after sending (QR-40 step 4). | No email arrives for a link that no longer works. |
+
 ### MAIL-23 Every email of the run follows the rules
 
 **Purpose:** a final sweep over everything this file made the site send.
-**Preconditions:** MAIL-01 to MAIL-30 have run.
+**Preconditions:** MAIL-01 to MAIL-31 have run.
 
 | # | Action | Expected result |
 |---|---|---|

@@ -6,7 +6,7 @@ from django.contrib.auth.models import Permission
 from django.urls import reverse
 
 from apps.accounts.models import User
-from apps.qr_code.models import QRCode, QRShareLink
+from apps.qr_code.models import QRCode, QRShareLink, QRShareRecipient
 from apps.qr_code.services import share
 
 from .share_support import make_qrcode, make_user
@@ -120,6 +120,54 @@ class TestShareLinkAdmin:
             reverse('admin:qr_code_qrcode_change', args=[link.qrcode_id])
         ).content.decode()
         assert 'for the printer' in body and 'name="share_links-0-label"' not in body
+
+
+class TestRecipients:
+    @pytest.fixture
+    def person(self, link):
+        return QRShareRecipient.objects.create(link=link, email='ann@example.com')
+
+    def test_the_link_page_lists_the_people_it_was_emailed_to_read_only(
+        self, client, superuser, link, person
+    ):
+        body = client.get(
+            reverse('admin:qr_code_qrsharelink_change', args=[link.pk])
+        ).content.decode()
+        assert 'ann@example.com' in body
+        assert 'name="recipients-0-email"' not in body and 'recipients-TOTAL_FORMS' in body
+        assert body.count(link.code) == 0  # still no full code
+
+    def test_a_post_cannot_add_or_change_a_person(self, client, superuser, link, person):
+        change = reverse('admin:qr_code_qrsharelink_change', args=[link.pk])
+        assert client.post(change, {'recipients-TOTAL_FORMS': '1'}).status_code == 403
+        assert QRShareRecipient.objects.count() == 1
+
+    def test_deleting_a_qr_code_or_a_user_takes_the_people_too(
+        self, client, superuser, user, link, person
+    ):
+        delete = reverse('admin:qr_code_qrcode_delete', args=[link.qrcode_id])
+        assert 'cannot be deleted' not in client.get(delete).content.decode()
+        assert client.post(delete, {'post': 'yes'}).status_code == 302
+        assert not QRShareRecipient.objects.exists()
+        other = make_qrcode(user)
+        QRShareRecipient.objects.create(link=share.create_link(other), email='bob@example.com')
+        response = client.post(
+            reverse('admin:accounts_user_delete', args=[user.pk]), {'post': 'yes'}
+        )
+        assert response.status_code == 302 and not QRShareRecipient.objects.exists()
+
+    def test_staff_who_may_delete_a_user_are_not_blocked_by_the_people(
+        self, client, user, link, person
+    ):
+        staff_with(
+            client,
+            'accounts.view_user',
+            'accounts.delete_user',
+            'qr_code.delete_qrcode',
+            'qr_code.delete_qrsharelink',
+        )
+        delete = reverse('admin:accounts_user_delete', args=[user.pk])
+        assert 'cannot be deleted' not in client.get(delete).content.decode()
 
 
 class TestDeleting:

@@ -1,0 +1,9 @@
+{% autoescape off %}{{ owner_name }} shared the QR code "{{ name }}" with you.
+{% if message %}
+{{ message }}
+{% endif %}
+See it here: {{ link }}
+
+Anyone with this link can see the QR code and download it. You don't need an account.
+{% if expires_at %}The link expires on {{ expires_at }}.
+{% endif %}{% endautoescape %}

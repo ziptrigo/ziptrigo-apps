@@ -5,7 +5,7 @@ from .qrcode import (
     QRCodeType,
     generate_short_code,
 )
-from .share import QRShareLink
+from .share import QRShareLink, QRShareRecipient
 
 __all__ = [
     'QRCode',
@@ -13,5 +13,6 @@ __all__ = [
     'QRCodeErrorCorrection',
     'QRCodeType',
     'QRShareLink',
+    'QRShareRecipient',
     'generate_short_code',
 ]

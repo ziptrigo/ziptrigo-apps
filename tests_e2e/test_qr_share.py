@@ -1,6 +1,7 @@
-"""Sharing a QR code (issue #5, PR 1), end to end in a real browser: the owner makes a link from the
-dashboard, copies it, a second anonymous browser context opens it and downloads the image, and
-revoking makes the page the neutral unavailable one at once.
+"""Sharing a QR code (issue #5, PRs 1 and 2), end to end in a real browser: the owner makes a link
+from the dashboard, copies it, a second anonymous browser context opens it and downloads the
+image, emails it to a person (the email shows at `/__e2e__/mail/` and its link opens the page),
+and revoking makes the page the neutral unavailable one at once.
 
 Run on the shared e2e server (`receipts_server`). Every QR code this makes is named with the prefix
 `Zq `; each test removes what it made first and last.
@@ -139,6 +140,67 @@ def test_share_from_the_editor_and_an_expiry(
         # Escape closes the dialog and gives the focus back.
         page.keyboard.press('Escape')
         expect(dialog).to_be_hidden()
+    finally:
+        visitor_context.close()
+        receipts_server.shell(CLEANUP)
+
+
+def test_send_the_link_by_email_resend_and_refusals(
+    page: Page, browser: Browser, receipts_server: ReceiptsServer
+):
+    receipts_server.shell(CLEANUP)
+    qr_id = receipts_server.shell(SEED).strip().splitlines()[-1]
+    visitor_context = browser.new_context()
+    try:
+        receipts_server.login(page)
+        dialog = _open_share(page, receipts_server, qr_id)
+        page.click('#qr-share-form button[type="submit"]')
+        item = dialog.locator('#qr-share-links li').first
+        address = item.locator('code').inner_text().strip()
+
+        item.get_by_role('button', name='Send by email').click()
+        form = item.locator('form[id^="link-mail-"]')
+        form.get_by_label('Email addresses').fill('Ann@Example.com, bob@example.com')
+        form.get_by_label('Message (optional)').fill('Here is the <b>door</b> code')
+        form.get_by_role('button', name='Send email').click()
+        expect(dialog).to_contain_text('Emailed the link to 2 people.')
+        people = item.locator('ul[id^="link-people-"] li')
+        expect(people).to_have_count(2)
+        expect(people.first).to_contain_text('Ann@example.com')
+
+        # An invalid address is a refusal under the field, and nothing more is added.
+        item.get_by_role('button', name='Send by email').click()
+        form = item.locator('form[id^="link-mail-"]')
+        form.get_by_label('Email addresses').fill('not-an-address')
+        form.get_by_role('button', name='Send email').click()
+        expect(dialog.locator('#qr-share-msg')).to_contain_text(
+            '"not-an-address" is not a valid email address.'
+        )
+        expect(people).to_have_count(2)
+
+        # A resend inside the cooldown is refused with the wait.
+        people.first.get_by_role('button', name='Resend').click()
+        expect(dialog.locator('#qr-share-msg')).to_contain_text(
+            'This person was emailed recently; you can resend in'
+        )
+
+        # The email: a fixed subject, the owner's name, the message as text, and the link.
+        page.goto(f'{receipts_server.url}/__e2e__/mail/?to=ann@example.com')
+        email = page.locator('article.email')
+        expect(email).to_have_count(1)
+        expect(email.locator('.subject')).to_have_text('A QR code was shared with you')
+        expect(email.locator('.text-body')).to_contain_text('shared the QR code "Zq Shop door"')
+        expect(email.locator('.text-body')).to_contain_text('Here is the')
+        # The HTML part escapes what the owner typed (the viewer shows its source).
+        expect(email.locator('.html-body')).to_contain_text(
+            'Here is the &lt;b&gt;door&lt;/b&gt; code'
+        )
+        expect(email.locator('.text-body')).to_contain_text(address)
+
+        # The link in the email opens the shared page for someone with no account.
+        visitor = visitor_context.new_page()
+        visitor.goto(address)
+        expect(visitor.get_by_role('heading', name='Zq Shop door')).to_be_visible()
     finally:
         visitor_context.close()
         receipts_server.shell(CLEANUP)

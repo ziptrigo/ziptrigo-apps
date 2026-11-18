@@ -19,7 +19,7 @@ from django.utils.html import format_html
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core.admin_site import custom_admin_site
 
-from .models import QRCode, QRShareLink
+from .models import QRCode, QRShareLink, QRShareRecipient
 from .services import share
 
 
@@ -57,6 +57,25 @@ class QRShareLinkInline(admin.TabularInline):
     @admin.display(description='Now')
     def state(self, obj: QRShareLink) -> str:
         return _state(obj)
+
+
+class QRShareRecipientInline(admin.TabularInline):
+    """The people a link was emailed to: read-only (they are made by the owner's panel)."""
+
+    model = QRShareRecipient
+    extra = 0
+    can_delete = False
+    fields = ['email', 'last_sent_at', 'created_at']
+    readonly_fields = fields
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
 
 
 def _state(link: QRShareLink) -> str:
@@ -118,6 +137,7 @@ class QRShareLinkAdmin(_NoCodeLookupMixin, admin.ModelAdmin):
     ]
     list_filter = ['created_at']
     search_fields = ['qrcode__name', 'qrcode__created_by__email', 'label']
+    inlines = [QRShareRecipientInline]
     list_select_related = ['qrcode', 'qrcode__created_by']
     date_hierarchy = 'created_at'
     fields = [
