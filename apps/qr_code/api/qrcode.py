@@ -19,9 +19,16 @@ from ..schemas import (
     QRCodeSchema,
     QRCodeUpdateSchema,
 )
-from ..services import QRCodeGenerator
+from ..services import QRCodeGenerator, share
 
 router = Router(tags=['QR Codes'])
+
+
+def _get_flagged(user, qr_id: uuid.UUID) -> QRCode:
+    """The user's QR code with `has_active_link` (one query), or `QRCode.DoesNotExist`."""
+    return share.with_active_link_flag(
+        QRCode.objects.filter(id=qr_id, created_by=user, deleted_at__isnull=True)
+    ).get()
 
 
 def _image_url(qrcode: QRCode) -> str:
@@ -35,7 +42,9 @@ async def list_qrcodes(request):
     user = request.auth
 
     # Get QR codes excluding soft-deleted
-    queryset = QRCode.objects.filter(created_by=user, deleted_at__isnull=True)
+    queryset = share.with_active_link_flag(
+        QRCode.objects.filter(created_by=user, deleted_at__isnull=True)
+    )
     qrcodes: list[QRCode] = await sync_to_async(lambda: list(queryset))()
 
     # Add computed fields (dynamic attributes for serialization)
@@ -77,9 +86,7 @@ async def retrieve_qrcode(request, qr_id: uuid.UUID):
     user = request.auth
 
     try:
-        qrcode = await sync_to_async(QRCode.objects.get)(
-            id=qr_id, created_by=user, deleted_at__isnull=True
-        )
+        qrcode = await sync_to_async(_get_flagged)(user, qr_id)
     except QRCode.DoesNotExist:
         raise HttpError(404, 'QR code not found.')
 
@@ -110,9 +117,7 @@ async def update_qrcode(request, qr_id: uuid.UUID, payload: QRCodeUpdateSchema):
     user = request.auth
 
     try:
-        qrcode = await sync_to_async(QRCode.objects.get)(
-            id=qr_id, created_by=user, deleted_at__isnull=True
-        )
+        qrcode = await sync_to_async(_get_flagged)(user, qr_id)
     except QRCode.DoesNotExist:
         raise HttpError(404, 'QR code not found.')
 

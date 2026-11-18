@@ -7,14 +7,19 @@ QR Code CLI - Command line interface for QR code generation and management.
 This CLI provides commands to interact with the QR code service.
 """
 
-from typing import Optional
+from datetime import date, datetime
+from typing import Annotated, Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
 from .utils import (
     EnvironmentAnnotation,
+    api_error_text,
+    api_request,
     api_url,
     get_headers,
     logger,
@@ -232,6 +237,156 @@ def qrcode_delete(environment: EnvironmentAnnotation, qr_id: str):
     except requests.exceptions.RequestException as e:
         logger.error(f'Failed to delete QR code: {e}')
         raise typer.Exit(1)
+
+
+# -- Share links ---------------------------------------------------------------------------------
+# A share link (`<site>/q/<code>`) shows a QR code to anyone who has the address and lets them
+# download it. These commands call `/api/qr/{id}/links`; they go through `api_request` (default
+# timeout, bounded retry on a short 429).
+
+QRIdAnnotation = Annotated[str, typer.Argument(help='The QR code id (shown by `list`/`get`).')]
+
+
+def _say(message: str) -> None:
+    """Log `message` as it is: the logger renders Rich markup, which a user's text may contain."""
+    logger.info(escape(message))
+
+
+def _fail(message: str) -> typer.Exit:
+    logger.error(escape(message))
+    return typer.Exit(1)
+
+
+def _console() -> Console:
+    """A console for tables: the terminal's own width, or a wide one when output is piped."""
+    console = Console()
+    return console if console.is_terminal else Console(width=200)
+
+
+def _call(method: str, path: str, **kwargs):
+    """A request to `/api/qr<path>` that must succeed: its JSON, or `None` for a 204."""
+    response = api_request(method, api_url(f'/qr{path}'), headers=get_headers(CLI), **kwargs)
+    if not response.ok:
+        raise _fail(api_error_text(response))
+    return None if response.status_code == 204 else response.json()
+
+
+def _expiry(value: str) -> str:
+    """`--expires` as the API wants it. A bare date is sent as a date and the server reads it as
+    the end of that day in your time zone; a time without an offset is read in your time zone."""
+    value = value.strip()
+    try:
+        # A date first: `datetime.fromisoformat` accepts a bare date too (as midnight).
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(value).isoformat()
+    except ValueError:
+        raise typer.BadParameter(
+            'use an ISO date or date-time, like 2026-12-31 or 2026-12-31T18:00:00+00:00.'
+        ) from None
+
+
+def _people(link: dict) -> str:
+    return ', '.join(person['email'] for person in link['recipients'])
+
+
+@app.command(name='links')
+def qrcode_links(environment: EnvironmentAnnotation, qr_id: QRIdAnnotation):
+    """
+    List a QR code's share links, with the people each was emailed to.
+
+    Example:
+        qrcode links local 1b6e2f4a-...
+    """
+    select_environment(environment)
+    links = _call('get', f'/{qr_id}/links')
+    if not links:
+        _say('No share links. Make one with `share`.')
+        return
+    table = Table(title='Share links')
+    table.add_column('ID', style='cyan', no_wrap=True, min_width=36)
+    table.add_column('URL', no_wrap=True)
+    table.add_column('Label')
+    table.add_column('State', style='green', no_wrap=True)
+    table.add_column('Expires', no_wrap=True)
+    table.add_column('Emailed to')
+    for link in links:
+        table.add_row(
+            link['id'],
+            link['url'],
+            Text(link['label']),
+            link['state'],
+            (link['expires_at'] or '')[:10],
+            Text(_people(link)),
+        )
+    _console().print(table)
+
+
+@app.command(name='share')
+def qrcode_share(
+    environment: EnvironmentAnnotation,
+    qr_id: QRIdAnnotation,
+    label: str = typer.Option('', '--label', help='A reminder of who it is for (never public).'),
+    expires: Optional[str] = typer.Option(
+        None, '--expires', help='ISO date (the end of that day) or date-time.'
+    ),
+    to: Optional[list[str]] = typer.Option(
+        None, '--to', help='Email the link to this address (repeat for several).'
+    ),
+    message: str = typer.Option('', '--message', help='A note to add to the email (--to only).'),
+):
+    """
+    Make a share link: anyone who has the address can see the QR code and download it. The
+    address is printed. With --to, the link is also emailed (needs a confirmed email address on
+    your account).
+
+    Example:
+        qrcode share local 1b6e2f4a-...
+        qrcode share local 1b6e2f4a-... --label "for Sam" --expires 2026-12-31 --to sam@example.com
+    """
+    if message and not to:
+        raise typer.BadParameter('--message goes with --to.')
+    select_environment(environment)
+    payload: dict = {}
+    if label:
+        payload['label'] = label
+    if expires:
+        payload['expires_at'] = _expiry(expires)
+    link = _call('post', f'/{qr_id}/links', json=payload)
+    _say(f'Made a share link: {link["url"]}')
+    _say(f'Link ID: {link["id"]}')
+    if to:
+        body: dict = {'emails': list(to)}
+        if message:
+            body['message'] = message
+        try:
+            emailed = _call('post', f'/{qr_id}/links/{link["id"]}/email', json=body)
+        except typer.Exit:
+            _say('The link was made but not emailed (see the error above).')
+            raise
+        _say(f'Emailed the link to {_people(emailed)}.')
+
+
+@app.command(name='unshare')
+def qrcode_unshare(
+    environment: EnvironmentAnnotation,
+    qr_id: QRIdAnnotation,
+    link_id: Annotated[str, typer.Argument(help='The link id (shown by `links`).')],
+    yes: Annotated[bool, typer.Option('--yes', help='Do not ask first.')] = False,
+):
+    """
+    Revoke a share link: it stops working for good (make another to share again).
+
+    Example:
+        qrcode unshare local 1b6e2f4a-... 7c9e6679-...
+    """
+    select_environment(environment)
+    if not yes and not typer.confirm('Revoke this link? It stops working for good.'):
+        raise _fail('Cancelled; nothing was changed.')
+    _call('delete', f'/{qr_id}/links/{link_id}')
+    _say('Revoked the link.')
 
 
 if __name__ == '__main__':

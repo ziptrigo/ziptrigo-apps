@@ -27,7 +27,10 @@ TAGS = [
         'description': 'The signed-in user: name, email, time zone, date and time format.',
     },
     {'name': 'Credits', 'description': "Staff only: a user's credit balance and adjustments."},
-    {'name': 'QR Codes', 'description': 'QR codes, tracked or not: create, edit, preview, images.'},
+    {
+        'name': 'QR Codes',
+        'description': 'QR codes, tracked or not: create, edit, preview, images, share links.',
+    },
     {
         'name': 'File Transfer',
         'description': 'Send files: drafts, resumable uploads to S3, recipients, the transfers '

@@ -107,7 +107,7 @@ def expiry_date(link: QRShareLink) -> date | None:
     return link.expires_at.astimezone(user_tz(owner_of(link.qrcode))).date()
 
 
-def _expiry_changes(link: QRShareLink, expires_on: date | datetime) -> bool:
+def expiry_changes(link: QRShareLink, expires_on: date | datetime) -> bool:
     """Whether `expires_on` would change the link's expiry: the day it already expires on is no
     change (so an expired link's label can be edited), nor is the same instant."""
     if isinstance(expires_on, datetime):
@@ -250,7 +250,7 @@ def check_update(
     if label is not None:
         clean_label(label)
     clearing = clear_expiry or expires_on is None
-    changing = not clearing and isinstance(expires_on, date) and _expiry_changes(link, expires_on)
+    changing = not clearing and isinstance(expires_on, date) and expiry_changes(link, expires_on)
     if changing:
         assert isinstance(expires_on, date)
         _clean_expiry(qrcode, expires_on)
@@ -340,7 +340,7 @@ def update_link(
                 fields.append('expires_at')
         elif expires_on is not UNCHANGED:
             assert isinstance(expires_on, date)
-            if _expiry_changes(fresh, expires_on):
+            if expiry_changes(fresh, expires_on):
                 fresh.expires_at = _clean_expiry(qrcode, expires_on)
                 fields.append('expires_at')
         if not was_active and fresh.is_active():
