@@ -1,0 +1,12 @@
+{% comment %} The share dialog (issue #5), fetched into #qr-share-modal by the dashboard's Share menu item and the editor's Share button.
+   The overlay is the `fragmentModal` component (`core/js/fragment_modal.js`: Escape, a click on the backdrop and Close close it).
+   The panel has its own `confirmModal` scope for its Revoke buttons (kept off the Close button: both define `close`); while it is
+   open Escape closes only it. Every action re-renders `#qr-share-panel` (`partials/share_panel.html`). {% endcomment %}
+<div x-data="fragmentModal"
+     @keydown.escape.window="if (!$root.querySelector('#confirm-modal-title')?.checkVisibility()) close()" @click.self="close()"
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70">
+    <div role="dialog" aria-modal="true" aria-labelledby="qr-share-title"
+         class="max-h-[90vh] w-full max-w-2xl mx-4 overflow-y-auto rounded-2xl bg-white dark:bg-gray-800 shadow-2xl">
+        <div id="qr-share-panel">{% include 'qr_code/partials/share_panel.html' %}</div>
+    </div>
+</div>

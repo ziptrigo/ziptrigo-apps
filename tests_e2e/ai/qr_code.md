@@ -13,9 +13,12 @@ The QR code product's web UI (`apps/qr_code`):
 - the public short links `/go/<code>` and `/go/<code>/`, their scan count, and the neutral
   "This QR code isn't available" page for an unknown or deleted code;
 - the image `/qr/image/<id>/` and its download (`?download=1`);
+- sharing a QR code (issue #5): the dashboard row's **Share** item and the editor's **Share** button, the share dialog (create, copy,
+  label, expiry, edit, revoke), the "Shared" icon, and the public pages `/q/<code>` and `/q/<code>/image` with the neutral unavailable
+  page for every link that doesn't work (QR-32 to QR-37);
 - the "too long for a QR code" refusal, including the advice to turn on tracking for a long URL;
 - access control: logged-out visitors, another user's QR code ids;
-- that creating QR codes costs no credits;
+- that creating and sharing QR codes costs no credits;
 - phone width, dark mode and keyboard use of the dashboard and the editor.
 
 The editor offers exactly two content types, **Text** and **URL** (a URL can be tracked); both are
@@ -228,7 +231,7 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click the "⋮" button on the `QA Tracked` row. | A menu opens with **Edit**, **Duplicate** and **Delete** (red). Clicking elsewhere on the page closes it; clicking "⋮" on another row closes this one and opens that one. |
+| 1 | Click the "⋮" button on the `QA Tracked` row. | A menu opens with **Edit**, **Duplicate**, **Share**, **Download** and **Delete** (red). Clicking elsewhere on the page closes it; clicking "⋮" on another row closes this one and opens that one. |
 | 2 | Click **Edit**. | `/qr/edit/<TRACKED_ID>/`. Tab title "Edit QR Code - ZipTrigo", heading "Edit QR code". |
 | 3 | Look at the form. | **Name** = `QA Tracked` (editable); **Type** shown read-only as `URL` (grey box, not a select); **Text / URL (read-only)** is a disabled grey textarea showing `SHORT_URL`; no Format select, no Track checkbox, no Short URL field, no Preview button. "QR Code Preview:" label with the saved QR image (`/qr/image/<TRACKED_ID>/`). **Cancel** and **Save**. |
 | 4 | Clear the Name and click **Save**. | Native "Please fill out this field." bubble; nothing is sent. |
@@ -366,7 +369,7 @@ makes its own SVG code.)
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Create a URL QR code named `QA SVG`, content `https://example.com/svg`, Format `SVG`, Track unticked. | Saved; it is the top row on `/qr/`. |
-| 2 | Open the "⋮" menu of the `QA SVG` row and look at it; also look in the preview modal and on the Edit page. | The menu has **Edit**, **Duplicate**, **Download** (download icon) and **Delete** (red). The preview modal and the Edit page have no download control. |
+| 2 | Open the "⋮" menu of the `QA SVG` row and look at it; also look in the preview modal and on the Edit page. | The menu has **Edit**, **Duplicate**, **Share** (share icon), **Download** (download icon) and **Delete** (red). The preview modal and the Edit page have no download control. |
 | 3 | Click **Download** on the `QA Text` row. | The browser saves `qa-text.png` (the name slugified); the request was `/qr/image/<TEXT_ID>/?download=1` with `Content-Disposition: attachment; filename="qa-text.png"`. Open the file: a PNG QR code. |
 | 4 | Click **Download** on the `QA SVG` row. | It saves `qa-svg.png`, a PNG too: the SVG format chosen at creation can't be obtained from the web UI (observation, not a failure). |
 | 5 | Click **Download** on the `Café ☕ QR 👋` row (QR-19). | It saves `cafe-qr.png` (accents and emoji dropped from the file name). |
@@ -480,13 +483,106 @@ visitor's system setting.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Press `Tab` from the top of the page. | The first stop is "Skip to content"; then the header, the **New QR code** button, the search box, the **Newest**/**Name** sort links, and for each row its thumbnail button ("Preview <name>") and its "⋮" button ("Actions for <name>"). Every focused control shows a visible focus ring. |
-| 2 | Focus a row's "⋮" button and press `Enter`. | Its menu opens. `Tab` moves through **Edit**, **Duplicate**, **Download** and **Delete** in that order. |
+| 2 | Focus a row's "⋮" button and press `Enter`. | Its menu opens. `Tab` moves through **Edit**, **Duplicate**, **Share**, **Download** and **Delete** in that order. |
 | 3 | Press `Escape` while the menu is open. | Record whether it closes. (The dashboard's script closes the menu on an outside click only; if `Escape` leaves it open, record it as an accessibility observation, not a failure.) |
 | 4 | Open the menu again, `Tab` to **Delete** and press `Enter`. | The delete dialog opens with focus on **Cancel** (QR-27 covers the focus trap). Press `Escape`: it closes and focus returns to that row's "⋮" button. |
 | 5 | Focus a thumbnail button and press `Enter`. | The enlarged preview opens with focus on "×"; `Enter` on "×" closes it and focus returns to the thumbnail. |
 | 6 | In the search box type `text` and press `Enter`. | The list is filtered (`/qr/?q=text`). |
 | 7 | Go to `/qr/create/` and `Tab` through the form. | Name, Text / URL, Type, Format, Track QR Code (skipped while disabled), **Preview**, **Cancel**, **Save**, in that order. With Type `URL` selected by the arrow keys, Track becomes reachable and `Space` ticks it. |
 | 8 | Fill Name and content, `Tab` to **Preview** and press `Enter`, then `Tab` to **Save** and press `Enter`. | The preview renders, then the code is saved and the browser goes to `/qr/`. Delete this code afterwards (menu → **Delete** → **Delete**). |
+
+### QR-32 Share a QR code with a link
+
+**Purpose:** the owner makes a share link from the dashboard and copies it (issue #5).
+**Preconditions:** logged in as `qa.user`, on `/qr/` with `QA Text` (`TEXT_ID`) and `QA Tracked` (`TRACKED_ID`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the "⋮" menu of the `QA Text` row and click **Share**. | The menu closes and a dialog opens over the page, titled `Share "QA Text"`, with the focus inside it. It says "Anyone who has a link can see this QR code and download it, without signing in. The link always shows the code as it is now. 0 of 10 active links used.", has **Label (optional)** ("Only you see it."), **Expires on (optional)**, a **Create link** button and "This QR code has no links yet.". |
+| 2 | Type `for the printer` in **Label** and click **Create link**. | The list shows one link: an **Active** pill, the label, an address `http://localhost:8765/q/<22 letters, digits, - or _>` (`LINK_URL`), **Copy link**, "Created <time>", **Edit** and **Revoke** (red). The counter reads "1 of 10 active links used". |
+| 3 | Click **Copy link**. | The button reads **Copied** for about two seconds, then **Copy link** again; pasting elsewhere gives exactly `LINK_URL`. |
+| 4 | Click **Close** (or press `Escape`). | The dialog closes (the focus goes back to the control that opened it when that is still on screen). The `QA Text` row now has a small link icon next to its name (tooltip "Shared"); the other rows have none. |
+| 5 | Open `/qr/edit/<TEXT_ID>/`. | A **Share** button sits next to the heading; it opens the same dialog with the same link. `Escape` closes it. |
+| 6 | Open `/qr/create/` and `/qr/duplicate/<TEXT_ID>/`. | No **Share** button there (nothing to share yet). |
+| 7 | Reload `/qr/` and open `/qr/share/<TEXT_ID>/` directly in the address bar. | The browser goes to `/qr/?share=<TEXT_ID>` and the share dialog opens by itself. `/qr/?share=nonsense` and `/qr/?share=<another user's id>` open nothing. |
+| 8 | In the dialog, create 9 more links (labels `l2` to `l10`), then try an 11th. | The counter reaches "10 of 10 active links used"; the 11th is refused with the red line "A QR code can have at most 10 active links." and no link is added. |
+| 9 | As `qa.broke` (0 credits), share one of their own codes. | It works: sharing costs no credits (QR-25 and the Costs page say the same). |
+
+### QR-33 The public page
+
+**Purpose:** anyone with the link sees the code, with no account (issue #5).
+**Preconditions:** QR-32 done (`LINK_URL` for `QA Text`); a second browser profile or a private window that is **not** signed in.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In the private window open `LINK_URL`. | No login. The heading `QA Text`, the QR code image (white background), a **Download PNG** button, and the section **This QR code contains** with `Hello from QA` and a **Copy** button. Nothing about the owner (no name, no email), the label `for the printer`, the scan count or other links. The tab title is `QA Text - ZipTrigo`. |
+| 2 | Look at the response headers (developer tools) of the page and of `LINK_URL/image`. | Both: `Cache-Control: no-store, private`, `Referrer-Policy: strict-origin`, `X-Robots-Tag: noindex, nofollow`; the page has `<meta name="robots" content="noindex">`. The image is `image/png` with `X-Content-Type-Options: nosniff`. |
+| 3 | Click **Download PNG**. | The browser saves `qa-text.png`; it is a PNG that scans to `Hello from QA`. |
+| 4 | Click **Copy**. | The button reads **Copied**; pasting gives `Hello from QA`. |
+| 5 | Open `LINK_URL` with a trailing slash, then `LINK_URL/image?download=1`. | Both work; the second downloads the PNG as an attachment. |
+| 6 | Create a link for `QA Tracked` (QR-32 step 1 to 2) and open it as the visitor. | The heading, the image and **This QR code leads to** `http://localhost:8765/?from=qr` as plain text (not a link) with the note "Shown as text, not a link: check where it goes before you open it." The page does not show the `/go/<code>` short link. |
+| 7 | Scan (or decode) the downloaded `QA Tracked` image and open the short URL it encodes; then, as `qa.admin`, look at the code in `/admin/qr_code/qrcode/`. | The short link redirects to the home page and the code's **Scan count** went up by one: a scan of a shared copy counts like any other. |
+| 8 | Create a link for `QA Plain URL` (an SVG code) and open it. | It shows a PNG image like the dashboard does. |
+| 9 | Rename `QA Text` to `QA Text (renamed)` as the owner (`/qr/edit/<TEXT_ID>/`) and reload `LINK_URL` as the visitor. | The visitor's page shows the new name: a link shows the code as it is now. Rename it back. |
+| 10 | Open the `Injection QR` code's link (create the code first if it is gone). | The name and content show as text; no alert dialog appears. |
+| 11 | Signed in as `qa.user`, open `LINK_URL` in the normal window. | The same public page (no nav of the QR app, no edit controls). |
+| 12 | In the shell, deactivate the owner (`python tests_e2e/ai/manage.py shell -c "from apps.accounts.models import User as U; u=U.objects.get(email='qa.user@example.com'); u.deactivate()"`, use the seeded address) and reload `LINK_URL` and `LINK_URL/image` as the visitor; then set `status='ACTIVE'` and `is_active=True` again with `U.objects.filter(...).update(...)`. | While the owner is deactivated both show the neutral unavailable page (404); after reactivating they work again. |
+
+### QR-34 Expiry and revoking
+
+**Purpose:** a link can be given an end date and killed at any time (issue #5).
+**Preconditions:** QR-32 done, the dialog open for `QA Text`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Create a link with **Expires on** set to yesterday (type the date). | The red line `Expires on: Choose a date that has not passed.` (also under the field); no link is added. |
+| 2 | Type `tomorrow` in the field and create. | The red line `Expires on: Enter a date.`. |
+| 3 | Create a link with **Expires on** = a date 10 days ahead. | The new link says "Expires <date>" (in your date format). The visitor's page for it shows "Expires <date and time>". |
+| 4 | Click **Edit** on a link, change the label to `printer 2`, clear the date, **Save link**. | The list shows `printer 2` and no expiry. |
+| 5 | Click **Edit** on a link and type or paste 150 characters into **Label**. | The browser stops at 100 characters (`maxlength`); the server's own limit, `Label: Keep the label to 100 characters or fewer.`, is unit-tested. |
+| 5b | Paste a label containing a zero-width space or a right-to-left override (e.g. `\u200b` before `Ann`) into **Label** and save. | The saved label has those characters removed (only visible text remains). |
+| 6 | Click **Revoke** on `LINK_URL`'s link. | A confirmation: "Revoke this link?" / "Anyone who has it can no longer see the QR code through it. This can't be undone: you can make a new link." with **Cancel** and **Revoke**. `Escape` closes only the confirmation, not the share dialog. |
+| 7 | Click **Revoke** and confirm (also try it from the editor's **Share** button: you return to the editor with the dialog open). Revoking works even right after 60 link changes in a minute (it is never rate limited). | The page reloads (the dashboard, or the editor when you started there) with the share dialog open again and a green "Link revoked."; the link is greyed with a **Revoked** pill, no **Copy link**, **Edit** or **Revoke**. If it was the only active link, the row's link icon is gone. |
+| 8 | As the visitor reload `LINK_URL` and `LINK_URL/image`. | Both show the neutral page **This QR code isn't available** ("It may have been removed by its owner.", a link "Go to ZipTrigo") with HTTP 404 (QR-35). |
+| 9 | Reload the dialog. | The revoked link has no **Edit** or **Revoke** button and no **Copy link** (a replayed edit POST answers `This link was revoked and can no longer be changed.`, a replayed revoke is harmless). |
+| 10 | In the shell (`python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.qr_code.models import QRShareLink as L; L.objects.filter(label='l2').update(expires_at=timezone.now()-timedelta(minutes=1))"`) expire the link labelled `l2`. | The dialog (reload) greys it with an **Expired** pill; the visitor gets the neutral page; **Edit** is still offered, and extending the date makes it active again. |
+
+### QR-35 Every dead link looks the same
+
+**Purpose:** a visitor can't tell why a link doesn't work (issue #5).
+**Preconditions:** QR-32 to QR-34 done; the visitor window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/q/doesnotexist`, a revoked link, an expired link, and `/q/` followed by 200 letters. | The same page for all: **This QR code isn't available**, status 404, the same headers as QR-33 step 2. View source: the four pages are byte for byte identical. |
+| 2 | As the owner, delete `QA Text` (QR-21 steps), then open its still-active link and its `/image`. | The same neutral page and 404: deleting a code stops every link of it. |
+| 3 | Compare with `/go/doesnotexist`. | The same page again. |
+| 4 | The words "revoked", "expired", "deleted" and "taken down" appear nowhere in any of those pages. | As described. |
+
+### QR-36 Access control for sharing
+
+**Purpose:** only the owner shares a code (issue #5).
+**Preconditions:** `qa.user` has `QA Tracked` (`TRACKED_ID`) with a link `L_ID`; the other user is `qa.broke`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Logged out, open `/qr/share/<TRACKED_ID>/` and POST to `/qr/share/<TRACKED_ID>/new/`. | Redirected to the login page (`next` = the path). The public pages need no login (QR-33). |
+| 2 | As `qa.broke`, open `/qr/share/<TRACKED_ID>/`, `/qr/?share=<TRACKED_ID>`, and replay the create, edit and revoke POSTs for `qa.user`'s code and link. | The share URLs answer 404; `/qr/?share=...` opens nothing. No link is created, changed or revoked. |
+| 3 | As `qa.user`, replay the edit POST of a link of `QA Tracked` under the URL of `QA Text`. | 404. |
+| 4 | Look at `/qr/` as `qa.broke`. | No link icons: another user's links are invisible. |
+
+### QR-37 Sharing: mobile, dark mode and keyboard
+
+**Purpose:** the share dialog and the public page work at phone width, in dark mode and with the keyboard (issue #5).
+**Preconditions:** a QR code with an active link and a revoked one.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | At 375 px wide open the share dialog and the public page. | The dialog fits with margins and scrolls inside itself when long; the address wraps instead of overflowing; the buttons wrap. The public page's image scales down; no horizontal scroll. |
+| 2 | Choose **Dark** on `/account/` and look at both again. | Dark backgrounds with light text; the dialog, its fields, the pills and the confirmation are legible; the QR image keeps its own colours on white. |
+| 3 | With the keyboard only: focus a row's "⋮", `Enter`, `Tab` to **Share**, `Enter`. | The dialog opens with focus on its first control (**Close**); `Tab` walks through its fields and buttons; `Escape` closes it. |
+| 4 | Inside the dialog `Tab` to **Revoke**, `Enter`, then `Tab`/`Shift+Tab`. | The confirmation takes the focus (on **Cancel**); `Escape` closes only it. |
+| 5 | Make an error (a past date) and look at the field. | The message is repeated under **Expires on** with a red border and `aria-invalid="true"`; the focus moves to the field. |
 
 ## Out of scope
 
@@ -496,3 +592,4 @@ visitor's system setting.
   (`/qr/image/<id>/`); the stored file is not reachable from the web UI.
 - The `/go/<code>` per-IP rate limit (`QR_REDIRECT_IP`): rate limiting is off on this server.
 - The JWT API `/api/qr/` and `inv qrcode`: unit-tested.
+- Sharing by email, reports and takedown of a shared QR code come with later changes of issue #5 and get their own cases then.

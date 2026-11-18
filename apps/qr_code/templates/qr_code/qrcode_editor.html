@@ -5,7 +5,16 @@
 
 {% block content %}
 <div class="container mx-auto px-4 py-8 max-w-3xl">
-  <h1 class="text-3xl font-semibold tracking-tight mb-6 text-gray-900 dark:text-gray-100">{% if qrcode %}Edit{% else %}Create{% endif %} QR code</h1>
+  <div class="mb-6 flex items-center justify-between gap-3">
+    <h1 class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{% if qrcode %}Edit{% else %}Create{% endif %} QR code</h1>
+    {% if qrcode %}
+    <button type="button" id="qr-share-btn"
+            hx-get="{% url 'qr_code:share' qrcode.id %}" hx-target="#qr-share-modal" hx-swap="innerHTML"
+            class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+      <i class="fas fa-share-nodes mr-2" aria-hidden="true"></i>Share</button>
+    {% endif %}
+  </div>
+  {% if qrcode %}<div id="qr-share-modal"{% if open_share %} hx-get="{% url 'qr_code:share' open_share %}" hx-trigger="load" hx-swap="innerHTML"{% endif %}></div>{% endif %}
 
   <div id="qrcode-msg" class="mb-4 text-sm" aria-live="polite"></div>
 
@@ -206,4 +215,9 @@
     });
   })();
 </script>
+{% endblock %}
+
+{% block extra_js %}
+{# A classic (non-deferred) script, so its `alpine:init` listener is registered before Alpine starts. #}
+<script src="{% static 'core/js/fragment_modal.js' %}"></script>
 {% endblock %}

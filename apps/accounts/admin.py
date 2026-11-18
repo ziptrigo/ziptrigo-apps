@@ -22,12 +22,14 @@ CASCADE_WITH_USER_APP_LABELS = ('billing', 'receipts', 'short_url', 'todo', 'not
 # The same, for single models (`'<app label>.<model name>'`) of an app that has other models which
 # must keep asking: `core` is a grab bag, so only its notifications and push subscriptions and
 # answers (issue #239; all read-only in the admin) are listed, and a future `core` model with a
-# user FK is not exempted without anyone deciding so.
+# user FK is not exempted without anyone deciding so. `qr_code` lists its share links alone (issue
+# #5): its other models have admins that allow delete.
 CASCADE_WITH_USER_MODELS = (
     'core.notification',
     'core.pushsubscription',
     'core.pushaction',
     'accounts.refreshtoken',
+    'qr_code.qrsharelink',
 )
 
 
