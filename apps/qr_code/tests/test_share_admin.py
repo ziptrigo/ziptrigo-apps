@@ -332,6 +332,24 @@ class TestTakeDownOnTheQRCodeList:
         ):
             assert f'name="{field}"' not in body
 
+    def test_a_change_form_save_cannot_revert_a_takedown_from_a_stale_instance(
+        self, client, superuser, qrcode
+    ):
+        stale = QRCode.objects.get(pk=qrcode.pk)  # read before the takedown
+        takedown.take_down_qrcode(qrcode, by=superuser, reason='Landed meanwhile')
+        stale.name = 'Renamed in the admin'
+
+        class FakeForm:
+            changed_data = ['name']
+
+        from apps.core.admin_site import custom_admin_site
+
+        model_admin = custom_admin_site._registry[QRCode]
+        model_admin.save_model(None, stale, FakeForm(), True)
+        fresh = QRCode.objects.get(pk=qrcode.pk)
+        assert fresh.name == 'Renamed in the admin'
+        assert fresh.is_taken_down and fresh.takedown_reason == 'Landed meanwhile'
+
 
 def user_email(qrcode) -> str:
     return qrcode.created_by.email
@@ -378,6 +396,9 @@ class TestTheReportList:
             ReportStatus.ACTIONED
         }
         assert LogEntry.objects.filter(object_id=str(qrcode.pk)).count() == 1
+        for report in (first, second):
+            entry = LogEntry.objects.get(object_id=str(report.pk))
+            assert entry.get_change_message() == 'Actioned: QR code taken down'
 
     def test_dismiss_marks_the_report_and_logs_it(self, client, superuser, reported):
         response = act(client, REPORTS, 'dismiss_action', [reported], follow=True)

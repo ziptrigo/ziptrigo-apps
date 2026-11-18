@@ -93,6 +93,7 @@ def _takedown_confirm_response(
     *,
     original_queryset,
     action_name: str,
+    reports: list[QRShareReport] | None = None,
 ) -> HttpResponse:
     """Shared two-step confirmation of `QRCodeAdmin` and `QRShareReportAdmin`'s take down:
     `qrcodes` is the deduplicated set of QR codes to take down (what is shown and acted on). The
@@ -112,6 +113,8 @@ def _takedown_confirm_response(
                 )
             ]
             admin_log.log_change(request, done, f'Taken down: {reason}')
+            if reports:
+                admin_log.log_change(request, reports, 'Actioned: QR code taken down')
             message = f'Took down {len(done)} QR code(s).'
             skipped = len(qrcodes) - len(done)
             if skipped:
@@ -215,6 +218,15 @@ class QRCodeAdmin(_TakedownPermissionMixin, _NoCodeLookupMixin, admin.ModelAdmin
     ]
     inlines = [QRShareLinkInline]
     actions = ['take_down_action']
+
+    def save_model(self, request, obj: QRCode, form, change: bool) -> None:
+        """On a change, write only the fields the form changed (and `updated_at`): a full save
+        would write every column from the instance read when the page loaded, including the
+        takedown columns, and revert a takedown that landed in between."""
+        if change:
+            obj.save(update_fields=[*form.changed_data, 'updated_at'])
+        else:
+            super().save_model(request, obj, form, change)
 
     @admin.display(boolean=True, description='Taken down', ordering='taken_down_at')
     def taken_down(self, obj: QRCode) -> bool:
@@ -334,7 +346,13 @@ class QRShareReportAdmin(_TakedownPermissionMixin, _ReadOnlyModelAdmin):
             QRCode.objects.filter(pk__in=queryset.values('qrcode_id')).select_related('created_by')
         )
         return _takedown_confirm_response(
-            request, self, qrcodes, original_queryset=queryset, action_name='take_down_action'
+            request,
+            self,
+            qrcodes,
+            original_queryset=queryset,
+            action_name='take_down_action',
+            # Read before the takedown: it actions the pending ones, and only those get the line.
+            reports=list(queryset.filter(status=ReportStatus.PENDING)),
         )
 
 

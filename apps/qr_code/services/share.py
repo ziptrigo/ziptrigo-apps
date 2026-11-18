@@ -41,6 +41,7 @@ CODE_BYTES = 16
 #: The longest code a public URL is looked up with (a real one is 22 characters).
 MAX_CODE_LENGTH = 64
 DELETED_MESSAGE = 'This QR code was deleted.'
+COPY_TAKEN_DOWN_MESSAGE = 'This QR code was taken down and cannot be copied.'
 REVOKED_MESSAGE = 'This link was revoked and can no longer be changed.'
 PAST_DATE_MESSAGE = 'Choose a date that has not passed.'
 CAP_MESSAGE = f'A QR code can have at most {MAX_ACTIVE_LINKS_PER_CODE} active links.'
@@ -144,10 +145,9 @@ def with_active_link_flag(queryset: QuerySet) -> QuerySet:
     "shared"."""
     return queryset.annotate(
         has_active_link=Exists(
-            QRShareLink.objects.filter(
-                active_condition(), qrcode=OuterRef('pk'), qrcode__taken_down_at__isnull=True
-            ).only('pk')
+            QRShareLink.objects.filter(active_condition(), qrcode=OuterRef('pk')).only('pk')
         )
+        & Q(taken_down_at__isnull=True)
     )
 
 

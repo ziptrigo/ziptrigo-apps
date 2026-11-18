@@ -252,9 +252,40 @@ class TestTheOwnersView:
         self.web.post(url('edit-submit', self.qrcode.pk), {'name': 'Renamed'}, **HTMX)
         assert reload(self.qrcode).is_taken_down
 
-    def test_a_duplicate_is_a_new_untouched_code(self):
-        page = self.web.get(url('duplicate', self.qrcode.pk))
-        assert page.status_code == 200 and 'taken down' not in text(page).lower()
+    def test_a_duplicate_of_it_is_refused_with_a_flash(self):
+        """The create submit doesn't know which code a duplicate came from (the page only
+        pre-fills the editor), so refusing the duplicate page is the whole check."""
+        response = self.web.get(url('duplicate', self.qrcode.pk), follow=True)
+        assert response.redirect_chain[-1][0] == url('dashboard')
+        assert 'This QR code was taken down and cannot be copied.' in text(response)
+
+    def test_the_dashboard_offers_no_duplicate_for_it(self, user):
+        fine = make_qrcode(user, name='Fine door')
+        body = text(self.web.get(url('dashboard')))
+        assert url('duplicate', self.qrcode.pk) not in body
+        assert url('duplicate', fine.pk) in body
+
+    def test_a_rename_does_not_revert_a_takedown_that_landed_meanwhile(
+        self, user, staff, monkeypatch
+    ):
+        """The view reads the code, validates, then saves: a takedown in between must survive."""
+        from apps.qr_code.forms import QRCodeRenameForm
+
+        fresh = make_qrcode(user, name='Open door')
+        original = QRCodeRenameForm.is_valid
+
+        def is_valid_then_takedown(form):
+            valid = original(form)
+            takedown.take_down_qrcode(
+                QRCode.objects.get(pk=fresh.pk), by=staff, reason='Landed meanwhile'
+            )
+            return valid
+
+        monkeypatch.setattr(QRCodeRenameForm, 'is_valid', is_valid_then_takedown)
+        self.web.post(url('edit-submit', fresh.pk), {'name': 'Renamed'}, **HTMX)
+        after = reload(fresh)
+        assert after.name == 'Renamed'
+        assert after.is_taken_down and after.takedown_reason == 'Landed meanwhile'
 
     def test_another_user_still_gets_a_404(self):
         theirs = make_qrcode(make_user(), name='Theirs')

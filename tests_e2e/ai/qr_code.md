@@ -673,7 +673,7 @@ visitor's system setting.
 | 5 | In devtools replay `POST /qr/share/<TRACKED_ID>/new/`, `.../<link id>/edit/` (`label=x`) and `.../<link id>/email/` (`emails=x@example.com`). | Each answers 422 with the red line `This QR code was taken down and cannot be shared.`; no link is made or changed and nothing is emailed (`/__e2e__/mail/?to=x@example.com` has nothing). |
 | 6 | Owner: open `/qr/edit/<TRACKED_ID>/`, rename it to `QA Tracked 2`, save; open **Download**. | Everything still works: the code can be viewed, renamed, downloaded and deleted, and it stays taken down (the red line stays). |
 | 7 | Take the short URL of `QA Tracked` (its `http://localhost:8765/go/<code>`) and open it in the visitor window. | It still redirects to the destination: **a takedown does not stop `/go/<code>`** (it is printed on physical codes). The code's scan count in `/admin/qr_code/qrcode/` goes up by one. |
-| 8 | Owner: **Duplicate** `QA Tracked`. | The editor opens pre-filled and saving makes an ordinary new code that is not taken down. |
+| 8 | Owner: open the "⋮" menu of the `QA Tracked` row; then open `/qr/duplicate/<TRACKED_ID>/` directly. | The menu has **Edit**, **Share**, **Download** and **Delete** but **no Duplicate** (every other row still has it). The direct URL redirects to `/qr/` with the red flash `This QR code was taken down and cannot be copied.` and nothing is created. |
 | 9 | `/__e2e__/mail/?to=qa.user@example.com` and the bell. | The owner got no email and no notification about the takedown. |
 | 10 | Owner: delete `QA Tracked 2` (QR-21). | It works; a taken-down code can be deleted. |
 | 11 | As `qa.broke`, open `/qr/share/<TRACKED_ID>/` (QA User's taken-down code). | 404, as for any other user's code. |

@@ -2543,13 +2543,17 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
     creating or changing a link and `share_emails.require_sendable` refuses sending or resending (first, with the same message) with the
     typed `QRCodeTakenDownError` ("This QR code was taken down and cannot be shared.", a plain non-field `ValidationError`, so the API of the
     last PR can answer 409 without comparing text), decided again under the lock (`_locked_qrcode` re-reads the row); **revoking is
-    still always allowed**; the queued email task sends nothing. The owner still sees, edits, downloads, duplicates (the copy is an ordinary
-    new code) and deletes the code. **No email and no notification** to the owner. **`/go/<code>` is not touched**: `views.redirect` never
+    still always allowed**; the queued email task sends nothing. The owner still sees, edits, downloads and deletes the code but **can't duplicate it**: the dashboard menu
+    has no Duplicate for it and `qr_code:duplicate` redirects to the dashboard with the flash "This QR code was taken down and cannot be
+    copied." (`share.COPY_TAKEN_DOWN_MESSAGE`; the create submit doesn't know which code a duplicate came from, so refusing the page is the
+    whole check, like Notes' `check_duplicable`). A rename saves **only `name` and `updated_at`** (`update_fields`, web and JWT API), and
+    `QRCodeAdmin.save_model` saves only the changed form fields on a change, so a takedown that landed after the code was read is never
+    reverted by a stale full save. **No email and no notification** to the owner. **`/go/<code>` is not touched**: `views.redirect` never
     reads these columns, because a tracked code is printed on physical codes and killing a redirect is a different decision (a test pins that
     a taken-down tracked code still redirects and counts scans).
   - **What the owner sees.** The dashboard row gets a red line "Taken down. <reason> Its share links no longer work." (`data-taken-down`;
     the reason only, never the internal note, the staff user or the reporter) and loses its "Shared" icon (`with_active_link_flag` ignores a
-    taken-down code, and the panel's out-of-band span follows `shared`, not `active_count`). The share dialog opens with a red **This QR code
+    taken-down code, with the link subquery filtered on the link table and the outer row's `taken_down_at` combined with `&`, and the panel's out-of-band span follows `shared`, not `active_count`). The share dialog opens with a red **This QR code
     was taken down.** box with the reason, has no create form, and its links show a **Not working** pill with **Revoke** only (no **Copy
     link**, **Edit**, **Send by email** or **Resend**); refused POSTs answer 422 with the message above (a flash without htmx).
   - **Admin** (`admin.py`, a copy of Notes'): the read-only `QRShareReportAdmin` (list: QR code (a link), reason, status, reporter email and IP,
@@ -2560,7 +2564,8 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
     no "notify" box); several reports of one code take it down once, a code already taken down is skipped and said so ("Took down 1 QR
     code(s). 1 had already been taken down."). **All three actions name `qr_code.takedown_qrcode`** (`has_takedown_qrcode_permission`: a plain
     admin action ignores `has_change_permission`, so view-only staff would otherwise get them, even by posting) and log with
-    `apps.core.admin_log.log_change`. The `code` lookup refusal covers the new admin too (`link__code`, `qrcode__share_links__code`). The report
+    `apps.core.admin_log.log_change` (a takedown started from the report list also logs "Actioned: QR code taken down" on each report it
+    actioned). Reporter IPs are kept like Notes' and Short URLs' (no purge); a shared purge job is a possible follow-up. The `code` lookup refusal covers the new admin too (`link__code`, `qrcode__share_links__code`). The report
     admin is read-only, so `qr_code.qrsharereport` is in `accounts.admin.CASCADE_WITH_USER_MODELS` (deleting a **user** with reported codes keeps
     working) and `QRCodeAdmin.get_deleted_objects` also drops it from `perms_needed` for a caller holding `qr_code.delete_qrsharereport`.
   - **Not done:** an auto-hold after N reports, a block list, a staff notification on a report (there is no admin email setting), a release

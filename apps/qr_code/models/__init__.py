@@ -6,7 +6,6 @@ from .qrcode import (
     generate_short_code,
 )
 from .share import (
-    MAX_DETAILS_LENGTH,
     QRShareLink,
     QRShareRecipient,
     QRShareReport,
@@ -15,7 +14,6 @@ from .share import (
 )
 
 __all__ = [
-    'MAX_DETAILS_LENGTH',
     'QRCode',
     'QRCodeFormat',
     'QRCodeErrorCorrection',
