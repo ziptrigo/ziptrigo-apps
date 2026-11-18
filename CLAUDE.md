@@ -45,7 +45,8 @@ apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), cred
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
                       to superusers; admin triage by status.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links, share links with the
-                      public `/q/<code>` pages, emailing a link, reports and takedown (issue #5, see "QR code specifics" > "Sharing").
+                      public `/q/<code>` pages, emailing a link, reports and takedown, and the share-link JWT endpoints
+                      and `inv qrcode` commands (issue #5, see "QR code specifics" > "Sharing").
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs, and file requests (issue
                       #306: a link for other people to upload files to you, see "File requests").
@@ -109,6 +110,7 @@ inv server run [local|prod]     # runserver on :8000
 inv pip sync                  # uv sync --frozen, all groups
 inv api generate [--bump patch|minor|major]   # docs/openapi.yml; bumps the version only if the spec changed
 inv api generate --check      # exit 1 if docs/openapi.yml is out of date; writes nothing
+inv qrcode links local <qr-id> | share local <qr-id> [--label ... --expires 2026-12-31 --to a@x --to b@y --message ...] | unshare local <qr-id> <link-id> [--yes]   # share links (issue #5)
 inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/, /api/receipts/, /api/s/, /api/todo/, /api/notes/, /api/time/
 inv filetransfer send local report.pdf --to a@example.com [--title "Q3 report"]
 inv filetransfer request-create local ["Wedding photos"] [--message ... --anyone | --signed-in | --to a@x --to b@y --max-files N --max-gb N --expires 30|none|2026-12-31 --password]   # file requests (issue #306); the password via FILETRANSFER_LINK_PASSWORD or a hidden prompt
@@ -1873,7 +1875,8 @@ file_transfer, `/api/receipts/` for receipts, `/api/s/` for short_url, described
 above, including how it handles credits for a client with no one to confirm with, `/api/todo/`
 for the To-do app, described just below and under "To-do" > "API and CLI", `/api/time/` for World Time,
 described under "World Time" > "API and CLI", and `/api/notes/` for Notes,
-described under "Notes" > "API and CLI"). Docs at `/api/docs`. **Schema class names are unique across
+described under "Notes" > "API and CLI"; `/api/qr/` also has the share-link endpoints, see "QR code
+specifics" > "Sharing"). Docs at `/api/docs`. **Schema class names are unique across
 the whole API**: the OpenAPI document keys a component by class name alone, so two apps' classes with
 one name silently replace each other in the spec. A new schema that would clash takes the app's name as
 a prefix (`NoteLinkSchema`, `NoteFilterSchema`; `apps/notes/tests/test_api_wiring.py` fails on a Notes
@@ -2376,8 +2379,7 @@ a QR code (`MAX_CONTENT_LENGTH` counts characters, capacity is bytes: 1,000 emoj
 a 400 before anything is saved; the web editor's form calls `check_content_fits` for the same
 reason and its views turn a late `ValidationError` into a 422.
 
-**Sharing** (issue #5, PRs 1 to 3 of 4: copy-link sharing, sending by email, and reports and takedown; the JWT API and CLI
-are the last PR of the same issue). The owner of a QR code makes a **share link**, `<BASE_URL>/q/<code>`, that shows the
+**Sharing** (issue #5, all four PRs: copy-link sharing, sending by email, reports and takedown, and the JWT API with the CLI). The owner of a QR code makes a **share link**, `<BASE_URL>/q/<code>`, that shows the
 code (image, name, what it encodes) to anyone who has the address, with no account, and lets them download the PNG.
 Sharing is free (the Costs page says so, `services/costs.py`). The link shows the QR code **as it is now**, not a
 snapshot: renaming it changes what the link shows, deleting it stops every link of it. It is Notes' share link
@@ -2575,7 +2577,36 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
   was emailed to are kept with it, with when each was last emailed, and (PR 3) that a report of a shared QR code stores the reason, the
   details, the reporter's IP address and optional email (the abuse-reports lines name a shared QR code too); `TERMS_VERSION` is **not**
   bumped (the owner decides).
-- **Not in PRs 1 to 3** (issue #5's last PR): the JWT API and `inv qrcode` commands. No "save a copy" for a signed-in visitor.
+- **API and CLI** (PR 4; `api/share.py`, `schemas/share.py`, `admin/qrcode.py`; no migration; OpenAPI 2.17.0, additive). Under
+  `/api/qr/`, JWT only (`JWTAuth()` per endpoint; sync endpoints on the same `router` as the async ones), calling the services the
+  Share dialog calls and adding no rule of its own. Every schema class is `QRCodeShare...` (names are unique across the spec; a test
+  checks the share schemas). Endpoints, relative to the mount: `GET|POST /{qr_id}/links`, `PATCH|DELETE /{qr_id}/links/{link_id}`,
+  `POST /{qr_id}/links/{link_id}/email` (`{emails, message?}`) and `POST .../recipients/{recipient_id}/resend`. A link is `{id, url,
+  label, expires_at, revoked_at, active, recipients: [{id, email, last_sent_at}], created_at}` (`url` is `BASE_URL` + `/q/<code>`;
+  `active` is not revoked and not expired, whether it *works* also depends on the code). `expires_at` is a bare date (the end of that
+  day in the owner's zone) or an ISO date-time (naive: the owner's zone), `null` clears it (`label: null` clears the label); `PATCH`
+  applies only the keys sent, an empty `PATCH` changes nothing and spends nothing; every body is `extra='forbid'`. `DELETE` revokes
+  (204, idempotent, **never rate limited**, allowed on a taken-down code). `email` answers the link (with its people read afresh);
+  the people are two queries for any number of links. `QRCodeSchema` gains `has_active_link` (an active link on a code that is not
+  taken down: the list annotates it, `share.with_active_link_flag`, so it is no query per row), `taken_down` and `takedown_reason`
+  (`null` unless taken down; never the internal note).
+  - *Status codes* (documented in `api/share.py`): **400** a service refusal (`field: message`, a message that belongs to no field
+    plain: the cap, a revoked link, the unconfirmed owner, the cooldown, "This link no longer works."); **404** another user's code,
+    link or recipient, a link of another code, a deleted code (never 403); **409** a taken-down code (`QRCodeTakenDownError`, caught
+    by type, not by text: create, change, email and resend; listing and revoking still work); **422** ninja's own (a malformed id,
+    an unknown key, an empty `emails`); **429** the site handler with `Retry-After`.
+  - *Budgets are the web's*: create and change check first (`check_create` / `check_update`, no lock, no write), then charge
+    `QR_SHARE_USER`, then write, so a refused request spends nothing; `email` and `resend` pass `charge_share_emails` bound to the user
+    to the service, which spends `QR_SHARE_EMAIL_USER` once per email after every other refusal (a request that does not fit emails
+    nobody: 429 with "try again in N minutes").
+  - *CLI* (`inv qrcode ...`, the new commands go through `admin/utils.py`'s `api_request`; the older ones still use `requests`
+    directly): `links <env> <qr-id>` (table: id, url, label, state, expiry, the people emailed), `share <env> <qr-id> [--label
+    --expires 2026-12-31 --to a@x --to b@y --message ...]` (makes the link and prints its address and id; with `--to` it then emails
+    it, and if that fails it says the link was made but not emailed and exits 1; `--message` without `--to` is a usage error; a bad
+    `--expires` is refused before any request) and `unshare <env> <qr-id> <link-id> [--yes]` (asks first). User text is printed
+    escaped. Tests: `apps/qr_code/tests/test_api_share.py` (every endpoint and status, other users' 404s, refusals that spend no
+    budget, the 409s, revoke never limited, the new fields, query counts) and `admin/tests/test_qrcode.py`.
+- **Not done**: a "save a copy" for a signed-in visitor.
 - **Tests**: `apps/qr_code/tests/test_share_links.py` (rules, expiry in the owner's zone, the cap, availability, query counts),
   `test_share_panel.py` (the dashboard item and icon, the dialog, create/edit/revoke, refusals, 404s, rate limits),
   `test_share_public.py` (every unavailable case identical, headers, image and download, a tracked code's image and scan count,

@@ -39,6 +39,25 @@ class QRCodeSchema(ModelSchema):
 
     image_url: str | None = None
     redirect_url: str | None = None
+    has_active_link: bool = False
+    """Whether the code has a share link that works now (an active link on a code staff have not
+    taken down)."""
+    taken_down: bool = False
+    """Staff took the QR code down (final): none of its share links work and it cannot be shared."""
+    takedown_reason: str | None = None
+    """Why it was taken down; `null` unless it was. Never the staff's internal note."""
+
+    @staticmethod
+    def resolve_has_active_link(obj) -> bool:
+        return bool(getattr(obj, 'has_active_link', False))
+
+    @staticmethod
+    def resolve_taken_down(obj) -> bool:
+        return obj.is_taken_down
+
+    @staticmethod
+    def resolve_takedown_reason(obj) -> str | None:
+        return (obj.takedown_reason or None) if obj.is_taken_down else None
 
     class Meta:
         model = QRCode

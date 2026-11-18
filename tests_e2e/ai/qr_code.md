@@ -21,6 +21,7 @@ The QR code product's web UI (`apps/qr_code`):
 - reporting a shared QR code (the collapsed **Report this QR code** form on the public page) and a takedown by staff as the owner
   and the visitor see it, including that a tracked code's `/go/` short link keeps working (QR-41 and QR-42; the admin side is ADM-69
   in `admin.md`);
+- the share links in the JWT API (`/api/qr/{id}/links`) and the `inv qrcode links|share|unshare` commands (QR-43);
 - the "too long for a QR code" refusal, including the advice to turn on tracking for a long URL;
 - access control: logged-out visitors, another user's QR code ids;
 - that creating and sharing QR codes costs no credits;
@@ -678,6 +679,21 @@ visitor's system setting.
 | 10 | Owner: delete `QA Tracked 2` (QR-21). | It works; a taken-down code can be deleted. |
 | 11 | As `qa.broke`, open `/qr/share/<TRACKED_ID>/` (QA User's taken-down code). | 404, as for any other user's code. |
 
+### QR-43 The share links over the API and the `inv qrcode` CLI
+
+**Purpose:** the command line over the same share links (issue #5, PR 4).
+**Preconditions:** QR-32 and QR-38 done; a shell in the repo root; `QRCODE_PASSWORD='QaE2e-Passw0rd!'` exported; the test server of the README (`API_BASE_URL=http://localhost:8765`); `inv qrcode <command> local ...` with `local` the environment; `QA_ID` the id of `QA Text` (`inv qrcode list local` shows the first 8 characters, `/qr/edit/<id>/` the whole id); real-services mode for step 3.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `inv qrcode links local <QA_ID>` before logging in; then `inv qrcode login local qa.user@example.com`; then `links` again. | The first exits 1 (`Not authenticated on local. Please login first.`); after the login a table (id, url, label, state, expires, emailed to) lists the links of QR-32 and QR-38, the one with the people showing their addresses. A label with `[bold]` in it is printed as typed. |
+| 2 | `inv qrcode share local <QA_ID>`, then `--label "for Sam" --expires 2026-12-31`, `--expires "2026-12-31 18:00"` and `--expires soon`. | `Made a share link: <url>` and `Link ID: <id>`; a date means the end of that day in your time zone, a date-time that moment; `soon` is a usage error (exit 2) before any request. Open a printed url as the visitor: the public page of QR-33. |
+| 3 | `inv qrcode share local <QA_ID> --to c.<R>@example.com --to d.<R>@example.com --message "Door code inside"`; then `--message hi` without `--to`. | The link is printed, then `Emailed the link to c.<R>@example.com, d.<R>@example.com.`; both emails arrive at `/__e2e__/mail/` (subject `A QR code was shared with you`). `--message` alone is a usage error (exit 2). |
+| 4 | Make links until the cap: `inv qrcode share local <QA_ID>` repeatedly. | At the tenth active link (counting those of the earlier cases) it exits 1 with `400: A QR code can have at most 10 active links.` and nothing is made. |
+| 5 | `inv qrcode unshare local <QA_ID> <link id>` (answer `n`, then `y`), then `links` again, then `unshare ... --yes` on the same link. | `n` exits 1 `Cancelled; nothing was changed.` and keeps the link; `y` says `Revoked the link.` and the link is `revoked` in the table, and its url is the neutral page (QR-35) for the visitor; revoking again works (idempotent). |
+| 6 | With the access token of `qa.user`, `curl -H "Authorization: Bearer <token>" $API_BASE_URL/api/qr/<QA_ID>` (get the token from `~/.qrcode_token.local`). | The QR code JSON now has `has_active_link` (true while a link works), `taken_down` false and `takedown_reason` null. After ADM-69's takedown of a code, its JSON has `taken_down` true and the reason, never the internal note; `share` on it exits 1 with `409: This QR code was taken down and cannot be shared.`, while `links` and `unshare` still work. |
+| 7 | Run `inv qrcode links local <id of a code of qa.broke>` and `inv qrcode unshare local <QA_ID> <a link id of another code> --yes`. | Both exit 1 with `404:` (another user's code, or a link that isn't that code's): nothing is changed. |
+
 ## Out of scope
 
 - Size, border, error correction and colours: the editor has no controls for them (JWT API only,
@@ -685,7 +701,7 @@ visitor's system setting.
 - The SVG and PDF files the format choice produces: the site only ever serves a PNG
   (`/qr/image/<id>/`); the stored file is not reachable from the web UI.
 - The `/go/<code>` per-IP rate limit (`QR_REDIRECT_IP`): rate limiting is off on this server.
-- The JWT API `/api/qr/` and `inv qrcode`: unit-tested.
+- The JWT API `/api/qr/` and `inv qrcode`, except the share links (QR-43): unit-tested.
 - The per-user budget of emailed links (`QR_SHARE_EMAIL_USER`, 30 an hour): rate limiting is off on this server, so it is
   unit-tested (`apps/qr_code/tests/test_share_emails.py`).
 - The per-IP and per-code budgets of reports (`QR_SHARE_REPORT_IP`, 5 an hour, and `QR_SHARE_REPORT_CODE`, 20 an hour): rate

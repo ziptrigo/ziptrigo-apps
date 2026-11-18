@@ -17,7 +17,7 @@ One file per area, plus the preflight that runs before any of them:
 | [`notifications.md`](notifications.md) | The header bell, its dropdown, the notifications page, every event that creates one, and Web Push |
 | [`emails.md`](emails.md) | Every email the site sends: delivery, subject, body, escaping and every link in it |
 | [`feedback.md`](feedback.md) | The footer's Feedback page |
-| [`qr_code.md`](qr_code.md) | QR code dashboard, editor, preview, duplicate, delete, `/go/<code>` short links, sharing a QR code with a link (`/q/<code>`) |
+| [`qr_code.md`](qr_code.md) | QR code dashboard, editor, preview, duplicate, delete, `/go/<code>` short links, sharing a QR code with a link (`/q/<code>`), emailing it, reports and takedown, the share links over the JWT API and `inv qrcode` |
 | [`file_transfer.md`](file_transfer.md) | Sending files, dashboard actions, public download page, anonymous sending, file requests (ask others to upload to you) |
 | [`receipts.md`](receipts.md) | Upload, extraction, receipt page, vendors, trash, settings, CSV export |
 | [`short_url.md`](short_url.md) | Short links: dashboard, editor and costs, `/s/<code>` redirect and neutral page, password, preview and reports, stats, blocked domains, takedown |
