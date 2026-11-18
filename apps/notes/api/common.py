@@ -33,7 +33,7 @@ a query parameter of the restore and duplicate endpoints) makes the call refuse 
 real cost, worked out inside the charging transaction, differs.
 """
 
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import date
@@ -68,12 +68,17 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
 
 
-def validation_detail(exc: ValidationError) -> str:
+def validation_detail(exc: ValidationError, fields: Mapping[str, str] | None = None) -> str:
     """One readable line for a `ValidationError`: the first message, or `field: message` pairs when
-    the service keyed its errors by field (a message that belongs to no field is plain)."""
+    the service keyed its errors by field (a message that belongs to no field is plain). `fields`
+    maps a service's field name to the one the API's request body uses, where they differ (the
+    share links' `expires_on` is the body's `expires_at`), so a client can find the field."""
+    names = fields or {}
     if hasattr(exc, 'error_dict'):
         return ' '.join(
-            message if field_name == '__all__' else f'{field_name}: {message}'
+            message
+            if field_name == '__all__'
+            else f'{names.get(field_name, field_name)}: {message}'
             for field_name, messages in exc.message_dict.items()
             for message in messages
         )
@@ -89,24 +94,27 @@ def _cost_text(total: int) -> str:
 
 
 @contextmanager
-def mapped_errors(*, keep: type[ValidationError] | None = None) -> Generator[None]:
+def mapped_errors(
+    *, keep: type[ValidationError] | None = None, fields: Mapping[str, str] | None = None
+) -> Generator[None]:
     """Turn the services' exceptions into the API's statuses (see the module docs). The specific
     `ValidationError` subclasses come first: each has a status of its own. `keep` is a subclass the
-    caller answers itself (the 409 of a save with a stale `base_version`): it passes through."""
+    caller answers itself (the 409 of a save with a stale `base_version`): it passes through.
+    `fields` renames service field names in the detail (`validation_detail`)."""
     try:
         yield
     except InsufficientCreditsError as exc:
         raise HttpError(402, str(exc) or 'Insufficient credits') from exc
     except NoteLockedError as exc:
-        raise HttpError(402, validation_detail(exc)) from exc
+        raise HttpError(402, validation_detail(exc, fields)) from exc
     except NoteTakenDownError as exc:
-        raise HttpError(409, validation_detail(exc)) from exc
+        raise HttpError(409, validation_detail(exc, fields)) from exc
     except CostChangedError as exc:
         raise HttpError(409, _cost_text(exc.quote)) from exc
     except ValidationError as exc:
         if keep is not None and isinstance(exc, keep):
             raise
-        raise HttpError(400, validation_detail(exc)) from exc
+        raise HttpError(400, validation_detail(exc, fields)) from exc
 
 
 def conflict_body(exc: NoteConflictError) -> dict[str, Any]:
