@@ -15,7 +15,8 @@ config/               The Django project: settings, urls, api (one NinjaAPI), en
 apps/core/            Site shell: base.html, landing page, the Privacy Policy and Terms of Use
                       pages (`apps.core.legal`, issue #96), ProductApp registry, admin site, email,
                       email verification, rate limiting (`apps.core.ratelimit`), client IP,
-                      generic S3 storage (`apps.core.services.storage`), a QR image helper
+                      generic S3 storage (`apps.core.services.storage`), the 90-day IP retention of abuse reports
+                      (`apps.core.services.ip_retention`), a QR image helper
                       (`apps.core.services.qr_image`), in-app notifications (the header bell, issue
                       #169), Markdown rendering / search text / checklist editing
                       (`apps.core.markdown`, issue #176), the OpenAI client factory and reply
@@ -2567,7 +2568,7 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
     code(s). 1 had already been taken down."). **All three actions name `qr_code.takedown_qrcode`** (`has_takedown_qrcode_permission`: a plain
     admin action ignores `has_change_permission`, so view-only staff would otherwise get them, even by posting) and log with
     `apps.core.admin_log.log_change` (a takedown started from the report list also logs "Actioned: QR code taken down" on each report it
-    actioned). Reporter IPs are kept like Notes' and Short URLs' (no purge); a shared purge job is a possible follow-up. The `code` lookup refusal covers the new admin too (`link__code`, `qrcode__share_links__code`). The report
+    actioned). Reporter IPs are kept 90 days: the daily `qr_code.purge_report_ips` job (`jobs.py`, registered in `QrCodeConfig.ready()`) nulls `reporter_ip` on older reports, through `apps.core.services.ip_retention.clear_old_ips`, the rule Notes and Short URLs share (`IP_RETENTION` 90 days, file transfer's download IPs too; batches of 1,000 rows per `UPDATE`, idempotent, errors propagate to `ScheduledJob.last_error`); the report itself stays. The `code` lookup refusal covers the new admin too (`link__code`, `qrcode__share_links__code`). The report
     admin is read-only, so `qr_code.qrsharereport` is in `accounts.admin.CASCADE_WITH_USER_MODELS` (deleting a **user** with reported codes keeps
     working) and `QRCodeAdmin.get_deleted_objects` also drops it from `perms_needed` for a caller holding `qr_code.delete_qrsharereport`.
   - **Not done:** an auto-hold after N reports, a block list, a staff notification on a report (there is no admin email setting), a release
@@ -4652,7 +4653,10 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
     *peeked* first and *hit* only once a report was created, with the link looked up before the key
     is touched (a made-up code creates none). A repeat from the same normalized IP against the same
     link within 10 minutes is a form error, not a second row. The htmx path answers `HX-Refresh`
-    when the link became unavailable (htmx doesn't swap a 404).
+    when the link became unavailable (htmx doesn't swap a 404). The reporter's IP is kept 90 days:
+    the daily `short_url.purge_report_ips` job nulls it on older reports
+    (`apps.core.services.ip_retention.clear_old_ips`, shared with QR codes and Notes), so a pending
+    report older than that no longer counts toward the auto-hold's distinct IPs.
   - **Auto-hold** (`services.hold`, off at `auto_hold_report_threshold` 0): `held_for_review_at`, a
     plain flag (not a status) set once the link has that many pending reports from *distinct
     normalized IPs* (the same /64 caveat as file transfer's: it raises the bar, it isn't a guarantee
@@ -7365,7 +7369,8 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
   `tests_e2e/test_app_preferences.py` gained `notes`.
 - **Jobs** (registered in `ready()`, each with a `description`): `notes.purge_trash` (daily, lease 1 h)
   calls `services.notes.purge_trash`; `notes.renew` (daily, lease 1 h, `jobs.renew`) runs the three
-  renewal steps below.
+  renewal steps below; `notes.purge_report_ips` (daily, lease 1 h) nulls the IP of reports older than 90 days
+  (see "Sharing, reports and takedown").
 - **Renewals** (PR 3; `services/billing.py`, `services/emails.py`, `services/notices.py`; no migration, the
   columns `paid_through`, `locked_at` and `NotesAccount.renewal_warned_at` came with the foundation). A note
   created in a free slot is free for good; any other has `paid_through`, the date it renews on, and costs
@@ -7565,7 +7570,8 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
     error; the note's row is locked for the checks and the insert; `HX-Refresh` when the link stopped
     working (`create_report` raises the typed `ReportUnavailableError`, a `LinkUnavailableError`, which the view
     catches: it never compares message text). htmx gets the report box back (a 422 with the errors, or the thank-you), a plain POST the whole
-    page in the same state.
+    page in the same state. The reporter's IP is kept 90 days: the daily `notes.purge_report_ips` job nulls it on older reports
+    (`apps.core.services.ip_retention.clear_old_ips`, shared with QR codes and Short URLs).
   - **Takedown** (`services/takedown.take_down_note(note, *, by, reason, internal_note='')`, admin only, **final:
     there is no release**): one conditional `UPDATE ... WHERE taken_down_at IS NULL` setting the four columns
     and, in the same transaction, marking the note's pending reports `actioned` (it takes no other lock than the

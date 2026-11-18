@@ -59,6 +59,16 @@ class NotesConfig(AppConfig):
             )
         )
 
+        register_job(
+            JobSpec(
+                name='notes.purge_report_ips',
+                func=jobs.purge_report_ips,
+                description='Removes the IP address from reports of shared notes older than 90 days.',
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
+
     def _connect_signals(self):
         import logging
 

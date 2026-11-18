@@ -88,3 +88,12 @@ class ShortUrlConfig(AppConfig):
                 lease=timedelta(minutes=10),
             )
         )
+        register_job(
+            JobSpec(
+                name='short_url.purge_report_ips',
+                func=jobs.purge_report_ips,
+                description='Removes the IP address from reports of short links older than 90 days.',
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )

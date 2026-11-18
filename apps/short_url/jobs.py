@@ -7,6 +7,9 @@ rollup in particular must stop at a day it can't write (see `services.rollup`).
 
 import logging
 
+from apps.core.services.ip_retention import clear_old_ips
+
+from .models import LinkReport
 from .services import reputation, rollup
 
 logger = logging.getLogger(__name__)
@@ -37,3 +40,11 @@ def recheck_destinations() -> None:
             result.checked,
             result.held,
         )
+
+
+def purge_report_ips() -> None:
+    """Daily: forget the IP address of link reports older than 90 days. A pending report that old
+    then no longer counts toward the auto-hold threshold (which counts distinct IPs)."""
+    cleared = clear_old_ips(LinkReport.objects.all())
+    if cleared:
+        logger.info('Cleared the IP address of %d link report(s).', cleared)

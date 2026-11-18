@@ -8,7 +8,9 @@ import logging
 
 from django.utils import timezone
 
-from .models import Note
+from apps.core.services.ip_retention import clear_old_ips
+
+from .models import Note, NoteReport
 from .services import billing, notes
 
 logger = logging.getLogger(__name__)
@@ -51,3 +53,11 @@ def renew() -> None:
     warned = billing.warn_upcoming(run_start)
     if warned:
         logger.info('Warned %d user(s) about upcoming note renewals.', warned)
+
+
+def purge_report_ips() -> None:
+    """Daily: forget the IP address of note reports older than 90 days. Unlike the other jobs here
+    an error propagates (one statement per batch, nothing to skip)."""
+    cleared = clear_old_ips(NoteReport.objects.all())
+    if cleared:
+        logger.info('Cleared the IP address of %d note report(s).', cleared)
