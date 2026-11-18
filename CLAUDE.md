@@ -2575,8 +2575,8 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
 - **Privacy Policy**: `privacy.md` says a share link shows the QR code to anyone who has it and that the link (with its label and
   expiry) is kept, has a "Shared QR codes" line next to the shared notes and events ones, and (PR 2) says the email addresses a link
   was emailed to are kept with it, with when each was last emailed, and (PR 3) that a report of a shared QR code stores the reason, the
-  details, the reporter's IP address and optional email (the abuse-reports lines name a shared QR code too); `TERMS_VERSION` is **not**
-  bumped (the owner decides).
+  details, the reporter's IP address and optional email (the abuse-reports lines name a shared QR code too); `TERMS_VERSION` was bumped to
+  `2026-11-17` for these lines, so every signed-in user is asked to accept the documents again.
 - **API and CLI** (PR 4; `api/share.py`, `schemas/share.py`, `admin/qrcode.py`; no migration; OpenAPI 2.17.0, additive). Under
   `/api/qr/`, JWT only (`JWTAuth()` per endpoint; sync endpoints on the same `router` as the async ones), calling the services the
   Share dialog calls and adding no rule of its own. Every schema class is `QRCodeShare...` (names are unique across the spec; a test
