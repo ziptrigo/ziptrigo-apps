@@ -27,8 +27,8 @@ _ADDRESS_SPLIT = re.compile(r'[,;\s]+')
 class ShareEmailForm(forms.Form):
     """Emailing a link: a box of addresses (separated by commas, semicolons, spaces or new lines)
     and an optional message. Only reads the fields; the address format, the cap, the message length
-    and the cooldown are the service's (`services.share_emails`). The box has a `max_length` so a
-    pasted file is not split into thousands of pieces."""
+    and the cooldown are the service's (`services.share_emails`). Both boxes have a generous
+    `max_length` so a pasted file is not split into thousands of pieces or walked by the cleaner."""
 
     emails = forms.CharField(
         label='Email addresses',
@@ -36,7 +36,7 @@ class ShareEmailForm(forms.Form):
         max_length=5000,
         error_messages={'max_length': 'Too many addresses.'},
     )
-    message = forms.CharField(label='Message', required=False, strip=False)
+    message = forms.CharField(label='Message', required=False, strip=False, max_length=5000)
 
     def addresses(self) -> list[str]:
         return [part for part in _ADDRESS_SPLIT.split(self.cleaned_data['emails']) if part]

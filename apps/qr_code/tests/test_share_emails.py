@@ -378,6 +378,18 @@ class TestBudget:
         assert 'try again in' in caught.value.message and caught.value.retry_after > 0
         assert QRShareRecipient.objects.count() == 2  # nobody of the refused call
 
+    def test_a_request_that_does_not_fit_spends_no_hit_at_all(self, load, owner):
+        import functools
+
+        charge = functools.partial(share_emails.charge_share_emails, owner)
+        share_emails.send_link(load(), ['a@example.com', 'b@example.com'], charge=charge)  # 1 left
+        for _ in range(5):  # refused again and again: still no hit spent
+            with pytest.raises(ratelimit.RateLimitExceeded):
+                share_emails.send_link(load(), ['c@example.com', 'd@example.com'], charge=charge)
+        assert len(share_emails.send_link(load(), ['e@example.com'], charge=charge)) == 1
+        with pytest.raises(ratelimit.RateLimitExceeded):
+            share_emails.send_link(load(), ['f@example.com'], charge=charge)
+
     def test_a_refused_request_spends_none_of_it(self, load, owner):
         import functools
 
@@ -514,6 +526,22 @@ class TestTask:
         share_emails.send_share_email.call(str(link.pk), 'ann@example.com', '')
         assert sent == []
 
+    def test_a_duplicate_run_and_a_run_after_a_newer_resend_send_nothing(self, link, sent):
+        person = QRShareRecipient.objects.create(
+            link=link, email='ann@example.com', last_sent_at=timezone.now()
+        )
+        claimed = person.last_sent_at.isoformat()
+        share_emails.send_share_email.call(str(link.pk), 'ann@example.com', '', claimed)
+        assert len(sent) == 1
+        newer = timezone.now() + timedelta(minutes=11)
+        QRShareRecipient.objects.filter(pk=person.pk).update(last_sent_at=newer)
+        share_emails.send_share_email.call(str(link.pk), 'ann@example.com', '', claimed)
+        assert len(sent) == 1  # the older task is stale
+        share_emails.send_share_email.call(str(link.pk), 'ann@example.com', '', newer.isoformat())
+        assert len(sent) == 2
+        share_emails.send_share_email.call(str(link.pk), 'ann@example.com', '', 'garbage')
+        assert len(sent) == 2
+
     def test_it_sends_nothing_for_a_person_no_longer_on_the_link_or_a_gone_link(self, link, sent):
         share_emails.send_share_email.call(str(link.pk), 'ann@example.com', '')
         QRShareRecipient.objects.create(link=link, email='ann@example.com')
@@ -579,7 +607,15 @@ class TestPanel:
         owner.save()
         body = self.panel(web, qrcode)
         assert 'Confirm your email address to send a QR code by email.' in body
+        assert f'href="{reverse("accounts:resend-confirmation")}"' in body
         assert 'name="emails"' not in body
+
+    def test_the_unconfirmed_line_is_shown_once_however_many_links(self, web, owner, qrcode, link):
+        share.create_link(qrcode)
+        owner.email_confirmed = False
+        owner.save()
+        body = self.panel(web, qrcode)
+        assert body.count('Confirm your email address to send a QR code by email.') == 1
 
     def test_the_people_it_was_sent_to_are_listed_with_a_resend_button(self, web, qrcode, link):
         person = QRShareRecipient.objects.create(

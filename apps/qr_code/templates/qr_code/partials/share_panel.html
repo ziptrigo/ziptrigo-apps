@@ -33,6 +33,7 @@
     </form>
 
     <div x-data="confirmModal">
+    {% if links and not can_email %}<p class="mb-3 text-sm text-gray-600 dark:text-gray-400" id="qr-share-unconfirmed">Confirm your email address to send a QR code by email. <a href="{% url 'accounts:resend-confirmation' %}" class="underline">Resend the confirmation email</a>.</p>{% endif %}
     {% if links %}
     <ul class="divide-y divide-gray-200 dark:divide-gray-700" id="qr-share-links">
         {% for link in links %}
@@ -93,8 +94,6 @@
                         class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
                     <i class="fas fa-paper-plane mr-2" aria-hidden="true"></i>Send email</button>
             </form>
-            {% else %}
-            <p class="mt-3 text-sm text-gray-600 dark:text-gray-400">Confirm your email address to send a QR code by email. <a href="{% url 'accounts:account' %}" class="underline">Go to your account</a>.</p>
             {% endif %}
             {% endif %}
             <form id="link-edit-{{ link.pk }}" x-show="edit" style="display: none" method="post" action="{% url 'qr_code:share-edit' qrcode.pk link.pk %}"

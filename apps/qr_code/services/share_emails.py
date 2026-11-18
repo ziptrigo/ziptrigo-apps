@@ -5,21 +5,26 @@ view and the API bind to the user) and per person (`RESEND_COOLDOWN`).
 
 `send_link` and `resend` make **every refusal before they charge**, so a refused request spends no
 budget, in this order: the link works; the owner's account is active and its **email is confirmed**
-(an unconfirmed account must not email strangers); the addresses (valid, de-duplicated ignoring
+(an unconfirmed account must not email strangers; the active owner is part of "the link works"); the addresses (valid, de-duplicated ignoring
 case, at most `MAX_RECIPIENTS_PER_LINK` people in all); the message; the cooldown of an address
 already on the link (typing one again is a resend). Then `charge(n)`, then one transaction with the
 QR code and link rows locked: the rows are created, or `last_sent_at` is claimed with a conditional
 `UPDATE` (two quick clicks email the person once), and one `send_share_email` task per address is
 queued on commit. The task re-reads everything and sends nothing for a link that stopped working
-or a person who is no longer on it. No notification and no copy to the owner: the recipient may
-have no account.
+or a person who is no longer on it, and each task carries the `last_sent_at` its request claimed
+(`claimed_at`), so a duplicate run, or a run after a newer resend, sends nothing.
+
+The owner's **message is stored**: it is an argument of the task, which `django_tasks_db` keeps in
+the task's result row until `core.purge_old_task_results` removes it (14 days). It is not kept
+anywhere else, so a resend carries no message. No notification and no copy to the owner: the
+recipient may have no account.
 
 Refusals are `ValidationError`s keyed by field (`emails`, `message`; `__all__` for none).
 """
 
 import math
 from collections.abc import Callable, Iterable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from django.contrib.auth.base_user import BaseUserManager
@@ -58,10 +63,18 @@ NO_LONGER_MESSAGE = 'This person is no longer on the list.'
 
 def charge_share_emails(user: 'User', count: int) -> None:
     """Spend `count` hits (one per email about to be queued) of the per-user `QR_SHARE_EMAIL_USER`
-    budget, shared by the web and later the API. Raises `ratelimit.RateLimitExceeded` (with how
-    long to wait) at the first hit over the limit; the ones already made stay spent. Bind it to the
-    user (`functools.partial`) and pass it as `charge`: `send_link` and `resend` call it only once
-    nothing else can refuse the request, so a refused one costs no budget."""
+    budget, shared by the web and later the API. The remaining budget is read first: a request that
+    does not fit raises `ratelimit.RateLimitExceeded` (with how long to wait) **before any hit**, so
+    it spends nothing. Only a race with another request can still pass the check and then run out
+    part way, which leaves the hits already made spent. Bind it to the user (`functools.partial`)
+    and pass it as `charge`: `send_link` and `resend` call it only once nothing else can refuse the
+    request, so a refused one costs no budget."""
+    peeked = ratelimit.peek_user(user, 'QR_SHARE_EMAIL_USER')
+    # `remaining` is -1 when nothing is counted (limiting off, storage failure): always allowed.
+    if not peeked.allowed or 0 <= peeked.remaining < count:
+        raise ratelimit.RateLimitExceeded(
+            retry_after=peeked.retry_after, message=ratelimit.retry_message(peeked.retry_after)
+        )
     for _ in range(count):
         result = ratelimit.hit_user(user, 'QR_SHARE_EMAIL_USER')
         if not result.allowed:
@@ -121,8 +134,9 @@ def clean_share_message(message: object) -> str:
 
 
 def require_sendable(link: QRShareLink) -> None:
-    """The link works and its owner may email people: refused (`__all__`) otherwise. `link.qrcode`
-    and the code's owner are read (`select_related('qrcode__created_by')`)."""
+    """The link works and its owner's email is confirmed: refused (`__all__`) otherwise. That the
+    owner's account is active is part of "the link works" (`share.is_available`). `link.qrcode` and
+    the code's owner are read (`select_related('qrcode__created_by')`)."""
     if not share.is_available(link):
         raise ValidationError(NOT_WORKING_MESSAGE)
     if not share.owner_of(link.qrcode).email_confirmed:
@@ -231,7 +245,7 @@ def resend(recipient: QRShareRecipient, *, charge: ChargeEmails | None = None) -
                 raise ValidationError(NO_LONGER_MESSAGE) from None
             raise _cooldown_error(_cooldown_wait(recipient) or RESEND_COOLDOWN)
         recipient.last_sent_at = now
-        enqueue_after_commit(send_share_email, str(link.pk), recipient.email, '')
+        enqueue_after_commit(send_share_email, str(link.pk), recipient.email, '', now.isoformat())
     return recipient
 
 
@@ -269,7 +283,9 @@ def _write(link: QRShareLink, addresses: list[str], message: str) -> list[QRShar
                 wait = _cooldown_wait(person) or RESEND_COOLDOWN
                 raise _cooldown_error(wait, address, field='emails')
             people.append(person)
-            enqueue_after_commit(send_share_email, str(fresh.pk), person.email, message)
+            enqueue_after_commit(
+                send_share_email, str(fresh.pk), person.email, message, now.isoformat()
+            )
     return people
 
 
@@ -283,19 +299,31 @@ def owner_name(owner: 'User') -> str:
 
 
 @task
-def send_share_email(link_id: str, email: str, message: str = '') -> None:
+def send_share_email(link_id: str, email: str, message: str = '', claimed_at: str = '') -> None:
     """ "<owner> shared the QR code ... with you" -- to one person, at the first send, on an
     address typed again and on a resend. The subject is fixed (nothing the owner typed in it); the
     owner's name, the code's name and the message are in the body, autoescaped in the HTML.
-    Nothing is sent when the link no longer works, the owner's email is no longer confirmed or the
-    person is no longer on the link."""
+    Nothing is sent when the link no longer works, the owner's email is no longer confirmed, the
+    person is no longer on the link or `claimed_at` (the `last_sent_at` the request claimed, ISO 8601)
+    is no longer the person's: tasks run at least once, so a duplicate run, or one after a newer
+    resend, finds a different value and stays quiet. An empty `claimed_at` skips that check."""
     link = (
         QRShareLink.objects.select_related('qrcode', 'qrcode__created_by')
         .filter(pk=link_id)
         .first()
     )
-    if link is None or not link.recipients.filter(email__iexact=email).exists():
+    if link is None:
         return
+    person = link.recipients.filter(email__iexact=email).first()
+    if person is None:
+        return
+    if claimed_at:
+        try:
+            claimed = datetime.fromisoformat(claimed_at)
+        except ValueError:
+            return
+        if person.last_sent_at != claimed:
+            return
     try:
         require_sendable(link)
     except ValidationError:
