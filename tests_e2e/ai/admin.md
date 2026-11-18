@@ -960,7 +960,7 @@ push configured (NOTIF-20's preconditions).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | `/admin/accounts/user/`, open `qa.user@example.com`. | Under **Status**, after the email confirmation fields: **Terms version** `2026-11-17` and **Terms accepted at** (`-` for the seeded accounts, which were marked accepted without a date; a date and time for an account registered during the run, see ACC-49). Neither is an input. |
+| 1 | `/admin/accounts/user/`, open `qa.user@example.com`. | Under **Status**, after the email confirmation fields: **Terms version** `2026-11-18` and **Terms accepted at** (`-` for the seeded accounts, which were marked accepted without a date; a date and time for an account registered during the run, see ACC-49). Neither is an input. |
 | 2 | Change **Name**, save, reopen. | Saved; the two terms values are unchanged. Restore the name. |
 
 ### ADM-56 Blockers: the links
@@ -1170,6 +1170,21 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | 11 | Permissions (ADM-51's STAFF, Session B): give STAFF only "QR codes | QR Code | Can view QR Code" and "QR codes | QR share report | Can view QR share report". Open both lists. | Both load with **no** action menu entry for take down or dismiss; POSTing `action=take_down_action` / `dismiss_action` (devtools) changes nothing. Adding only "Can change QR Code" does not unlock them either. |
 | 12 | Session A: add "QR codes | QR Code | Can take down QR codes and dismiss reports" to STAFF. Session B: reload. | The QR codes list offers **Take down selected QR code(s)** and the report list **Dismiss selected report(s)** and **Take down the reported QR code(s)**; they work and log in History. |
 | 13 | Delete a QR code that has a report, and a throwaway user who owns one, as the superuser. | The delete page is allowed; afterwards the reports are gone with them. Staff who may delete QR codes and share links but lack "Can delete QR share report" are told that **QR share report** needs a permission and the code is not deleted. |
+
+### ADM-70 Reporter IPs are forgotten after 90 days
+
+**Purpose:** the IP address a public report was sent from is removed after 90 days, for QR code, Notes and Short URLs
+reports alike; the report itself stays (issue #5 follow-up).
+**Preconditions:** Session A (`qa.admin`); at least one report of each kind with a Reporter ip (ADM-69, ADM-61 after NOTES-26,
+ADM-40, or ones made in the shell).
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Shell: age one report of each kind, `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.qr_code.models import QRShareReport as Q; from apps.notes.models import NoteReport as N; from apps.short_url.models import LinkReport as S; old = timezone.now() - timedelta(days=91); [M.objects.filter(pk=M.objects.order_by('created_at').first().pk).update(created_at=old) for M in (Q, N, S)]"`. | No output, no error. |
+| 2 | Shell: run the three jobs, `python tests_e2e/ai/manage.py shell -c "from apps.qr_code import jobs as q; from apps.notes import jobs as n; from apps.short_url import jobs as s; q.purge_report_ips(); n.purge_report_ips(); s.purge_report_ips()"`. Run it a second time. | No error either time. |
+| 3 | `/admin/qr_code/qrsharereport/`, `/admin/notes/notereport/`, `/admin/short_url/linkreport/`. | The aged report of each list shows an empty **Reporter ip** (its reason, details, email and status unchanged); the other reports still show their IP. |
+| 4 | `/admin/core/scheduledjob/` once the scheduler ran (ADM-49). | `qr_code.purge_report_ips`, `notes.purge_report_ips` and `short_url.purge_report_ips` are listed (daily), each described as removing the IP address from reports older than 90 days. |
+| 5 | Open `/privacy/`. | The shared QR codes, abuse prevention and retention sections say a report's IP address is removed after 90 days. |
 
 ## Out of scope
 

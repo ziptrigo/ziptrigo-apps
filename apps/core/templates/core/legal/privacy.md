@@ -31,11 +31,11 @@ If you choose **Sign in with Microsoft**, Microsoft shares with us your name, yo
 
 - **Download records:** we record the IP address and time of each download of a transfer, so the sender can see download activity and we can investigate abuse. We keep the same record when files are downloaded from a file request.
 - **Shared notes:** when someone opens a shared note we do not record who they are; the page is not stored by search engines and is not cached. If a shared note is edited through an editable link, we record the time of the edit.
-- **Shared QR codes:** when someone opens a shared QR code we do not record who they are; the page is not stored by search engines and is not cached. A scan of the code itself is counted as for any tracked code. Anyone who has the link can report the QR code: the report stores the reason, any details, the reporter's IP address and, if given, their email address, and the owner is not told who reported it.
+- **Shared QR codes:** when someone opens a shared QR code we do not record who they are; the page is not stored by search engines and is not cached. A scan of the code itself is counted as for any tracked code. Anyone who has the link can report the QR code: the report stores the reason, any details, the reporter's IP address (removed after 90 days) and, if given, their email address, and the owner is not told who reported it.
 - **Shared events:** when someone opens a shared World Time event we do not record who they are; the page is not stored by search engines and is not cached. The time in the visitor's own time zone is worked out in their browser.
 - **Short link clicks:** when someone follows a short link we record the time, the website they came from (its host name only), their country, their type of device, browser and operating system, and whether the visit looks automated. We do not store the visitor's IP address. We store a keyed, one-way hash of it that changes every day, used only to count unique visitors per day.
 - **QR code scans:** for tracked QR codes we count how many times a code was scanned. We do not record who scanned it.
-- **Abuse prevention:** we use IP addresses to enforce rate limits and usage caps. For rate limiting we store only a keyed, one-way hash, never the address itself. An abuse report stores the reporter's IP address.
+- **Abuse prevention:** we use IP addresses to enforce rate limits and usage caps. For rate limiting we store only a keyed, one-way hash, never the address itself. An abuse report stores the reporter's IP address, which is removed after 90 days.
 - **Credit activity:** a record of the credits added to and spent from your account, and of promo codes you redeemed.
 - **Notifications:** the notices the Service shows you and, if you turn on notifications on a device, that browser's push subscription (an address at the browser maker's push service, and encryption keys).
 - **Sign-in records:** identifiers of the sign-in tokens issued to the mobile app and other API clients, so they can be renewed and revoked. We do not store the tokens themselves.
@@ -94,7 +94,7 @@ We share personal information only:
 - **Short links:** kept until you delete them. The address of a deleted link is retired and never reused. Individual click records are deleted after about 90 days; daily totals without any visitor identifier are kept with the link.
 - **Notifications:** deleted after 90 days.
 - **Email confirmation codes:** deleted after about 30 days.
-- **Credit history, feedback and abuse reports:** kept as long as needed for their purpose and to handle abuse.
+- **Credit history, feedback and abuse reports:** kept as long as needed for their purpose and to handle abuse. The IP address an abuse report of a short link, a shared note or a shared QR code was sent from is removed after 90 days.
 - **Server logs:** kept for a limited time.
 
 When an account is deleted, we delete its personal information and content, except what we must keep for legal reasons or to handle abuse. One thing is kept on purpose: a keyed, one-way fingerprint of each email address that was confirmed on the Service. It contains no readable address and is used only to grant the free welcome credits once per address.
