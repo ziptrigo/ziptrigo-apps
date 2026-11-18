@@ -448,6 +448,14 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # cooldown per person (10 minutes) and the cap of 20 people per link limit that. Web and, in a
     # later PR, `/api/qr/` share this budget.
     'QR_SHARE_EMAIL_USER': (30, 3600),
+    # Abuse reports on a shared QR code (`/q/<code>/report`), the same split as Notes'
+    # `NOTES_REPORT_*` and Short URLs' `SU_REPORT_*`: `QR_SHARE_REPORT_IP` is strict, per IP, and
+    # counts every submission (charged first, before the link is looked up); `QR_SHARE_REPORT_CODE`
+    # is a looser per-QR-code ceiling across every IP, *peeked* before a report is tried and hit only
+    # once one was created, so a few addresses can't spend a code's whole budget on attempts that
+    # never become a report and lock every genuine reporter out behind them.
+    'QR_SHARE_REPORT_IP': (5, 3600),
+    'QR_SHARE_REPORT_CODE': (20, 3600),
     # -- short_url (issue #162): the `/s/<code>` redirect and the owner's pages --
     # `/s/<code>` redirects: public and high-traffic by design, so as generous as `/go/<code>`.
     # Same behaviour over the limit (`apps/short_url/views/redirect.py`): charged *before* the

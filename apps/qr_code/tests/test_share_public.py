@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.qr_code.models import QRCodeType
-from apps.qr_code.services import QRCodeGenerator, share
+from apps.qr_code.services import QRCodeGenerator, share, takedown
 
 from .share_support import make_link, make_qrcode, make_user
 
@@ -194,10 +194,14 @@ class TestUnavailable:
         gone = make_qrcode(user, name='Gone')
         on_deleted = share.create_link(gone)
         gone.soft_delete()
+        down = make_qrcode(user, name='Down')
+        on_down = share.create_link(down)
+        takedown.take_down_qrcode(down, by=make_user(is_staff=True), reason='x')
         return {
             'revoked': revoked.code,
             'expired': expired.code,
             'deleted code': on_deleted.code,
+            'taken down code': on_down.code,
             'unknown': 'nope-nope-nope',
             'too long': 'x' * 200,
         }

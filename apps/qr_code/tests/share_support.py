@@ -4,7 +4,7 @@ import secrets
 import uuid
 
 from apps.accounts.models import User
-from apps.qr_code.models import QRCode, QRCodeFormat, QRCodeType, QRShareLink
+from apps.qr_code.models import QRCode, QRCodeFormat, QRCodeType, QRShareLink, QRShareReport
 
 
 def make_user(**fields) -> User:
@@ -27,3 +27,10 @@ def make_link(qrcode: QRCode, **fields) -> QRShareLink:
     """A share link straight in the database (no services): active by default."""
     fields.setdefault('code', secrets.token_urlsafe(16))
     return QRShareLink.objects.create(qrcode=qrcode, **fields)
+
+
+def make_report(qrcode: QRCode, link: QRShareLink | None = None, **fields) -> QRShareReport:
+    """A report straight in the database (no services)."""
+    fields.setdefault('reason', 'spam')
+    fields.setdefault('reporter_ip', '203.0.113.9')
+    return QRShareReport.objects.create(qrcode=qrcode, link=link, **fields)

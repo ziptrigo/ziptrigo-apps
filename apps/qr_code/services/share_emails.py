@@ -4,7 +4,8 @@ email each gets, and resending it. Sending is free for the owner in credits but 
 view and the API bind to the user) and per person (`RESEND_COOLDOWN`).
 
 `send_link` and `resend` make **every refusal before they charge**, so a refused request spends no
-budget, in this order: the link works; the owner's account is active and its **email is confirmed**
+budget, in this order: the link works (a QR code staff took down is refused with its own message);
+the owner's account is active and its **email is confirmed**
 (an unconfirmed account must not email strangers; the active owner is part of "the link works"); the addresses (valid, de-duplicated ignoring
 case, at most `MAX_RECIPIENTS_PER_LINK` people in all); the message; the cooldown of an address
 already on the link (typing one again is a resend). Then `charge(n)`, then one transaction with the
@@ -44,6 +45,7 @@ from apps.core.services.queue import enqueue_after_commit
 from ..limits import MAX_RECIPIENTS_PER_LINK, RESEND_COOLDOWN, SHARE_MESSAGE_MAX
 from ..models import QRShareLink, QRShareRecipient
 from . import share
+from .errors import QRCodeTakenDownError
 from .text import clean_message
 
 if TYPE_CHECKING:
@@ -135,8 +137,12 @@ def clean_share_message(message: object) -> str:
 
 def require_sendable(link: QRShareLink) -> None:
     """The link works and its owner's email is confirmed: refused (`__all__`) otherwise. That the
-    owner's account is active is part of "the link works" (`share.is_available`). `link.qrcode` and
-    the code's owner are read (`select_related('qrcode__created_by')`)."""
+    owner's account is active is part of "the link works" (`share.is_available`). A QR code staff
+    took down is refused first, with its own error (`QRCodeTakenDownError`: the owner is told why
+    the dialog offers nothing). `link.qrcode` and the code's owner are read
+    (`select_related('qrcode__created_by')`)."""
+    if link.qrcode.is_taken_down:
+        raise QRCodeTakenDownError
     if not share.is_available(link):
         raise ValidationError(NOT_WORKING_MESSAGE)
     if not share.owner_of(link.qrcode).email_confirmed:

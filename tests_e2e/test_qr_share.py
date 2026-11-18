@@ -1,7 +1,9 @@
-"""Sharing a QR code (issue #5, PRs 1 and 2), end to end in a real browser: the owner makes a link
+"""Sharing a QR code (issue #5, PRs 1 to 3), end to end in a real browser: the owner makes a link
 from the dashboard, copies it, a second anonymous browser context opens it and downloads the
 image, emails it to a person (the email shows at `/__e2e__/mail/` and its link opens the page),
-and revoking makes the page the neutral unavailable one at once.
+and revoking makes the page the neutral unavailable one at once. A visitor reports the QR code from
+the page (no login); staff taking it down (done in the shell: the admin is covered by unit tests)
+makes the link the neutral page and shows the owner the reason on the dashboard and in the dialog.
 
 Run on the shared e2e server (`receipts_server`). Every QR code this makes is named with the prefix
 `Zq `; each test removes what it made first and last.
@@ -201,6 +203,69 @@ def test_send_the_link_by_email_resend_and_refusals(
         visitor = visitor_context.new_page()
         visitor.goto(address)
         expect(visitor.get_by_role('heading', name='Zq Shop door')).to_be_visible()
+    finally:
+        visitor_context.close()
+        receipts_server.shell(CLEANUP)
+
+
+TAKE_DOWN = (
+    'from apps.accounts.models import User\n'
+    'from apps.qr_code.models import QRCode, QRShareReport\n'
+    'from apps.qr_code.services import take_down_qrcode\n'
+    "staff = User.objects.create_user(email='zq-staff@example.com', is_staff=True)\n"
+    "qr = QRCode.objects.get(pk='{qr_id}')\n"
+    "take_down_qrcode(qr, by=staff, reason='Pretends to be a bank', internal_note='SECRET NOTE')\n"
+    "print(QRShareReport.objects.filter(qrcode=qr).values_list('status', flat=True).first())\n"
+    'staff.delete()\n'
+)
+
+
+def test_report_a_shared_qr_code_then_a_takedown(
+    page: Page, browser: Browser, receipts_server: ReceiptsServer
+):
+    receipts_server.shell(CLEANUP)
+    qr_id = receipts_server.shell(SEED).strip().splitlines()[-1]
+    visitor_context = browser.new_context()
+    try:
+        receipts_server.login(page)
+        dialog = _open_share(page, receipts_server, qr_id)
+        page.click('#qr-share-form button[type="submit"]')
+        item = dialog.locator('#qr-share-links li').first
+        address = item.locator('code').inner_text().strip()
+
+        # A visitor with no account opens the report form (collapsed until asked for) and sends it.
+        visitor = visitor_context.new_page()
+        visitor.goto(address)
+        form = visitor.locator('#report-box form')
+        expect(form).to_be_hidden()
+        visitor.get_by_role('button', name='Report this QR code').click()
+        expect(form).to_be_visible()
+        visitor.get_by_label('Reason').select_option('phishing')
+        visitor.get_by_label('Details (optional)').fill('Asks for bank details')
+        visitor.get_by_role('button', name='Submit report').click()
+        expect(visitor.locator('#report-box')).to_contain_text(
+            'Thank you, your report has been submitted.'
+        )
+
+        # Staff take the code down: the report is actioned, the link is the neutral page.
+        status = receipts_server.shell(TAKE_DOWN.format(qr_id=qr_id)).strip().splitlines()[-1]
+        assert status == 'actioned'
+        visitor.goto(address)
+        expect(visitor.get_by_role('heading', name=UNAVAILABLE)).to_be_visible()
+        assert visitor.request.get(f'{address}/image').status == 404
+
+        # The owner sees the reason (never the internal note) on the dashboard and in the dialog.
+        page.goto(f'{receipts_server.url}/qr/')
+        row = page.locator('li', has=page.locator(f'[data-qr-id="{qr_id}"]')).first
+        expect(row.locator('[data-taken-down]')).to_contain_text('Pretends to be a bank')
+        expect(page.locator('body')).not_to_contain_text('SECRET NOTE')
+        page.click(f'.qr-dropdown-btn[data-qr-id="{qr_id}"]')
+        page.click(f'.qr-dropdown-menu[data-qr-id="{qr_id}"] [data-qr-share]')
+        dialog = page.get_by_role('dialog', name='Share "Zq Shop door"')
+        expect(dialog.locator('#qr-share-taken-down')).to_contain_text('Pretends to be a bank')
+        expect(dialog.get_by_role('button', name='Create link')).to_have_count(0)
+        expect(dialog.get_by_role('button', name='Revoke')).to_be_visible()
+        expect(page.locator(f'#qr-shared-{qr_id} [title="Shared"]')).to_have_count(0)
     finally:
         visitor_context.close()
         receipts_server.shell(CLEANUP)

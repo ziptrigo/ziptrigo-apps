@@ -9,7 +9,11 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from django.db.models import Manager
+
+    from apps.accounts.models import User
 
 
 def generate_short_code(length: int = 8) -> str:
@@ -145,8 +149,42 @@ class QRCode(models.Model):
         null=True, blank=True, help_text='Timestamp when QR code was soft-deleted'
     )
 
+    # A takedown (`services.takedown`, admin only) is final: every share link of the code stops
+    # working and it can't be shared or emailed again. The owner still sees, edits, downloads and
+    # deletes it, and a tracked code's `/go/<code>` redirect is untouched (it is printed on
+    # physical codes). The text columns have a `db_default` so the container still serving while
+    # the migration runs can keep inserting QR codes.
+    taken_down_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
+    taken_down_by = cast(
+        'User | None',
+        models.ForeignKey(
+            settings.AUTH_USER_MODEL,
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='+',
+            help_text='The staff user who took this QR code down.',
+        ),
+    )
+    takedown_reason = cast(
+        str,
+        models.TextField(
+            blank=True,
+            default='',
+            db_default='',
+            help_text='Shown to the owner. Never says who reported it.',
+        ),
+    )
+    takedown_internal_note = cast(
+        str,
+        models.TextField(
+            blank=True, default='', db_default='', help_text='Staff only: shown nowhere else.'
+        ),
+    )
+
     class Meta:
         ordering = ['-created_at']
+        permissions = [('takedown_qrcode', 'Can take down QR codes and dismiss reports')]
         indexes = [
             models.Index(fields=['short_code']),
             models.Index(fields=['created_by', '-created_at']),
@@ -167,6 +205,10 @@ class QRCode(models.Model):
                 self.short_code = generate_short_code()
 
         super().save(*args, **kwargs)
+
+    @property
+    def is_taken_down(self) -> bool:
+        return self.taken_down_at is not None
 
     def get_redirect_url(self) -> str | None:
         """Get the full redirect URL for this QR code."""

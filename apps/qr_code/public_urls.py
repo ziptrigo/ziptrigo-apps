@@ -9,7 +9,7 @@ render in UTC and the public wording and are never terms-gated.
 
 from django.urls import re_path
 
-from .views import shared_image, shared_page
+from .views import report_qrcode, shared_image, shared_page
 
 app_name = 'q'
 
@@ -18,4 +18,5 @@ _CODE = r'(?P<code>[A-Za-z0-9_-]+)'
 urlpatterns = [
     re_path(rf'^q/{_CODE}/?$', shared_page, name='page'),
     re_path(rf'^q/{_CODE}/image/?$', shared_image, name='image'),
+    re_path(rf'^q/{_CODE}/report/?$', report_qrcode, name='report'),
 ]

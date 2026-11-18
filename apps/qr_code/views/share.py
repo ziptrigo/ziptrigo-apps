@@ -93,6 +93,7 @@ def _owned_recipient(link: QRShareLink, recipient_id: UUID) -> QRShareRecipient:
 
 def panel_context(qrcode: QRCode, notice: str = '') -> dict:
     items = share.list_links(qrcode)
+    active_count = sum(1 for link in items if link.state == 'active')
     return {
         'notice': notice,
         'can_email': bool(share.owner_of(qrcode).email_confirmed),
@@ -100,7 +101,11 @@ def panel_context(qrcode: QRCode, notice: str = '') -> dict:
         'message_max': SHARE_MESSAGE_MAX,
         'qrcode': qrcode,
         'links': items,
-        'active_count': sum(1 for link in items if link.state == 'active'),
+        'active_count': active_count,
+        # Staff took the code down: nothing can be made, changed or emailed, only revoked, and no
+        # link works (so the dashboard's "Shared" icon goes).
+        'taken_down': qrcode.is_taken_down,
+        'shared': bool(active_count) and not qrcode.is_taken_down,
         'max_links': MAX_ACTIVE_LINKS_PER_CODE,
         'today': user_today(share.owner_of(qrcode)).isoformat(),
     }

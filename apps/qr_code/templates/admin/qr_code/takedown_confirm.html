@@ -1,0 +1,26 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+    <div class="card">
+        <div class="card-header"><h3 class="card-title mb-0">{{ title }}</h3></div>
+        <div class="card-body">
+            <p>You are about to take down the following QR code(s). Every share link of each stops working for good and no link can be made or emailed for it again; its owner sees the reason below on the dashboard and in the share dialog. The owner can still edit, download and delete it, and a tracked code's <code>/go/</code> short link keeps redirecting. There is no way to undo this. The owner is not emailed.</p>
+            <ul>
+                {% for qrcode in qrcodes %}
+                <li><strong>{{ qrcode.name }}</strong> &mdash; {{ qrcode.created_by.email }}{% if qrcode.is_taken_down %} (already taken down){% elif qrcode.deleted_at %} (deleted){% endif %}</li>
+                {% endfor %}
+            </ul>
+
+            <form method="post" class="mt-4">
+                {% csrf_token %}
+                {% include "admin/qr_code/_field.html" with field=form.reason %}
+                {% include "admin/qr_code/_field.html" with field=form.internal_note %}
+                {% include "admin/qr_code/_hidden.html" %}
+                <button type="submit" class="btn btn-danger">Take down</button>
+                <a href="{{ request.path }}" class="btn btn-link">Cancel</a>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
