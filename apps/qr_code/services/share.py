@@ -3,8 +3,8 @@ lets them download it. Sharing is free.
 
 The code is a capability: `secrets.token_urlsafe(16)` (22 characters), never reused, never
 editable. A link is **active** while it is not revoked and has not expired; it **works**
-(`is_available`) only while its QR code is also not deleted and its owner's account can still sign
-in. The link shows the QR code *as it is
+(`is_available`) only while its QR code is also not deleted or taken down (`services.takedown`) and
+its owner's account can still sign in. The link shows the QR code *as it is
 now*: editing the code changes what the link shows, deleting it stops every link. Revoking is
 idempotent and final: a revoked link is never re-activated (make another).
 
@@ -28,6 +28,7 @@ from apps.accounts.services.timezones import local_datetime, user_tz
 
 from ..limits import LINK_LABEL_MAX, MAX_ACTIVE_LINKS_PER_CODE
 from ..models import QRCode, QRShareLink, QRShareRecipient
+from .errors import QRCodeTakenDownError
 from .text import clean_line
 
 if TYPE_CHECKING:
@@ -40,6 +41,7 @@ CODE_BYTES = 16
 #: The longest code a public URL is looked up with (a real one is 22 characters).
 MAX_CODE_LENGTH = 64
 DELETED_MESSAGE = 'This QR code was deleted.'
+COPY_TAKEN_DOWN_MESSAGE = 'This QR code was taken down and cannot be copied.'
 REVOKED_MESSAGE = 'This link was revoked and can no longer be changed.'
 PAST_DATE_MESSAGE = 'Choose a date that has not passed.'
 CAP_MESSAGE = f'A QR code can have at most {MAX_ACTIVE_LINKS_PER_CODE} active links.'
@@ -115,9 +117,12 @@ def _expiry_changes(link: QRShareLink, expires_on: date | datetime) -> bool:
 
 def require_shareable(qrcode: QRCode) -> None:
     """Refuse creating or changing a QR code's links while it is deleted (the owner's pages never
-    reach a deleted code, but the services are also called with one held across a delete)."""
+    reach a deleted code, but the services are also called with one held across a delete) or
+    taken down by staff (`QRCodeTakenDownError`, final). Revoking is never refused."""
     if qrcode.deleted_at is not None:
         raise ValidationError(DELETED_MESSAGE)
+    if qrcode.is_taken_down:
+        raise QRCodeTakenDownError
 
 
 # -- Reading -------------------------------------------------------------------------------------
@@ -136,11 +141,13 @@ def active_links(qrcode: QRCode) -> QuerySet:
 
 def with_active_link_flag(queryset: QuerySet) -> QuerySet:
     """Annotate each QR code with `has_active_link` (one subquery, no query per row), which the
-    dashboard uses for its "Shared" icon."""
+    dashboard uses for its "Shared" icon. A taken-down code's links don't work, so it is not
+    "shared"."""
     return queryset.annotate(
         has_active_link=Exists(
             QRShareLink.objects.filter(active_condition(), qrcode=OuterRef('pk')).only('pk')
         )
+        & Q(taken_down_at__isnull=True)
     )
 
 
@@ -175,13 +182,15 @@ def list_links(qrcode: QRCode) -> list[QRShareLink]:
 
 
 def is_available(link: QRShareLink) -> bool:
-    """Whether the link works now: it is active, its QR code is not deleted and the owner's
-    account can still sign in (`is_active` and an `ACTIVE` status: deactivating or deleting an
+    """Whether the link works now: it is active, its QR code is not deleted or taken down and the
+    owner's account can still sign in (`is_active` and an `ACTIVE` status: deactivating or deleting an
     account leaves `is_active` alone). (`link.qrcode` and its owner are read: load them with
     `select_related('qrcode__created_by')`.)"""
     owner = owner_of(link.qrcode)
     owner_ok = bool(owner.is_active) and owner.status == UserModel.STATUS_ACTIVE
-    return link.is_active() and link.qrcode.deleted_at is None and owner_ok
+    qrcode = link.qrcode
+    code_ok = qrcode.deleted_at is None and not qrcode.is_taken_down
+    return link.is_active() and code_ok and owner_ok
 
 
 def get_available(code: str) -> QRShareLink | None:

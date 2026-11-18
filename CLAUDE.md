@@ -45,7 +45,7 @@ apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), cred
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
                       to superusers; admin triage by status.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links, share links with the
-                      public `/q/<code>` pages, emailing a link (issue #5, see "QR code specifics" > "Sharing").
+                      public `/q/<code>` pages, emailing a link, reports and takedown (issue #5, see "QR code specifics" > "Sharing").
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs, and file requests (issue
                       #306: a link for other people to upload files to you, see "File requests").
@@ -1787,10 +1787,11 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   a known code still redirects, only the scan-count write is skipped, protecting
   `QRCode.scan_count`'s accuracy under a shared-IP/NAT burst rather than shedding load, and an
   unknown one is still a 404, never a 429, since a real visitor must never see an error just
-  because someone else scanned the same code), `QR_SHARE_VIEW_IP`, `QR_SHARE_IMAGE_IP`, `QR_SHARE_USER` and `QR_SHARE_EMAIL_USER` (sharing a QR
+  because someone else scanned the same code), `QR_SHARE_VIEW_IP`, `QR_SHARE_IMAGE_IP`, `QR_SHARE_USER`, `QR_SHARE_EMAIL_USER`, `QR_SHARE_REPORT_IP` and `QR_SHARE_REPORT_CODE` (sharing a QR
   code, issue #5: the public `/q/<code>` page and, on its own looser rule, its image and download, per IP, charged before the lookup like `/go/`'s, but
   over them a plain 429 page; the owner's share dialog per user, creating and editing only, validated first and charged after, **revoking is never rate limited**; and `QR_SHARE_EMAIL_USER`, 30 an hour per user, **one hit per email queued**, the same shape as
-  `FT_RECIPIENT_EMAIL_USER`;
+  `FT_RECIPIENT_EMAIL_USER`; the report form of the public page, `QR_SHARE_REPORT_IP` (5 an hour per IP, every submission, charged first) and the looser
+  per-QR-code `QR_SHARE_REPORT_CODE` (20 an hour, *peeked* before a report is tried and hit only once one was created), the shape of Notes' `NOTES_REPORT_*`;
   see "QR code specifics" > "Sharing"), and every file_transfer surface called
   out in issue #53 (anonymous upload/confirm endpoints, logged-in uploads, the download page,
   password attempts on it -- per IP *and* per transfer, so brute-forcing one transfer is throttled
@@ -2375,8 +2376,8 @@ a QR code (`MAX_CONTENT_LENGTH` counts characters, capacity is bytes: 1,000 emoj
 a 400 before anything is saved; the web editor's form calls `check_content_fits` for the same
 reason and its views turn a late `ValidationError` into a 422.
 
-**Sharing** (issue #5, PRs 1 and 2 of 4: copy-link sharing and sending by email; reports and takedown, and the JWT API and CLI
-are later PRs of the same issue). The owner of a QR code makes a **share link**, `<BASE_URL>/q/<code>`, that shows the
+**Sharing** (issue #5, PRs 1 to 3 of 4: copy-link sharing, sending by email, and reports and takedown; the JWT API and CLI
+are the last PR of the same issue). The owner of a QR code makes a **share link**, `<BASE_URL>/q/<code>`, that shows the
 code (image, name, what it encodes) to anyone who has the address, with no account, and lets them download the PNG.
 Sharing is free (the Costs page says so, `services/costs.py`). The link shows the QR code **as it is now**, not a
 snapshot: renaming it changes what the link shows, deleting it stops every link of it. It is Notes' share link
@@ -2390,7 +2391,7 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
   owner's own reminder, never shown publicly --, `expires_at`, `revoked_at`, `created_at`; index `(qrcode, revoked_at)`).
   A link is **active** while it is not revoked and has not expired (`is_active`) and **works** (`services.share.
   is_available`) while it is active, its QR code is not deleted and **its owner's account can still sign in** (`is_active` and an
-  `ACTIVE` status, read from the owner `get_available` already loads: no extra query; later also not taken down). A revoked link is never
+  `ACTIVE` status, read from the owner `get_available` already loads: no extra query) and **it has not been taken down** (PR 3, below). A revoked link is never
   re-activated. At most `MAX_ACTIVE_LINKS_PER_CODE` (10, `limits.py`: the app has no settings singleton) links are
   active per code ("A QR code can have at most 10 active links."; revoked and expired ones don't count, extending an
   expired one counts it again). The migration only adds a table, so the container still serving during a deploy reads
@@ -2405,7 +2406,7 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
   PR needs the latter); the date a link already expires on is no change, so an expired link's label can be edited. A deleted
   code is refused ("This QR code was deleted."), decided again under the lock (the owner's pages 404 on a deleted code, so only a held reference reaches it). The label goes through `services/text.clean_line` (World Time's, copied): control and format characters (zero-width, bidi overrides) are dropped, white space collapsed. `get_available(code)` returns the link with its
   code and the code's owner loaded, or `None` for **every** reason alike (unknown, over `MAX_CODE_LENGTH`, revoked, expired,
-  code deleted). `list_links(qrcode)` (active first, newest first, each with `url`, `state`, `expiry_value`: one query),
+  code deleted or taken down). `list_links(qrcode)` (active first, newest first, each with `url`, `state`, `expiry_value`: one query),
   `link_url` (`BASE_URL` + `/q/<code>`, never read from a request), `with_active_link_flag(queryset)` (one `Exists`, for the
   dashboard's icon).
 - **The owner's dialog.** The QR app has no detail page, so the panel is a dialog: the dashboard row menu's **Share** item
@@ -2430,8 +2431,8 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
   link; the dashboard renders the same span from `with_active_link_flag`: one subquery, no query per row). Another user's code or
   link, a deleted code, and a link under another code are a 404. There is no "QR code of the link" popup: the thing shared is itself
   a QR code.
-- **The public pages** (`public_urls.py`, `app_name = 'q'`, root-mounted in `config/urls.py` next to `/n/` and `/w/`: `/q/<code>`
-  and `/q/<code>/image`, paths spelled without a trailing slash, one is accepted; the code is `[A-Za-z0-9_-]+`). `/q/` is in
+- **The public pages** (`public_urls.py`, `app_name = 'q'`, root-mounted in `config/urls.py` next to `/n/` and `/w/`: `/q/<code>`,
+  `/q/<code>/image` and the POST-only `/q/<code>/report`, paths spelled without a trailing slash, one is accepted; the code is `[A-Za-z0-9_-]+`). `/q/` is in
   `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES`, so the pages are never terms-gated, load no session and render in UTC with the public date
   wording. **The page** (`qr_code/shared.html`, extending `core/base.html` like the shared note and event pages): the name, the QR
   image, **Download PNG** (the image is always a PNG, so the button says so), and **This QR code leads to** (a URL code: `original_url` for a tracked code, else its content) or **This
@@ -2441,7 +2442,7 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
   an attachment named after the code (`slugify(name)` or `qr-code`); it carries `X-Content-Type-Options: nosniff`. A tracked
   code's image still encodes `/go/<code>`, so **a scan of a shared copy counts in `scan_count`** like any scan. **Every answer**:
   `Cache-Control: no-store, private`, `Referrer-Policy: strict-origin` (not `no-referrer`: with it a browser sends `Origin: null`
-  on a same-origin form POST and Django's CSRF check refuses it, which the report form to come would hit), `X-Robots-Tag:
+  on a same-origin form POST and Django's CSRF check refuses it, which the report form hits), `X-Robots-Tag:
   noindex, nofollow` and a `noindex` meta. **Every link that doesn't work** gets the existing standalone `qr_code/unavailable.html`,
   404, rendered from no context, byte for byte the same for every reason and the same page `/go/<code>` shows for an unknown code
   (a test pins it; it makes at most one query). `QR_SHARE_VIEW_IP` (120/min per IP) is charged **before** the lookup on the page, and the looser
@@ -2511,25 +2512,83 @@ email: `services/share_emails.py`, templates `qr_code/emails/share.{txt,html}`, 
     row is deleted). No in-app notification and no copy to the owner: the recipient may have no account. **Accepted risk:** the email
     carries free text (the owner's name, the code's name, the message) to addresses the owner chose, so it could be used for phishing;
     that is bounded by a confirmed owner email, the per-user budget, the per-person cooldown and the cap of 20 people per link, and PR 3
-    adds reports and takedown.
+    added reports and takedown (below).
   - **Not done:** the JWT API (`POST .../email` and `.../resend`, PR 4), an unsubscribe or "stop emailing me" for a recipient, and
     storing the message so that a resend can repeat it.
+- **Reports and takedown** (PR 3; a copy of Notes' and Short URLs' abuse tooling, cut down to what applies, without an auto-hold or a
+  block list; `models/share.py`, `services/share_reports.py`, `services/takedown.py`, `services/errors.py`, `forms/report.py`,
+  `forms/admin.py`, `views/public.py`, migration `0004_share_reports_takedown`).
+  - **Report form.** The public page ends with a collapsed **Report this QR code** (`partials/report_box.html`: **Reason** (Short URLs'
+    and Notes' choices: phishing, malware, spam, illegal content, copyright, other), **Details (optional)** up to
+    `MAX_DETAILS_LENGTH` 2,000, **Your email (optional)** -- never shown to the owner), `POST /q/<code>/report` (`q:report`, no login, CSRF
+    protected; a plain POST answers the whole page, htmx answers the box: a 422 with the errors, or the thank-you). **Rate limits**:
+    `QR_SHARE_REPORT_IP` (5 an hour per IP) counts every submission and is charged first; the link is then looked up (so a made-up code
+    makes no per-code key); `QR_SHARE_REPORT_CODE` (20 an hour per QR code, across IPs) is *peeked* before a report is tried and *hit* only
+    once one was created, so attempts that never become a report can't lock genuine reporters out. A link that stopped working between
+    the page and the POST is a 204 with `HX-Refresh` for htmx (the page reloads into the neutral one) and the neutral 404 otherwise.
+  - **`QRShareReport`** (UUID, `qrcode` `CASCADE` with `related_name='share_reports'`, `link` `SET_NULL` `related_name='reports'`, `reason`,
+    `details`, `reporter_email`, `reporter_ip` -- the trusted client address (`apps.core.services.client_ip`) --, `status` `pending` /
+    `actioned` / `dismissed`, `reviewed_by` / `reviewed_at`, `resolution_note`, `created_at`). `share_reports.create_report(link, *,
+    reason, details, reporter_email, reporter_ip)` locks the QR code row for the checks and the insert, re-reads the link and raises the
+    typed `ReportUnavailableError` (a `LinkUnavailableError`, never matched by text) when it no longer works (revoked, expired, code
+    deleted or taken down); a repeat from the same **normalised** address (an IPv6 address as its /64, an IPv4-mapped one unwrapped:
+    `normalize_ip_for_key`) against the same code within 10 minutes is a form error, not a second row ("You already reported this QR code
+    recently. Thank you."). `dismiss_report` is conditional on `pending`. The owner is never told that a report exists or who made it.
+  - **Takedown** (`services/takedown.take_down_qrcode(qrcode, *, by, reason, internal_note='')`, admin only, **final: there is no release**):
+    `QRCode.taken_down_at`, `taken_down_by` (`SET_NULL`), `takedown_reason` and `takedown_internal_note` (text columns with a
+    `db_default`, the #102 lesson) and the permission `qr_code.takedown_qrcode` (`QRCode.Meta.permissions`). One conditional `UPDATE ...
+    WHERE taken_down_at IS NULL` that also marks the code's pending reports `actioned`, in one transaction; it returns whether *this call*
+    did it. `QRCode.is_taken_down`. Its effects: `is_available` is false, so every link of the code gives the neutral page (a test pins
+    that the bodies stay byte for byte identical, and the words "taken down" appear nowhere public); `share.require_shareable` refuses
+    creating or changing a link and `share_emails.require_sendable` refuses sending or resending (first, with the same message) with the
+    typed `QRCodeTakenDownError` ("This QR code was taken down and cannot be shared.", a plain non-field `ValidationError`, so the API of the
+    last PR can answer 409 without comparing text), decided again under the lock (`_locked_qrcode` re-reads the row); **revoking is
+    still always allowed**; the queued email task sends nothing. The owner still sees, edits, downloads and deletes the code but **can't duplicate it**: the dashboard menu
+    has no Duplicate for it and `qr_code:duplicate` redirects to the dashboard with the flash "This QR code was taken down and cannot be
+    copied." (`share.COPY_TAKEN_DOWN_MESSAGE`; the create submit doesn't know which code a duplicate came from, so refusing the page is the
+    whole check, like Notes' `check_duplicable`). A rename saves **only `name` and `updated_at`** (`update_fields`, web and JWT API), and
+    `QRCodeAdmin.save_model` saves only the changed form fields on a change, so a takedown that landed after the code was read is never
+    reverted by a stale full save. **No email and no notification** to the owner. **`/go/<code>` is not touched**: `views.redirect` never
+    reads these columns, because a tracked code is printed on physical codes and killing a redirect is a different decision (a test pins that
+    a taken-down tracked code still redirects and counts scans).
+  - **What the owner sees.** The dashboard row gets a red line "Taken down. <reason> Its share links no longer work." (`data-taken-down`;
+    the reason only, never the internal note, the staff user or the reporter) and loses its "Shared" icon (`with_active_link_flag` ignores a
+    taken-down code, with the link subquery filtered on the link table and the outer row's `taken_down_at` combined with `&`, and the panel's out-of-band span follows `shared`, not `active_count`). The share dialog opens with a red **This QR code
+    was taken down.** box with the reason, has no create form, and its links show a **Not working** pill with **Revoke** only (no **Copy
+    link**, **Edit**, **Send by email** or **Resend**); refused POSTs answer 422 with the message above (a flash without htmx).
+  - **Admin** (`admin.py`, a copy of Notes'): the read-only `QRShareReportAdmin` (list: QR code (a link), reason, status, reporter email and IP,
+    created; filters status, reason, date; search by the code's name, the owner's email and the reporter; no add, change or delete) with the
+    actions **Dismiss selected report(s)** and **Take down the reported QR code(s)**, and **Take down selected QR code(s)** plus a **Taken
+    down** column and filter on `QRCodeAdmin` (whose takedown columns are read-only in its change form). Both takedown actions are two-step
+    (`admin/qr_code/takedown_confirm.html`: a required **Reason** the owner sees and a staff-only **Internal note**, `forms.admin.TakedownForm`,
+    no "notify" box); several reports of one code take it down once, a code already taken down is skipped and said so ("Took down 1 QR
+    code(s). 1 had already been taken down."). **All three actions name `qr_code.takedown_qrcode`** (`has_takedown_qrcode_permission`: a plain
+    admin action ignores `has_change_permission`, so view-only staff would otherwise get them, even by posting) and log with
+    `apps.core.admin_log.log_change` (a takedown started from the report list also logs "Actioned: QR code taken down" on each report it
+    actioned). Reporter IPs are kept like Notes' and Short URLs' (no purge); a shared purge job is a possible follow-up. The `code` lookup refusal covers the new admin too (`link__code`, `qrcode__share_links__code`). The report
+    admin is read-only, so `qr_code.qrsharereport` is in `accounts.admin.CASCADE_WITH_USER_MODELS` (deleting a **user** with reported codes keeps
+    working) and `QRCodeAdmin.get_deleted_objects` also drops it from `perms_needed` for a caller holding `qr_code.delete_qrsharereport`.
+  - **Not done:** an auto-hold after N reports, a block list, a staff notification on a report (there is no admin email setting), a release
+    of a takedown, and an email to the owner.
 - **Privacy Policy**: `privacy.md` says a share link shows the QR code to anyone who has it and that the link (with its label and
   expiry) is kept, has a "Shared QR codes" line next to the shared notes and events ones, and (PR 2) says the email addresses a link
-  was emailed to are kept with it, with when each was last emailed; `TERMS_VERSION` is **not** bumped (the owner decides; the line
-  about reports comes with the PR that stores them).
-- **Not in PRs 1 and 2** (issue #5's later PRs): reports and takedown (a takedown will not stop a tracked code's `/go/` redirect,
-  which is printed on physical codes), the JWT API and `inv qrcode` commands. No "save a copy" for a signed-in visitor.
+  was emailed to are kept with it, with when each was last emailed, and (PR 3) that a report of a shared QR code stores the reason, the
+  details, the reporter's IP address and optional email (the abuse-reports lines name a shared QR code too); `TERMS_VERSION` is **not**
+  bumped (the owner decides).
+- **Not in PRs 1 to 3** (issue #5's last PR): the JWT API and `inv qrcode` commands. No "save a copy" for a signed-in visitor.
 - **Tests**: `apps/qr_code/tests/test_share_links.py` (rules, expiry in the owner's zone, the cap, availability, query counts),
   `test_share_panel.py` (the dashboard item and icon, the dialog, create/edit/revoke, refusals, 404s, rate limits),
   `test_share_public.py` (every unavailable case identical, headers, image and download, a tracked code's image and scan count,
   the rate limit), `test_share_admin.py` (masked code, refused lookups, read-only, deleting a code or user with links, the recipients
   inline), `test_share_emails.py` (the order of checks and that a refusal spends nothing, the budget per email, the cooldown and its
   race, the cap, the unconfirmed owner, the task skipping a dead link or a removed person, the rendered email with a hostile name and
-  message, the panel's forms, 429, 404s and constant query count), helpers in
+  message, the panel's forms, 429, 404s and constant query count), `test_share_reports.py` (the service, the repeat window, every unavailable
+  case, the form with and without htmx, the CSRF check, both budgets), `test_share_takedown.py` (the service, what it does to links, emails
+  and the owner's pages, that `/go/` still redirects), the report and takedown classes of `test_share_admin.py` (actions, confirmation
+  page, permissions, History), helpers in
   `share_support.py`; the Playwright `tests_e2e/test_qr_share.py` (share from the dashboard and the editor, copy, a second anonymous
-  context opens, downloads, Escape and revoke, and an emailed link shown at `/__e2e__/mail/`); the AI plan cases QR-32 to QR-40,
-  MAIL-31 and ADM-68.
+  context opens, downloads, Escape and revoke, an emailed link shown at `/__e2e__/mail/`, and a report followed by a takedown seen by the
+  visitor and the owner); the AI plan cases QR-32 to QR-42, MAIL-31, ADM-68 and ADM-69.
 
 File transfer specifics: the send page's file upload endpoints
 (`apps/file_transfer/views/uploads.py`, and their anonymous twins in `views/anonymous.py`) are a

@@ -615,6 +615,7 @@ two paid notes; the admin spends the balance down to exactly 7; shell access.
 | 7 | Clear the owner's name (`/account/`, blank name) and send to `QSHARE` again after the cooldown. | The heading and sentence start `Someone shared ...`; the owner's email address appears nowhere in the email. |
 | 8 | Un-confirm the owner (as MAIL-28 step 8) and replay a send. | Refused in the dialog (QR-40 step 1) and **no email** is sent. Re-confirm afterwards. |
 | 9 | Revoke the link right after sending (QR-40 step 4). | No email arrives for a link that no longer works. |
+| 10 | Report the code from the public page (QR-41) and take it down in the admin (ADM-69 step 4), without the notify option (there is none). | The owner gets **no email** about either; no email is sent to the reporter even when they typed an address. A link that was emailed earlier now gives the neutral page, and a replayed send is refused (QR-42 step 5). |
 
 ### MAIL-23 Every email of the run follows the rules
 

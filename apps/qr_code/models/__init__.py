@@ -5,7 +5,13 @@ from .qrcode import (
     QRCodeType,
     generate_short_code,
 )
-from .share import QRShareLink, QRShareRecipient
+from .share import (
+    QRShareLink,
+    QRShareRecipient,
+    QRShareReport,
+    ReportReason,
+    ReportStatus,
+)
 
 __all__ = [
     'QRCode',
@@ -14,5 +20,8 @@ __all__ = [
     'QRCodeType',
     'QRShareLink',
     'QRShareRecipient',
+    'QRShareReport',
+    'ReportReason',
+    'ReportStatus',
     'generate_short_code',
 ]

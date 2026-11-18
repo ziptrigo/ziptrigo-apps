@@ -13,3 +13,5 @@ MAX_RECIPIENTS_PER_LINK = 20
 SHARE_MESSAGE_MAX = 500
 #: How soon the same person may be emailed the same link again (a resend, or an address typed again).
 RESEND_COOLDOWN = timedelta(minutes=10)
+#: The longest "details" a report of a shared QR code can have.
+MAX_DETAILS_LENGTH = 2000

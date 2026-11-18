@@ -89,7 +89,10 @@ def qrcode_edit_submit(request: AuthenticatedHttpRequest, qr_id: str) -> HttpRes
     if not form.is_valid():
         return _errors(request, form)
 
-    form.save()
+    # Save only what the form edits: a full `save()` writes every column from the instance read at
+    # the start of the request and would revert a takedown that landed since.
+    form.save(commit=False)
+    qrcode.save(update_fields=['name', 'updated_at'])
     return hx_redirect(request, reverse('qr_code:dashboard'))
 
 

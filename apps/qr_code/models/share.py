@@ -2,16 +2,19 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar, cast
 
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.db.models.functions import Lower
 from django.utils import timezone
 
-from ..limits import LINK_LABEL_MAX
+from ..limits import LINK_LABEL_MAX, MAX_DETAILS_LENGTH
 from .qrcode import QRCode
 
 if TYPE_CHECKING:
     from django.db.models import Manager
+
+    from apps.accounts.models import User
 
 
 class QRShareLink(models.Model):
@@ -30,8 +33,10 @@ class QRShareLink(models.Model):
 
     pk: uuid.UUID
     qrcode_id: uuid.UUID
-    # The reverse accessor of `QRShareRecipient.link` (the people the link was emailed to).
+    # The reverse accessor of `QRShareRecipient.link` (the people the link was emailed to) and of
+    # `QRShareReport.link` (the reports made from this link's page).
     recipients: 'Manager'
+    reports: 'Manager'
     # Set by `services.share.list_links` for the owner's panel (not stored).
     url: str
     state: str
@@ -99,3 +104,89 @@ class QRShareRecipient(models.Model):
 
     def __str__(self) -> str:
         return self.email
+
+
+class ReportReason(models.TextChoices):
+    """Reason categories of the public "report this QR code" form (Notes' and Short URLs' set)."""
+
+    PHISHING = 'phishing', 'Phishing or scam'
+    MALWARE = 'malware', 'Malware'
+    SPAM = 'spam', 'Spam'
+    ILLEGAL_CONTENT = 'illegal_content', 'Illegal content'
+    COPYRIGHT = 'copyright', 'Copyright infringement'
+    OTHER = 'other', 'Other'
+
+
+class ReportStatus(models.TextChoices):
+    """A report's review state: `PENDING` until staff act on it, then `ACTIONED` (its QR code was
+    taken down) or `DISMISSED` (staff decided no action was needed)."""
+
+    PENDING = 'pending', 'Pending'
+    ACTIONED = 'actioned', 'Actioned'
+    DISMISSED = 'dismissed', 'Dismissed'
+
+
+class QRShareReport(models.Model):
+    """One "report this QR code" submission from a shared page. No login is needed to send one.
+    `reporter_email` is optional; `reporter_ip` is the best-effort client address
+    (`apps.core.services.client_ip`), kept for support and abuse purposes, as Notes and Short URLs
+    keep their reporters'. The owner never sees who reported a code."""
+
+    objects: ClassVar['Manager']
+    DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
+
+    pk: uuid.UUID
+    qrcode_id: uuid.UUID
+    link_id: uuid.UUID | None
+    reviewed_by_id: uuid.UUID | None
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    qrcode = cast(
+        'QRCode',
+        models.ForeignKey(QRCode, on_delete=models.CASCADE, related_name='share_reports'),
+    )
+    link = cast(
+        'QRShareLink | None',
+        models.ForeignKey(
+            QRShareLink,
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='reports',
+            help_text='The link the report was sent from.',
+        ),
+    )
+    reason = cast(str, models.CharField(max_length=32, choices=ReportReason))
+    details = cast(str, models.TextField(blank=True, default='', max_length=MAX_DETAILS_LENGTH))
+    reporter_email = cast(str, models.EmailField(blank=True, default=''))
+    reporter_ip = cast('str | None', models.GenericIPAddressField(null=True, blank=True))
+    status = cast(
+        str,
+        models.CharField(max_length=16, choices=ReportStatus, default=ReportStatus.PENDING),
+    )
+    reviewed_by = cast(
+        'User | None',
+        models.ForeignKey(
+            settings.AUTH_USER_MODEL,
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='+',
+            help_text='The staff user who dismissed this report or took its QR code down.',
+        ),
+    )
+    reviewed_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    resolution_note = cast(str, models.TextField(blank=True, default=''))
+    created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['qrcode', 'status'], name='qr_share_report_qr_idx'),
+            models.Index(fields=['status', 'created_at'], name='qr_share_report_status_idx'),
+        ]
+        verbose_name = 'QR share report'
+        verbose_name_plural = 'QR share reports'
+
+    def __str__(self) -> str:
+        return f'Report on {self.qrcode_id} ({self.status})'

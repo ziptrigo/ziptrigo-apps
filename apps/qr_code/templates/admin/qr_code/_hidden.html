@@ -1,0 +1,6 @@
+{% comment %} What the second POST re-submits so Django's action dispatch rebuilds the selection. {% endcomment %}
+<input type="hidden" name="action" value="{{ action_name }}">
+<input type="hidden" name="apply" value="yes">
+{% for obj in objects %}
+<input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}">
+{% endfor %}

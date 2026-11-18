@@ -6,7 +6,7 @@ from .pages import (
     qrcode_editor,
     qrcode_image,
 )
-from .public import shared_image, shared_page
+from .public import report_qrcode, shared_image, shared_page
 from .redirect import redirect_short_url
 from .share import (
     share_create,
@@ -28,6 +28,7 @@ __all__ = [
     'qrcode_preview',
     'qrcode_short_code',
     'redirect_short_url',
+    'report_qrcode',
     'share_create',
     'share_edit',
     'share_email',

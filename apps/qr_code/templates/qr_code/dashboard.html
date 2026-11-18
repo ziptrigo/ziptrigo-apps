@@ -71,6 +71,13 @@
                             <p class="mt-2 flex items-center text-xs text-gray-500 dark:text-gray-400">
                                 <span class="truncate">{{ qr.content }}</span>
                             </p>
+                            {% if qr.is_taken_down %}
+                            <p class="mt-2 break-words text-xs text-red-700 dark:text-red-300" data-taken-down>
+                                <i class="fas fa-ban mr-1" aria-hidden="true"></i><span class="font-medium">Taken down.</span>
+                                {% if qr.takedown_reason %}{{ qr.takedown_reason|linebreaksbr }}{% endif %}
+                                Its share links no longer work.
+                            </p>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -89,10 +96,12 @@
                            class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">
                             <i class="fas fa-edit mr-2"></i>Edit
                         </a>
+                        {% if not qr.is_taken_down %}
                         <a href="{% url 'qr_code:duplicate' qr.id %}"
                            class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">
                             <i class="fas fa-clone mr-2"></i>Duplicate
                         </a>
+                        {% endif %}
                         <button type="button" data-qr-share
                                 hx-get="{% url 'qr_code:share' qr.id %}" hx-target="#qr-share-modal" hx-swap="innerHTML"
                                 class="w-full text-left block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">

@@ -1,9 +1,10 @@
 from uuid import UUID
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AnonymousUser
 from django.http import Http404, HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils.text import slugify
 
 from apps.accounts.http import MaybeAuthenticatedHttpRequest
@@ -104,6 +105,13 @@ def qrcode_duplicate(request: MaybeAuthenticatedHttpRequest, qr_id: str) -> Http
         from django.http import Http404
 
         raise Http404('QR Code not found')
+
+    # A code staff took down can't be copied (Notes' `check_duplicable`). The create submit doesn't
+    # know which code a duplicate came from (the page only pre-fills the editor), so refusing here
+    # is the whole check.
+    if source.is_taken_down:
+        messages.error(request, share.COPY_TAKEN_DOWN_MESSAGE)
+        return redirect('qr_code:dashboard')
 
     # Prefer the original URL (if present) for URL-type QR codes; otherwise use content.
     if source.qr_type == 'url' and source.original_url:

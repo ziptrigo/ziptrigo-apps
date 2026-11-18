@@ -18,6 +18,9 @@ The QR code product's web UI (`apps/qr_code`):
   page for every link that doesn't work (QR-32 to QR-37);
 - sending a share link by email: the **Send by email** form in the dialog, the people a link was sent to, **Resend**, the 10-minute
   cooldown, the cap of 20 people, and every refusal (QR-38 to QR-40; the email itself is MAIL-31 in `emails.md`);
+- reporting a shared QR code (the collapsed **Report this QR code** form on the public page) and a takedown by staff as the owner
+  and the visitor see it, including that a tracked code's `/go/` short link keeps working (QR-41 and QR-42; the admin side is ADM-69
+  in `admin.md`);
 - the "too long for a QR code" refusal, including the advice to turn on tracking for a long URL;
 - access control: logged-out visitors, another user's QR code ids;
 - that creating and sharing QR codes costs no credits;
@@ -637,6 +640,44 @@ visitor's system setting.
 | 7 | As the owner, replay the resend POST with a person id that belongs to another of the owner's links. | 404. |
 | 8 | Delete `QA Text` (QR-21) and open the admin's QR share recipients (ADM-68 step 9). | The people of its links are gone with it. |
 
+### QR-41 Report a shared QR code
+
+**Purpose:** anyone with the link can report the QR code, without an account (issue #5).
+**Preconditions:** QR-32 and QR-33 done (`QA Tracked` has an active link `TRACKED_LINK`); the visitor window (not signed in); `qa.user` is the owner in the normal window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open `TRACKED_LINK`, scroll to the bottom and click **Report this QR code**. | A small flag button, collapsed by default; clicking it opens a form: **Reason** (Choose a reason, Phishing or scam, Malware, Spam, Illegal content, Copyright infringement, Other), **Details (optional)**, **Your email (optional)** ("In case we need to follow up. We won't share it with the owner of the QR code.") and **Submit report**. |
+| 2 | Click **Submit report** with no reason. | The browser's "Please select an item in the list" (the field is required) and nothing is sent. (With JavaScript off, or by posting without `reason`, the server answers 422 and the form comes back with the red line `This field is required.` under **Reason**; unit-tested.) |
+| 3 | Choose **Phishing or scam**, details `Asks for bank details`, click **Submit report**. | The form is replaced, with no reload, by a green **Thank you, your report has been submitted.** In the shell the report exists (`python tests_e2e/ai/manage.py shell -c "from apps.qr_code.models import QRShareReport as R; print(list(R.objects.values('reason', 'status', 'reporter_ip', 'reporter_email')))"`): `phishing`, `pending`, the visitor's address (`127.0.0.1` here), an empty email. |
+| 4 | Reload `TRACKED_LINK`, open the form again and submit another report right away. | A red `You already reported this QR code recently. Thank you.`; no second report (a repeat from the same address within 10 minutes). After 10 minutes, or from another address, it works. |
+| 5 | Type `not-an-email` in **Your email** and submit with a reason. | A red error under the email field (`Enter a valid email address.`); nothing is stored. A valid address is stored with the report. |
+| 6 | Paste 2,001 characters into **Details**. | The browser stops at 2,000 characters (`maxlength`); the server's own limit (`Ensure this value has at most 2000 characters ...`) is unit-tested. |
+| 7 | With the form open, the owner revokes a second link of the code made for this step (QR-34 step 7), and the visitor, on that link's page, then submits. | The page reloads by itself into **This QR code isn't available** (404, QR-35); no report is stored. |
+| 8 | In devtools replay the report POST of a made-up code (`POST /q/doesnotexist/report`) and of a revoked link. | The same neutral 404 page; nothing is stored. A GET of `/q/<code>/report` is a 405. |
+| 9 | Look at the page's report `<form>` (view source). | It has `action="/q/<code>/report"`, a CSRF token and works without JavaScript: a plain POST answers the whole public page with the thank-you box open, with the headers of QR-33 step 2. |
+| 10 | The owner opens the dashboard and the share dialog. | Nothing about the report appears: the owner is never told who reported, or that anyone did. |
+| 11 | (Only with rate limiting on, which this server has off: otherwise skip, unit-tested.) Submit 6 reports from one address within an hour. | The sixth is `Too many requests. Please wait a moment and try again.` (429) and nothing is stored. |
+
+### QR-42 A takedown, as the owner and the visitor see it
+
+**Purpose:** staff take a QR code down; its links die, the owner is told why and can still use the code, and a tracked code's short link keeps working (issue #5).
+**Preconditions:** QR-32, QR-33 and QR-41 done: `QA Text` has an active link `LINK_URL` and `QA Tracked` (`TRACKED_ID`) has one (`TRACKED_LINK`, reported in QR-41); `qa.admin` takes `QA Tracked` down in the admin (ADM-69 step 4) with the reason `Pretends to be a bank` and the internal note `ticket 77`; the visitor window; `/__e2e__/mail/` open.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: reload `TRACKED_LINK` and `TRACKED_LINK/image`. | **This QR code isn't available** and 404, byte for byte the page of QR-35 (the words "taken down" appear nowhere). `LINK_URL` (of `QA Text`) still works. |
+| 2 | Owner: open `/qr/`. | The `QA Tracked` row shows, under its content, a red line with a ban icon: "Taken down. Pretends to be a bank Its share links no longer work." The link icon next to its name is gone. The internal note `ticket 77`, the admin's name and any reporter appear nowhere. |
+| 3 | Owner: open the "⋮" menu of that row, click **Share**. | The dialog opens with a red box **This QR code was taken down.** with the reason `Pretends to be a bank` and "Its links no longer work and it can't be shared or emailed. You can still edit, download or delete it, and revoke the links below." There is **no** create form, and the link under it has a red **Not working** pill, its address as text, **Revoke** only (no **Copy link**, **Edit**, **Send by email**, no **Resend** next to people it was emailed to). |
+| 4 | Click **Revoke** and confirm. | It works (a green "Link revoked."); the link becomes **Revoked**. Revoking is never refused, whatever the code's state. |
+| 5 | In devtools replay `POST /qr/share/<TRACKED_ID>/new/`, `.../<link id>/edit/` (`label=x`) and `.../<link id>/email/` (`emails=x@example.com`). | Each answers 422 with the red line `This QR code was taken down and cannot be shared.`; no link is made or changed and nothing is emailed (`/__e2e__/mail/?to=x@example.com` has nothing). |
+| 6 | Owner: open `/qr/edit/<TRACKED_ID>/`, rename it to `QA Tracked 2`, save; open **Download**. | Everything still works: the code can be viewed, renamed, downloaded and deleted, and it stays taken down (the red line stays). |
+| 7 | Take the short URL of `QA Tracked` (its `http://localhost:8765/go/<code>`) and open it in the visitor window. | It still redirects to the destination: **a takedown does not stop `/go/<code>`** (it is printed on physical codes). The code's scan count in `/admin/qr_code/qrcode/` goes up by one. |
+| 8 | Owner: open the "⋮" menu of the `QA Tracked` row; then open `/qr/duplicate/<TRACKED_ID>/` directly. | The menu has **Edit**, **Share**, **Download** and **Delete** but **no Duplicate** (every other row still has it). The direct URL redirects to `/qr/` with the red flash `This QR code was taken down and cannot be copied.` and nothing is created. |
+| 9 | `/__e2e__/mail/?to=qa.user@example.com` and the bell. | The owner got no email and no notification about the takedown. |
+| 10 | Owner: delete `QA Tracked 2` (QR-21). | It works; a taken-down code can be deleted. |
+| 11 | As `qa.broke`, open `/qr/share/<TRACKED_ID>/` (QA User's taken-down code). | 404, as for any other user's code. |
+
 ## Out of scope
 
 - Size, border, error correction and colours: the editor has no controls for them (JWT API only,
@@ -647,4 +688,5 @@ visitor's system setting.
 - The JWT API `/api/qr/` and `inv qrcode`: unit-tested.
 - The per-user budget of emailed links (`QR_SHARE_EMAIL_USER`, 30 an hour): rate limiting is off on this server, so it is
   unit-tested (`apps/qr_code/tests/test_share_emails.py`).
-- Reports and takedown of a shared QR code come with a later change of issue #5 and get their own cases then.
+- The per-IP and per-code budgets of reports (`QR_SHARE_REPORT_IP`, 5 an hour, and `QR_SHARE_REPORT_CODE`, 20 an hour): rate
+  limiting is off on this server, so they are unit-tested (`apps/qr_code/tests/test_share_reports.py`).
