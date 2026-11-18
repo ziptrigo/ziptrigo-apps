@@ -7790,6 +7790,8 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
     in the owner's zone), `null` clears it. The services took only a date, so `links._clean_expiry` and
     `_expiry_changes` now also accept a `datetime` (aware, or naive meaning the owner's zone) next to the date;
     the web, which passes dates, is unchanged. A `PATCH` with `mode: null` is a 400; `label: null` clears it.
+    A refused expiry is named as the body names it (`expires_at: Choose a date that has not passed.`):
+    `api/links.py`'s `API_FIELDS` renames the service's `expires_on` through `mapped_errors(fields=...)`.
   - **OpenAPI.** `docs/openapi.yml` is at **2.2.0** (a minor bump: 23 new paths, 25 new schemas, nothing existing
     changed). `TAGS` has `Notes`.
   - **CLI** (`admin/notes.py`, `inv notes ...`; `NOTES_PASSWORD`, token `~/.notes_token.<env>`): the commands are in

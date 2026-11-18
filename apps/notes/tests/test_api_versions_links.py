@@ -252,8 +252,8 @@ class TestLinks:
     @pytest.mark.parametrize(
         ('payload', 'message'),
         [
-            ({'expires_at': '2020-01-01'}, 'expires_on: Choose a date that has not passed.'),
-            ({'expires_at': '2020-01-01T10:00:00Z'}, 'expires_on: Choose a date'),
+            ({'expires_at': '2020-01-01'}, 'expires_at: Choose a date that has not passed.'),
+            ({'expires_at': '2020-01-01T10:00:00Z'}, 'expires_at: Choose a date'),
             ({'label': 'x' * 101}, 'label: Keep the label to 100 characters or fewer.'),
         ],
     )
@@ -374,6 +374,17 @@ class TestLinks:
         body = patch(client, f'/notes/{note.pk}/links/{link.pk}', auth, {'expires_at': day}).json()
 
         assert body['active'] is True
+
+    def test_a_past_expiry_names_the_body_field(self, client, auth, funded_user):
+        note = create_note(funded_user, title='T')
+        link = links.create_link(note, mode='read')
+
+        response = patch(
+            client, f'/notes/{note.pk}/links/{link.pk}', auth, {'expires_at': '2020-01-01'}
+        )
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'expires_at: Choose a date that has not passed.'
 
     def test_a_revoked_link_cannot_be_changed(self, client, auth, funded_user):
         note = create_note(funded_user, title='T')

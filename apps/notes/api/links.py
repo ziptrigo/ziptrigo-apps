@@ -16,6 +16,9 @@ from ..services import links as link_service
 from .common import charge, mapped_errors, owned_note
 from .router import router
 
+#: The link service's field names that differ from the API body's, renamed in error details.
+API_FIELDS = {'expires_on': 'expires_at'}
+
 
 def _data(link: ShareLink) -> dict:
     return {
@@ -52,7 +55,7 @@ def create_link(request, note_id: UUID, payload: NoteLinkCreateSchema):
     (the end of that day in your time zone) or a date-time, not in the past. At most 10 links per
     note are active at once (400)."""
     note = owned_note(request, note_id)
-    with mapped_errors():
+    with mapped_errors(fields=API_FIELDS):
         link_service.check_create(
             note, mode=payload.mode, label=payload.label, expires_on=payload.expires_at
         )
@@ -86,7 +89,7 @@ def update_link(request, note_id: UUID, link_id: UUID, payload: NoteLinkUpdateSc
         else:
             changes['expires_on'] = expires_at
     if changes:
-        with mapped_errors():
+        with mapped_errors(fields=API_FIELDS):
             link_service.check_update(link, **changes)
             charge(request, 'NOTES_EDIT_USER')
             link = link_service.update_link(link, **changes)
@@ -100,6 +103,6 @@ def revoke_link(request, note_id: UUID, link_id: UUID):
     note = owned_note(request, note_id)
     link = _owned_link(note, link_id)
     charge(request, 'NOTES_EDIT_USER')
-    with mapped_errors():
+    with mapped_errors(fields=API_FIELDS):
         link_service.revoke_link(link)
     return 204, None
