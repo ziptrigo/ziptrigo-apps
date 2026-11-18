@@ -3,7 +3,8 @@ lets them download it. Sharing is free.
 
 The code is a capability: `secrets.token_urlsafe(16)` (22 characters), never reused, never
 editable. A link is **active** while it is not revoked and has not expired; it **works**
-(`is_available`) only while its QR code is also not deleted. The link shows the QR code *as it is
+(`is_available`) only while its QR code is also not deleted and its owner's account can still sign
+in. The link shows the QR code *as it is
 now*: editing the code changes what the link shows, deleting it stops every link. Revoking is
 idempotent and final: a revoked link is never re-activated (make another).
 
@@ -22,10 +23,12 @@ from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.accounts.models import User as UserModel
 from apps.accounts.services.timezones import local_datetime, user_tz
 
 from ..limits import LINK_LABEL_MAX, MAX_ACTIVE_LINKS_PER_CODE
 from ..models import QRCode, QRShareLink
+from .text import clean_line
 
 if TYPE_CHECKING:
     from apps.accounts.models import User
@@ -65,7 +68,7 @@ def link_url(link: QRShareLink) -> str:
 
 
 def clean_label(label: object) -> str:
-    cleaned = ' '.join(str(label or '').split())
+    cleaned = clean_line(label)
     if len(cleaned) > LINK_LABEL_MAX:
         raise _error('label', f'Keep the label to {LINK_LABEL_MAX} characters or fewer.')
     return cleaned
@@ -80,8 +83,8 @@ def _expiry_instant_of(qrcode: QRCode, value: date | datetime) -> datetime:
     """The instant an expiry given as a date (the end of that day in the owner's zone) or as a
     date-time (that instant; one with no UTC offset is read in the owner's zone) means."""
     if isinstance(value, datetime):
-        if timezone.is_naive(value):
-            return value.replace(tzinfo=user_tz(owner_of(qrcode)))
+        if timezone.is_naive(value):  # the owner's wall clock, by `local_datetime`'s rule
+            return local_datetime(owner_of(qrcode), value.date(), value.time())
         return value
     return expiry_instant(qrcode, value)
 
@@ -111,8 +114,8 @@ def _expiry_changes(link: QRShareLink, expires_on: date | datetime) -> bool:
 
 
 def require_shareable(qrcode: QRCode) -> None:
-    """Refuse creating or changing a QR code's links while it is deleted. Revoking is exempt: see
-    `revoke_link`."""
+    """Refuse creating or changing a QR code's links while it is deleted (the owner's pages never
+    reach a deleted code, but the services are also called with one held across a delete)."""
     if qrcode.deleted_at is not None:
         raise ValidationError(DELETED_MESSAGE)
 
@@ -165,9 +168,13 @@ def list_links(qrcode: QRCode) -> list[QRShareLink]:
 
 
 def is_available(link: QRShareLink) -> bool:
-    """Whether the link works now: it is active and its QR code is not deleted. (`link.qrcode` is
-    read: load it with `select_related`.)"""
-    return link.is_active() and link.qrcode.deleted_at is None
+    """Whether the link works now: it is active, its QR code is not deleted and the owner's
+    account can still sign in (`is_active` and an `ACTIVE` status: deactivating or deleting an
+    account leaves `is_active` alone). (`link.qrcode` and its owner are read: load them with
+    `select_related('qrcode__created_by')`.)"""
+    owner = owner_of(link.qrcode)
+    owner_ok = bool(owner.is_active) and owner.status == UserModel.STATUS_ACTIVE
+    return link.is_active() and link.qrcode.deleted_at is None and owner_ok
 
 
 def get_available(code: str) -> QRShareLink | None:
@@ -329,9 +336,9 @@ def update_link(
 
 def revoke_link(link: QRShareLink) -> QRShareLink:
     """Revoke the link: it stops working for good (idempotent; a revoked link is never
-    re-activated). **Always allowed, whatever the QR code's state** (deleted, later taken down):
-    revoking only reduces what is exposed, so an owner who learns that a link leaked can kill it.
-    (Creating and changing links keep their refusals.)"""
+    re-activated). **Always allowed, whatever the QR code's state** (later also when it is taken
+    down), and never rate limited: revoking only reduces what is exposed, so an owner who learns
+    that a link leaked can kill it. (Creating and changing links keep their refusals.)"""
     with transaction.atomic():
         _, fresh = _locked_link(link)
         if fresh.revoked_at is None:

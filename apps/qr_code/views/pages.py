@@ -80,7 +80,12 @@ def qrcode_editor(request: MaybeAuthenticatedHttpRequest, qr_id: str | None = No
 
             raise Http404('QR Code not found')
 
-    context = {'qrcode': qrcode, 'prefill': {}}
+    context = {
+        'qrcode': qrcode,
+        'prefill': {},
+        # `?share=<id>` opens the share dialog on load (after a plain POST from it).
+        'open_share': qrcode.id if qrcode and request.GET.get('share') == str(qrcode.id) else None,
+    }
     return render(request, 'qr_code/qrcode_editor.html', context)
 
 

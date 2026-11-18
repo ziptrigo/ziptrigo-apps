@@ -1787,9 +1787,9 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   a known code still redirects, only the scan-count write is skipped, protecting
   `QRCode.scan_count`'s accuracy under a shared-IP/NAT burst rather than shedding load, and an
   unknown one is still a 404, never a 429, since a real visitor must never see an error just
-  because someone else scanned the same code), `QR_SHARE_VIEW_IP` and `QR_SHARE_USER` (sharing a QR
-  code, issue #5: the public `/q/<code>` pages per IP, charged before the lookup like `/go/`'s, but
-  over it a plain 429 page; the owner's share dialog per user, validated first and charged after;
+  because someone else scanned the same code), `QR_SHARE_VIEW_IP`, `QR_SHARE_IMAGE_IP` and `QR_SHARE_USER` (sharing a QR
+  code, issue #5: the public `/q/<code>` page and, on its own looser rule, its image and download, per IP, charged before the lookup like `/go/`'s, but
+  over them a plain 429 page; the owner's share dialog per user, creating and editing only, validated first and charged after, **revoking is never rate limited**;
   see "QR code specifics" > "Sharing"), and every file_transfer surface called
   out in issue #53 (anonymous upload/confirm endpoints, logged-in uploads, the download page,
   password attempts on it -- per IP *and* per transfer, so brute-forcing one transfer is throttled
@@ -2387,7 +2387,8 @@ snapshot: renaming it changes what the link shows, deleting it stops every link 
   `secrets.token_urlsafe(16)`, 22 characters, case-sensitive, never reused, `label` up to `LINK_LABEL_MAX` 100 -- the
   owner's own reminder, never shown publicly --, `expires_at`, `revoked_at`, `created_at`; index `(qrcode, revoked_at)`).
   A link is **active** while it is not revoked and has not expired (`is_active`) and **works** (`services.share.
-  is_available`) while it is active and its QR code is not deleted (later also not taken down). A revoked link is never
+  is_available`) while it is active, its QR code is not deleted and **its owner's account can still sign in** (`is_active` and an
+  `ACTIVE` status, read from the owner `get_available` already loads: no extra query; later also not taken down). A revoked link is never
   re-activated. At most `MAX_ACTIVE_LINKS_PER_CODE` (10, `limits.py`: the app has no settings singleton) links are
   active per code ("A QR code can have at most 10 active links."; revoked and expired ones don't count, extending an
   expired one counts it again). The migration only adds a table, so the container still serving during a deploy reads
@@ -2395,12 +2396,12 @@ snapshot: renaming it changes what the link shows, deleting it stops every link 
 - **Services** (`services/share.py`, exported as `services.share`; refusals are `ValidationError`s keyed by field, `__all__`
   for none; lock order: the `QRCode` row, then the link; `owner_of(qrcode)` types `created_by` for `ty`). `create_link(qrcode,
   *, label='', expires_on=None)`, `update_link(link, *, label=None, expires_on=UNCHANGED, clear_expiry=False)` and
-  `revoke_link(link)` (idempotent, final, **always allowed**, also for a deleted code); `check_create` / `check_update` are the
+  `revoke_link(link)` (idempotent, final, **always allowed** whatever the code's state, and never rate limited); `check_create` / `check_update` are the
   same refusals with no lock and no write, which the views run **before** charging `QR_SHARE_USER` (validated first, charged
   after). `expires_on` is a date = the end of that day in the owner's zone (`local_datetime`, not in the past: "Choose a date
-  that has not passed."), or a date-time (that instant; naive = the owner's zone), as Notes' links take them (the API of a later
+  that has not passed."), or a date-time (that instant; naive = the owner's wall clock read by `local_datetime`'s rule: a skipped time lands forward, a repeated one is its first occurrence), as Notes' links take them (the API of a later
   PR needs the latter); the date a link already expires on is no change, so an expired link's label can be edited. A deleted
-  code is refused ("This QR code was deleted."), decided again under the lock. `get_available(code)` returns the link with its
+  code is refused ("This QR code was deleted."), decided again under the lock (the owner's pages 404 on a deleted code, so only a held reference reaches it). The label goes through `services/text.clean_line` (World Time's, copied): control and format characters (zero-width, bidi overrides) are dropped, white space collapsed. `get_available(code)` returns the link with its
   code and the code's owner loaded, or `None` for **every** reason alike (unknown, over `MAX_CODE_LENGTH`, revoked, expired,
   code deleted). `list_links(qrcode)` (active first, newest first, each with `url`, `state`, `expiry_value`: one query),
   `link_url` (`BASE_URL` + `/q/<code>`, never read from a request), `with_active_link_flag(queryset)` (one `Exists`, for the
@@ -2416,11 +2417,13 @@ snapshot: renaming it changes what the link shows, deleting it stops every link 
   (`share-revoke`). A refusal is a 422 with `Label: message` lines in `#qr-share-msg` (`partials/share_messages.html`, field
   errors under the fields: the usual convention); the dialog lists links active first, then revoked/expired greyed with their
   state, each with its address and **Copy link** (the shared `copyText`), the label, the expiry, **Edit** and **Revoke**. **Revoke
-  goes through the shared confirmation modal** (`confirmModal`, a plain POST: a flash "Link revoked." and the dashboard with
-  `?share=<id>`, so the dialog is open again); the panel gives that modal its own `x-data="confirmModal"` scope wrapped around the
+  goes through the shared confirmation modal** (`confirmModal`, a plain POST, never rate limited: a flash "Link revoked." and back to
+  the page it came from with `?share=<id>`, so the dialog is open again: the editor when the Referer's path is the editor's
+  (`views.share.back_url`; only that path is compared, nothing the client sends is redirected to, and the editor opens the dialog
+  on load for its own code's `?share=`), else the dashboard); the panel gives that modal its own `x-data="confirmModal"` scope wrapped around the
   link list **only**, because `confirmModal` and `fragmentModal` both define `close()` and the inner one would shadow the Close
   button's. The overlay's Escape handler skips while the confirmation shows (`#confirm-modal-title` visible), so Escape closes
-  only the confirmation. A plain (non-htmx) action flashes and redirects the same way. Each action's answer also carries an
+  only the confirmation. A plain (non-htmx) action flashes and redirects the same way (`back_url`). Each action's answer also carries an
   out-of-band `<span id="qr-shared-<id>">` that swaps the dashboard row's link icon ("Shared", shown while the code has an active
   link; the dashboard renders the same span from `with_active_link_flag`: one subquery, no query per row). Another user's code or
   link, a deleted code, and a link under another code are a 404. There is no "QR code of the link" popup: the thing shared is itself
@@ -2429,7 +2432,7 @@ snapshot: renaming it changes what the link shows, deleting it stops every link 
   and `/q/<code>/image`, paths spelled without a trailing slash, one is accepted; the code is `[A-Za-z0-9_-]+`). `/q/` is in
   `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES`, so the pages are never terms-gated, load no session and render in UTC with the public date
   wording. **The page** (`qr_code/shared.html`, extending `core/base.html` like the shared note and event pages): the name, the QR
-  image, **Download**, and **This QR code leads to** (a URL code: `original_url` for a tracked code, else its content) or **This
+  image, **Download PNG** (the image is always a PNG, so the button says so), and **This QR code leads to** (a URL code: `original_url` for a tracked code, else its content) or **This
   QR code contains** (a text code) as plain text with **Copy** -- never a clickable link, with a note saying so; "Expires <time>"
   (`{% local_time %}`) when the link has an expiry. Nothing about the owner, the label, the scan count or other links; everything
   is escaped. **The image** is `QRCodeGenerator.render_png(qrcode)`, the owner's own settings, always PNG; `?download=1` makes it
@@ -2439,9 +2442,10 @@ snapshot: renaming it changes what the link shows, deleting it stops every link 
   on a same-origin form POST and Django's CSRF check refuses it, which the report form to come would hit), `X-Robots-Tag:
   noindex, nofollow` and a `noindex` meta. **Every link that doesn't work** gets the existing standalone `qr_code/unavailable.html`,
   404, rendered from no context, byte for byte the same for every reason and the same page `/go/<code>` shows for an unknown code
-  (a test pins it; it makes at most one query). `QR_SHARE_VIEW_IP` (120/min per IP) is charged **before** the lookup on both URLs,
-  so made-up codes spend it too, and the page and the image share it; over it a plain 429 page (`Retry-After`, the same
-  headers). A code appears in access logs like `/n/<code>`'s does. nginx counts `/q/` in its main per-IP zone: nothing changed in
+  (a test pins it; it makes at most one query). `QR_SHARE_VIEW_IP` (120/min per IP) is charged **before** the lookup on the page, and the looser
+  `QR_SHARE_IMAGE_IP` (300/min per IP) before the lookup on the image and its download, so made-up codes spend them too but a page
+  view is one hit of the first (the image is its own budget: a crowd behind one NAT address, a classroom or an office, must not see an
+  error); over either a plain 429 page (`Retry-After`, the same headers). A code appears in access logs like `/n/<code>`'s does. nginx counts `/q/` in its main per-IP zone: nothing changed in
   the `infra` repo.
 - **Admin** (`admin.py`): the read-only `QRShareLinkAdmin` (no add, change or delete) and the links as a read-only inline on
   `QRCodeAdmin`. **Never a full code**: only the first 6 characters (`abc123...`) are listed, the search doesn't look in it, and

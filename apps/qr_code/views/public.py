@@ -11,8 +11,9 @@ code, a revoked or expired link, a deleted QR code) renders the same standalone
 `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES`, so the terms gate leaves them alone and they render in UTC and
 the public date wording; the visitor may have no account at all.
 
-`QR_SHARE_VIEW_IP` is charged before the lookup on both URLs (made-up codes spend it too); over it,
-a plain 429 page. The image is the one the owner has, so a tracked code still encodes `/go/<code>`
+`QR_SHARE_VIEW_IP` is charged before the lookup on the page, and `QR_SHARE_IMAGE_IP` (looser: a page
+view loads the image, and a download is a second request) on the image and its download; made-up
+codes spend them too, and over either a plain 429 page. The image is the one the owner has, so a tracked code still encodes `/go/<code>`
 and a scan of a shared copy counts in `scan_count` as usual.
 """
 
@@ -45,9 +46,9 @@ def unavailable(request: HttpRequest) -> HttpResponse:
     return private(HttpResponse(render_to_string('qr_code/unavailable.html'), status=404))
 
 
-def _view_limited(request: HttpRequest) -> HttpResponse | None:
-    """The plain 429 page when this IP is over `QR_SHARE_VIEW_IP` (charged before the lookup)."""
-    result = ratelimit.hit_ip(request, 'QR_SHARE_VIEW_IP')
+def _limited(request: HttpRequest, rule: str) -> HttpResponse | None:
+    """The plain 429 page when this IP is over `rule` (charged before the lookup)."""
+    result = ratelimit.hit_ip(request, rule)
     if result.allowed:
         return None
     return private(ratelimit.page_response(request, result))
@@ -60,7 +61,7 @@ def _link_for(code: str) -> QRShareLink | None:
 
 @require_GET
 def shared_page(request: HttpRequest, code: str) -> HttpResponse:
-    if (response := _view_limited(request)) is not None:
+    if (response := _limited(request, 'QR_SHARE_VIEW_IP')) is not None:
         return response
     link = _link_for(code)
     if link is None:
@@ -73,7 +74,6 @@ def shared_page(request: HttpRequest, code: str) -> HttpResponse:
         'is_url': is_url,
         # Where a URL code leads: the destination a tracked code redirects to, else its content.
         'shown_text': (qrcode.original_url or qrcode.content) if is_url else qrcode.content,
-        'page_url': share.link_url(link),
     }
     return private(render(request, 'qr_code/shared.html', context))
 
@@ -82,7 +82,7 @@ def shared_page(request: HttpRequest, code: str) -> HttpResponse:
 def shared_image(request: HttpRequest, code: str) -> HttpResponse:
     """The PNG, rendered on demand from the QR code's own settings. With `?download=1` an
     attachment named after the code."""
-    if (response := _view_limited(request)) is not None:
+    if (response := _limited(request, 'QR_SHARE_IMAGE_IP')) is not None:
         return response
     link = _link_for(code)
     if link is None:

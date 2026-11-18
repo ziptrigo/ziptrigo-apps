@@ -4,11 +4,15 @@ The QR app has no detail page, so the panel is a dialog: the dashboard's row men
 in edit mode) fetches it into `#qr-share-modal` (`GET share/<id>/`, the shared `fragmentModal`), and
 each action re-renders its content (`#qr-share-panel`). A refusal is the usual 422 with `Label:
 message` lines in `#qr-share-msg`. Without htmx every action is a plain POST that flashes a message
-and goes back to the dashboard with the dialog open (`?share=<id>`). Changes spend `QR_SHARE_USER`,
-validated first and charged after. Creating and editing a link are refused for a deleted code
-(which has no page here anyway); revoking is always allowed. Another user's code or link is a 404.
+and goes back to the page it came from (the editor, else the dashboard) with the dialog open
+(`?share=<id>`). Changes spend `QR_SHARE_USER`,
+validated first and charged after. A deleted code has no dialog (it is a 404), so nothing here reaches
+one. **Revoking is never rate limited** (World Time's event delete is the same): an owner who learns
+that a link leaked must be able to kill it right after a burst of changes. Another user's code or
+link is a 404.
 """
 
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from django.contrib import messages
@@ -36,8 +40,19 @@ FIELD_LABELS = {'label': 'Label', 'expires_on': 'Expires on'}
 
 
 def dashboard_share_url(qrcode: QRCode) -> str:
-    """The dashboard with the share dialog open (where a plain POST goes back to)."""
+    """The dashboard with the share dialog open."""
     return f'{reverse("qr_code:dashboard")}?share={qrcode.pk}'
+
+
+def back_url(request: HttpRequest, qrcode: QRCode) -> str:
+    """Where a plain POST goes back to, with the dialog open: the QR code's editor when the POST
+    came from it (the referring page's path is compared with the editor's, so nothing the client
+    sends is ever redirected to), else the dashboard."""
+    editor = reverse('qr_code:edit', args=[qrcode.pk])
+    referer = request.META.get('HTTP_REFERER', '')
+    if referer and urlsplit(referer).path == editor:
+        return f'{editor}?share={qrcode.pk}'
+    return dashboard_share_url(qrcode)
 
 
 def owned_qrcode(request: AuthenticatedHttpRequest, qr_id: UUID) -> QRCode:
@@ -77,11 +92,11 @@ def _panel(request: HttpRequest, qrcode: QRCode, *, template: str = 'share_panel
 
 
 def _done(request: AuthenticatedHttpRequest, qrcode: QRCode, message: str) -> HttpResponse:
-    """The panel again for htmx; a flash and the dashboard with the dialog open otherwise."""
+    """The panel again for htmx; a flash and back to the page it came from otherwise."""
     if is_htmx(request):
         return _panel(request, qrcode)
     messages.success(request, message)
-    return redirect(dashboard_share_url(qrcode))
+    return redirect(back_url(request, qrcode))
 
 
 def _refused(request: AuthenticatedHttpRequest, qrcode: QRCode, lines: list[str]) -> HttpResponse:
@@ -94,7 +109,7 @@ def _refused(request: AuthenticatedHttpRequest, qrcode: QRCode, lines: list[str]
         return response
     for line in lines:
         messages.error(request, line)
-    return redirect(dashboard_share_url(qrcode))
+    return redirect(back_url(request, qrcode))
 
 
 def _limited(request: AuthenticatedHttpRequest) -> HttpResponse | None:
@@ -111,7 +126,7 @@ def share_panel(request: AuthenticatedHttpRequest, qr_id: UUID) -> HttpResponse:
     """The dialog (htmx). Opened directly it goes to the dashboard with the dialog open."""
     qrcode = owned_qrcode(request, qr_id)
     if not is_htmx(request):
-        return redirect(dashboard_share_url(qrcode))
+        return redirect(back_url(request, qrcode))
     return _panel(request, qrcode, template='share_modal')
 
 
@@ -171,13 +186,8 @@ def share_edit(request: AuthenticatedHttpRequest, qr_id: UUID, link_id: UUID) ->
 @require_POST
 def share_revoke(request: AuthenticatedHttpRequest, qr_id: UUID, link_id: UUID) -> HttpResponse:
     """Revoke a link for good (from the confirmation modal, a plain POST). Always allowed for the
-    owner: revoking only reduces what is exposed."""
+    owner: revoking only reduces what is exposed, so it spends no rate-limit budget."""
     qrcode = owned_qrcode(request, qr_id)
     link = _owned_link(qrcode, link_id)
-    if (response := _limited(request)) is not None:
-        return response
-    try:
-        share.revoke_link(link)
-    except ValidationError as exc:  # pragma: no cover - revoking has no refusals today
-        return _refused(request, qrcode, validation_lines(exc))
+    share.revoke_link(link)
     return _done(request, qrcode, 'Link revoked.')

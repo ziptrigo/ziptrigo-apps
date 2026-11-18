@@ -14,7 +14,7 @@
       <i class="fas fa-share-nodes mr-2" aria-hidden="true"></i>Share</button>
     {% endif %}
   </div>
-  {% if qrcode %}<div id="qr-share-modal"></div>{% endif %}
+  {% if qrcode %}<div id="qr-share-modal"{% if open_share %} hx-get="{% url 'qr_code:share' open_share %}" hx-trigger="load" hx-swap="innerHTML"{% endif %}></div>{% endif %}
 
   <div id="qrcode-msg" class="mb-4 text-sm" aria-live="polite"></div>
 

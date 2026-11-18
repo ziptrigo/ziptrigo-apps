@@ -515,9 +515,9 @@ visitor's system setting.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | In the private window open `LINK_URL`. | No login. The heading `QA Text`, the QR code image (white background), a **Download** button, and the section **This QR code contains** with `Hello from QA` and a **Copy** button. Nothing about the owner (no name, no email), the label `for the printer`, the scan count or other links. The tab title is `QA Text - ZipTrigo`. |
+| 1 | In the private window open `LINK_URL`. | No login. The heading `QA Text`, the QR code image (white background), a **Download PNG** button, and the section **This QR code contains** with `Hello from QA` and a **Copy** button. Nothing about the owner (no name, no email), the label `for the printer`, the scan count or other links. The tab title is `QA Text - ZipTrigo`. |
 | 2 | Look at the response headers (developer tools) of the page and of `LINK_URL/image`. | Both: `Cache-Control: no-store, private`, `Referrer-Policy: strict-origin`, `X-Robots-Tag: noindex, nofollow`; the page has `<meta name="robots" content="noindex">`. The image is `image/png` with `X-Content-Type-Options: nosniff`. |
-| 3 | Click **Download**. | The browser saves `qa-text.png`; it is a PNG that scans to `Hello from QA`. |
+| 3 | Click **Download PNG**. | The browser saves `qa-text.png`; it is a PNG that scans to `Hello from QA`. |
 | 4 | Click **Copy**. | The button reads **Copied**; pasting gives `Hello from QA`. |
 | 5 | Open `LINK_URL` with a trailing slash, then `LINK_URL/image?download=1`. | Both work; the second downloads the PNG as an attachment. |
 | 6 | Create a link for `QA Tracked` (QR-32 step 1 to 2) and open it as the visitor. | The heading, the image and **This QR code leads to** `http://localhost:8765/?from=qr` as plain text (not a link) with the note "Shown as text, not a link: check where it goes before you open it." The page does not show the `/go/<code>` short link. |
@@ -526,6 +526,7 @@ visitor's system setting.
 | 9 | Rename `QA Text` to `QA Text (renamed)` as the owner (`/qr/edit/<TEXT_ID>/`) and reload `LINK_URL` as the visitor. | The visitor's page shows the new name: a link shows the code as it is now. Rename it back. |
 | 10 | Open the `Injection QR` code's link (create the code first if it is gone). | The name and content show as text; no alert dialog appears. |
 | 11 | Signed in as `qa.user`, open `LINK_URL` in the normal window. | The same public page (no nav of the QR app, no edit controls). |
+| 12 | In the shell, deactivate the owner (`python tests_e2e/ai/manage.py shell -c "from apps.accounts.models import User as U; u=U.objects.get(email='qa.user@example.com'); u.deactivate()"`, use the seeded address) and reload `LINK_URL` and `LINK_URL/image` as the visitor; then set `status='ACTIVE'` and `is_active=True` again with `U.objects.filter(...).update(...)`. | While the owner is deactivated both show the neutral unavailable page (404); after reactivating they work again. |
 
 ### QR-34 Expiry and revoking
 
@@ -539,8 +540,9 @@ visitor's system setting.
 | 3 | Create a link with **Expires on** = a date 10 days ahead. | The new link says "Expires <date>" (in your date format). The visitor's page for it shows "Expires <date and time>". |
 | 4 | Click **Edit** on a link, change the label to `printer 2`, clear the date, **Save link**. | The list shows `printer 2` and no expiry. |
 | 5 | Click **Edit** on a link and type or paste 150 characters into **Label**. | The browser stops at 100 characters (`maxlength`); the server's own limit, `Label: Keep the label to 100 characters or fewer.`, is unit-tested. |
+| 5b | Paste a label containing a zero-width space or a right-to-left override (e.g. `\u200b` before `Ann`) into **Label** and save. | The saved label has those characters removed (only visible text remains). |
 | 6 | Click **Revoke** on `LINK_URL`'s link. | A confirmation: "Revoke this link?" / "Anyone who has it can no longer see the QR code through it. This can't be undone: you can make a new link." with **Cancel** and **Revoke**. `Escape` closes only the confirmation, not the share dialog. |
-| 7 | Click **Revoke** and confirm. | The page reloads with the share dialog open again and a green "Link revoked."; the link is greyed with a **Revoked** pill, no **Copy link**, **Edit** or **Revoke**. If it was the only active link, the row's link icon is gone. |
+| 7 | Click **Revoke** and confirm (also try it from the editor's **Share** button: you return to the editor with the dialog open). Revoking works even right after 60 link changes in a minute (it is never rate limited). | The page reloads (the dashboard, or the editor when you started there) with the share dialog open again and a green "Link revoked."; the link is greyed with a **Revoked** pill, no **Copy link**, **Edit** or **Revoke**. If it was the only active link, the row's link icon is gone. |
 | 8 | As the visitor reload `LINK_URL` and `LINK_URL/image`. | Both show the neutral page **This QR code isn't available** ("It may have been removed by its owner.", a link "Go to ZipTrigo") with HTTP 404 (QR-35). |
 | 9 | Reload the dialog. | The revoked link has no **Edit** or **Revoke** button and no **Copy link** (a replayed edit POST answers `This link was revoked and can no longer be changed.`, a replayed revoke is harmless). |
 | 10 | In the shell (`python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.qr_code.models import QRShareLink as L; L.objects.filter(label='l2').update(expires_at=timezone.now()-timedelta(minutes=1))"`) expire the link labelled `l2`. | The dialog (reload) greys it with an **Expired** pill; the visitor gets the neutral page; **Edit** is still offered, and extending the date makes it active again. |

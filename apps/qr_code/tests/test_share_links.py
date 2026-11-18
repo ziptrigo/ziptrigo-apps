@@ -136,9 +136,24 @@ class TestExpiry:
         link = share.create_link(qrcode, expires_on=naive)
         assert link.expires_at == local_datetime(user, naive.date(), time(10, 0))
 
+    def test_a_naive_datetime_in_a_skipped_hour_follows_local_datetimes_rule(self, user, qrcode):
+        user.timezone = 'Europe/Lisbon'
+        user.save()
+        qrcode.created_by = user
+        naive = datetime(2030, 3, 31, 1, 30)  # skipped when the clocks went forward that day
+        link = share.create_link(qrcode, expires_on=naive)
+        assert link.expires_at == local_datetime(user, naive.date(), time(1, 30))
+
     def test_a_past_datetime_is_refused(self, qrcode):
         with pytest.raises(ValidationError):
             share.create_link(qrcode, expires_on=timezone.now() - timedelta(minutes=1))
+
+
+class TestLabels:
+    def test_control_and_format_characters_are_dropped(self, qrcode):
+        raw = 'for\u200b Ann\u202e \x07 and\n  Bob'
+        assert share.create_link(qrcode, label=raw).label == 'for Ann and Bob'
+        assert share.clean_label('\u200b\u202e') == ''
 
 
 class TestUpdate:
@@ -236,6 +251,17 @@ class TestAvailability:
         gone.soft_delete()
         for code in (revoked.code, expired.code, on_deleted.code, 'nope', '', 'x' * 65):
             assert share.get_available(code) is None
+
+    @pytest.mark.parametrize('change', [{'is_active': False}, {'status': 'INACTIVE'}])
+    def test_a_link_of_an_account_that_cannot_sign_in_does_not_work(self, user, qrcode, change):
+        link = share.create_link(qrcode)
+        assert share.get_available(link.code) is not None
+        for field, value in change.items():
+            setattr(user, field, value)
+        user.save()
+        assert share.get_available(link.code) is None
+        link = QRShareLink.objects.select_related('qrcode__created_by').get(pk=link.pk)
+        assert not share.is_available(link)
 
     def test_a_code_is_case_sensitive(self, qrcode):
         link = make_link(qrcode, code='AbCdEf123456')

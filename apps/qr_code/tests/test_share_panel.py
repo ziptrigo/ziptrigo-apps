@@ -1,6 +1,7 @@
 """The owner's share dialog: opening it, creating, editing and revoking links, refusals, ownership
 (404), rate limits, and the dashboard's Share item and "Shared" icon."""
 
+import uuid
 from datetime import timedelta
 
 import pytest
@@ -221,6 +222,30 @@ class TestCreate:
         assert 'Choose a date that has not passed.' in text(web.get(response['Location']))
 
 
+class TestRevokeLandsBack:
+    def test_from_the_editor_it_returns_to_the_editor_with_the_dialog_open(self, web, qrcode):
+        link = share.create_link(qrcode)
+        editor = url('edit', qrcode.pk)
+        response = web.post(
+            url('share-revoke', qrcode.pk, link.pk), HTTP_REFERER=f'http://testserver{editor}'
+        )
+        assert response['Location'] == f'{editor}?share={qrcode.pk}'
+        page = web.get(response['Location'])
+        assert 'Link revoked.' in text(page)
+        assert f'hx-get="{url("share", qrcode.pk)}" hx-trigger="load"' in text(page)
+
+    def test_from_anywhere_else_it_returns_to_the_dashboard(self, web, qrcode):
+        link = share.create_link(qrcode)
+        response = web.post(
+            url('share-revoke', qrcode.pk, link.pk), HTTP_REFERER='https://evil.example/qr/edit/x/'
+        )
+        assert response['Location'] == f'{url("dashboard")}?share={qrcode.pk}'
+
+    def test_the_editor_ignores_a_share_id_that_is_not_its_code(self, web, qrcode):
+        page = web.get(f'{url("edit", qrcode.pk)}?share={uuid.uuid4()}')
+        assert 'hx-trigger="load"' not in text(page)
+
+
 class TestEdit:
     @pytest.fixture
     def link(self, qrcode):
@@ -302,8 +327,9 @@ class TestRateLimits:
         assert over.status_code == 429 and over['HX-Retarget'] == '#qr-share-msg'
         assert 'Retry-After' in over and QRShareLink.objects.count() == 2
 
-    def test_edit_and_revoke_spend_it_too(self, web, qrcode):
+    def test_edit_spends_it_but_revoking_never_does(self, web, qrcode):
         link = share.create_link(qrcode)
+        other = share.create_link(qrcode)
         assert (
             web.post(url('share-edit', qrcode.pk, link.pk), {'label': 'a'}, **HTMX).status_code
             == 200
@@ -312,7 +338,14 @@ class TestRateLimits:
             web.post(url('share-edit', qrcode.pk, link.pk), {'label': 'b'}, **HTMX).status_code
             == 200
         )
-        assert web.post(url('share-revoke', qrcode.pk, link.pk), **HTMX).status_code == 429
+        assert (
+            web.post(url('share-edit', qrcode.pk, link.pk), {'label': 'c'}, **HTMX).status_code
+            == 429
+        )
+        # Over the budget, a leaked link can still be killed.
+        assert web.post(url('share-revoke', qrcode.pk, link.pk), **HTMX).status_code == 200
+        assert web.post(url('share-revoke', qrcode.pk, other.pk)).status_code == 302
+        assert QRShareLink.objects.filter(revoked_at__isnull=False).count() == 2
 
     def test_opening_the_dialog_is_free(self, web, qrcode):
         for _ in range(5):

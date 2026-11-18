@@ -261,10 +261,15 @@ class TestRateLimit:
         assert over.status_code == 429 and 'Retry-After' in over
         assert_private(over)
 
-    def test_the_page_and_the_image_share_the_budget(self, visitor, link):
-        visitor.get(page(link.code))
-        visitor.get(image(link.code))
-        visitor.get(image(link.code))
+    def test_the_image_has_its_own_looser_budget(self, visitor, link, settings):
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'QR_SHARE_IMAGE_IP': (4, 60)}
+        # Page views spend only the page's budget (3), images and downloads only the image's (4).
+        for _ in range(2):
+            assert visitor.get(page(link.code)).status_code == 200
+            assert visitor.get(image(link.code)).status_code == 200
+        assert visitor.get(page(link.code)).status_code == 200
+        assert visitor.get(image(link.code) + '?download=1').status_code == 200
+        assert visitor.get(image(link.code)).status_code == 200
         for route in (page, image):
             response = visitor.get(route(link.code))
             assert response.status_code == 429 and 'Retry-After' in response

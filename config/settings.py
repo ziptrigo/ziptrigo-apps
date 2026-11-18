@@ -428,13 +428,18 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # burst, not to shed load (an increment is already one cheap `UPDATE`; the redirect itself is
     # the expensive-if-anything part, and that never gets skipped).
     'QR_REDIRECT_IP': (120, 60),
-    # Sharing a QR code (issue #5). The shared pages `/q/<code>` and `/q/<code>/image`, public:
-    # per IP, charged *before* the code is looked up so made-up codes spend it too; over it a
-    # plain 429 page. A person opening a shared code stays far below it; a script guessing codes
-    # (128 bits: it never will) or scraping one does not.
+    # Sharing a QR code (issue #5). The shared page `/q/<code>`, public: per IP, charged *before*
+    # the code is looked up so made-up codes spend it too; over it a plain 429 page. One person
+    # opening a shared code is one hit, so a crowd behind one NAT address (a classroom, an office)
+    # must not see an error: 120/min is sized for that, while a script scraping it is shed.
     'QR_SHARE_VIEW_IP': (120, 60),
-    # The owner's share panel: creating, editing and revoking a link. Per user, validated first
-    # and charged after (a refused form spends nothing).
+    # The shared image `/q/<code>/image` (and its download), on its own looser rule: a page view
+    # loads the image and a download is a second request, so charging them to the page's budget
+    # would halve it. Per IP, before the lookup, a plain 429 page over it.
+    'QR_SHARE_IMAGE_IP': (300, 60),
+    # The owner's share panel: creating and editing a link. Per user, validated first and charged
+    # after (a refused form spends nothing). Revoking is never rate limited: an owner who learns
+    # that a link leaked must be able to kill it at once (World Time's event delete is the same).
     'QR_SHARE_USER': (60, 60),
     # -- short_url (issue #162): the `/s/<code>` redirect and the owner's pages --
     # `/s/<code>` redirects: public and high-traffic by design, so as generous as `/go/<code>`.
