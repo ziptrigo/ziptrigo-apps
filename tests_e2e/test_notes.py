@@ -56,14 +56,31 @@ def test_write_preview_save_and_tick_a_box(page: Page, receipts_server: Receipts
         page.fill('#note-title', 'Zn Python notes')
         page.fill('#note-content', CONTENT)
 
-        # The live preview follows the textarea after a pause: coloured code, a table, checklist boxes.
+        # The editor opens on Content only: no preview until one is chosen.
+        group = page.get_by_role('group', name='Editor view')
+        expect(group.get_by_role('button', name='Content', exact=True)).to_have_attribute(
+            'aria-pressed', 'true'
+        )
         preview = page.locator('#note-preview')
+        expect(preview).to_be_hidden()
+        group.get_by_role('button', name='Content + preview').click()
+        expect(page.locator('#note-content')).to_be_visible()
+
+        # The live preview follows the textarea after a pause: coloured code, a table, checklist boxes.
         expect(preview.locator('pre.hl')).to_be_visible()
         expect(preview.locator('table')).to_be_visible()
         expect(preview.locator('td', has_text='eggs')).to_be_visible()
         assert preview.locator('pre.hl span[class^="hl-"]').count() > 0
         page.fill('#note-content', CONTENT + '\n# Added heading\n')
         expect(preview.locator('h1')).to_have_text('Added heading')
+
+        # Preview only hides the textarea; back to Content hides the preview.
+        group.get_by_role('button', name='Preview', exact=True).click()
+        expect(page.locator('#note-content')).to_be_hidden()
+        expect(preview.locator('h1')).to_have_text('Added heading')
+        group.get_by_role('button', name='Content', exact=True).click()
+        expect(preview).to_be_hidden()
+        expect(page.locator('#note-content')).to_be_visible()
 
         page.click('button[type="submit"]:has-text("Save")')
         page.wait_for_url(re.compile(r'/notes/[0-9a-f-]{36}/$'))

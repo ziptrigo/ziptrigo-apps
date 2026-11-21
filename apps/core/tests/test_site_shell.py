@@ -158,6 +158,7 @@ def test_the_segmented_control_is_styled_from_its_aria_state():
     css = SITE_CSS.read_text()
     assert ".segmented > [aria-selected='true']" in css
     assert ".segmented > [aria-current='true']" in css
+    assert ".segmented > [aria-pressed='true']" in css
     root = Path(__file__).resolve().parents[2]
     for name in (
         'file_transfer/templates/file_transfer/dashboard.html',

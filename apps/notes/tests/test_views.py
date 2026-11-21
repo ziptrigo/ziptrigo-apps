@@ -331,8 +331,29 @@ class TestEditorCreate:
         text = content(response)
         assert response.status_code == 200
         assert url('preview') in text and 'name="base_version"' in text
-        assert 'hx-trigger="input changed delay:400ms, load"' in text
-        assert 'id="note-preview"' in text and 'role="tablist"' in text
+        # The preview is only asked for while it shows: no request on load, none while typing in Content only.
+        assert 'hx-trigger="input[this.dataset.preview==\'on\'] changed delay:400ms"' in text
+        assert (
+            'data-preview="off"' in text
+            and 'load' not in text.split('id="note-content"')[1].split('>')[0]
+        )
+        assert 'id="note-preview"' in text and 'role="group" aria-label="Editor view"' in text
+
+    def test_the_view_switch_defaults_to_content_only(self, web):
+        text = content(web.get(url('new')))
+        for view, label in (
+            ('content', 'Content'),
+            ('split', 'Content + preview'),
+            ('preview', 'Preview'),
+        ):
+            assert f'data-view="{view}"' in text and f'>{label}</button>' in text
+        assert (
+            'data-view="content" :aria-pressed="(view === \'content\').toString()" @click="setView(\'content\')" aria-pressed="true"'
+            in text
+        )
+        assert text.count('aria-pressed="false"') == 2
+        # Before Alpine runs the preview pane is hidden: Content only.
+        assert '<div id="pane-preview" x-show="view !== \'content\'" style="display: none">' in text
 
     def test_creates_a_note(self, web, user):
         response = web.post(url('new'), {'title': 'Hello', 'content': 'a\r\nb'})

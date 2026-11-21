@@ -14,8 +14,8 @@ and the JWT API and `inv notes` CLI over all of it:
 - the note page `/notes/<id>/`: title, tag chips with the "Edit tags" popover, the rendered content (coloured code
   blocks, tables, checklist boxes, links), the buttons Edit, History, Duplicate, Download, Copy, Archive, Move to trash,
   and the banners for the Trash and a locked note;
-- the editor `/notes/new/` and `/notes/<id>/edit/`: the live preview (side by side from 1024 px wide, Write and Preview
-  tabs below), Save, Ctrl+S / Cmd+S, the unsaved-changes warning, the cost confirmation of a note that is not free and
+- the editor `/notes/new/` and `/notes/<id>/edit/`: the view switch (Content, the default; Content + preview, side by
+  side from 1024 px wide and stacked below; Preview) and the live preview, Save, Ctrl+S / Cmd+S, the unsaved-changes warning, the cost confirmation of a note that is not free and
   the **conflict panel** of an edit that lost a race;
 - history `/notes/<id>/history/` (who and when, view, restore) and the one-version page;
 - tags `/notes/tags/` (add, edit in place, colour, description tooltip, reorder, delete);
@@ -107,13 +107,16 @@ signed in in Context A; Visitor has no session.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click **New note**. | `/notes/new/`, heading **New note**; a **Title** input; a monospace **Content (Markdown)** textarea on the left and a **Preview** pane on the right (from 1024 px wide); a hint line listing the Markdown; **Cancel** and **Save**. The preview says "Nothing to preview yet." |
+| 1 | Click **New note**. | `/notes/new/`, heading **New note**; a **Title** input; above the content a switch of three buttons, **Content** (selected), **Content + preview** and **Preview**; a full-width monospace **Content (Markdown)** textarea and no preview; a hint line listing the Markdown; **Cancel** and **Save**. In devtools' Network tab no request to `/notes/preview/` was made. |
+| 1a | Type a few characters into the content, wait a second. | Still no request to `/notes/preview/` (the preview is hidden, so it isn't asked for). Clear the content. |
+| 1b | Click **Content + preview**. | It becomes the selected button; the textarea on the left and a **Preview** pane on the right (from 1024 px wide; stacked under the textarea below that). The preview says "Nothing to preview yet." |
 | 2 | Type `Shopping list` as the title and type `CONTENT_A` into the content. | About half a second after you stop typing the preview shows a heading **Shopping**, a code block with **coloured** Python (`def` and `return` in one colour, the rest in another; the block is light gray on a light theme), a table with the header cells `item` and `qty` (the `qty` column right-aligned) and two unticked checkboxes. Nothing flickers while typing. |
 | 3 | Append a line `<script>alert(1)</script>` to the content. | The preview shows it as plain text (raw HTML is never rendered); no script runs. |
+| 3a | Click **Preview**, then **Content**, then **Content + preview**. | **Preview**: the textarea and its hint are gone, the preview fills the width. **Content**: the textarea is back, the preview gone. **Content + preview**: both again, the preview showing the current text. The text is never lost. |
 | 4 | Remove that line and press **Ctrl+S** (**Cmd+S** on a Mac) with the focus in the textarea. | The note is saved exactly as if **Save** was clicked (see step 5); the browser's own "save page" dialog does not open. |
 | 5 | (If step 4 did not save, click **Save**.) | The page goes to the note page `/notes/<id>/`; a flash message **Note created.**; no "leave page" warning appeared. Record `N_A`. |
 | 6 | Look at the note page. | Tab title `Shopping list - Notes - ZipTrigo`; heading **Shopping list**; "Updated <time>" (in your zone); **No tags** and an **Edit tags** button; the buttons **Edit**, **History**, **Duplicate**, **Download**, **Copy**, **Archive**, **Move to trash**; the content as in the preview, with the code coloured, the table (a thin border, header cells bold) and two enabled checkboxes whose accessible names are `buy eggs` and `buy milk`. Hovering the code block shows a **Copy** button on it. |
-| 7 | Narrow the window below 1024 px and open `/notes/new/`. | The editor shows two tabs, **Write** and **Preview**, instead of two columns; **Preview** shows the rendered text, **Write** the textarea. |
+| 7 | Narrow the window below 1024 px and open `/notes/new/`. | The same three buttons (they may wrap); **Content** is selected. **Content + preview** shows the preview stacked under the textarea, **Preview** only the rendered text. |
 | 8 | On `/notes/new/`, type `x` into the title and then click the **Notes** sidebar link. | The browser asks whether to leave the page (unsaved changes). Cancel the question, clear the title (the form is as it opened) and click **Notes**: no question. |
 | 9 | On `/notes/new/`, click **Save** with an empty title. | Nothing is created. The red box above the form says `Title: Give the note a title.` and the same message shows under the Title input (red border; keyboard focus on it). |
 | 10 | Paste 201 characters into the Title and click **Save**. | `Title: Keep the title to 200 characters or fewer.` Nothing is created. (The input's own limit may also stop the typing at 200.) |
@@ -141,9 +144,9 @@ signed in in Context A; Visitor has no session.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Tab A: click **Edit**. Tab B: open `/notes/<N_A>/edit/` too. | Both editors open with the current text; the preview fills in. |
+| 1 | Tab A: click **Edit** and choose **Content + preview**. Tab B: open `/notes/<N_A>/edit/` too. | Both editors open with the current text on **Content**; in tab A the preview fills in. |
 | 2 | Tab B: change the content to `from tab B` and **Save**. | Saved: flash **Saved.** on the note page. |
-| 3 | Tab A: change the content to `from tab A`, change the title to `Shopping list (A)` and click **Save**. | The page stays; the editor is replaced by itself with a yellow panel: **This note was changed by someone else while you were editing.**, "Your text is kept below...", a block **Current version (title: Shopping list)** with `from tab B`, a **Copy current version** button, and the buttons **Save mine anyway** and **Discard my changes**; the normal Save / Cancel buttons are hidden. The textarea still holds `from tab A` and the title `Shopping list (A)`; the preview shows `from tab A`. |
+| 3 | Tab A: change the content to `from tab A`, change the title to `Shopping list (A)` and click **Save**. | The page stays; the editor is replaced by itself with a yellow panel: **This note was changed by someone else while you were editing.**, "Your text is kept below...", a block **Current version (title: Shopping list)** with `from tab B`, a **Copy current version** button, and the buttons **Save mine anyway** and **Discard my changes**; the normal Save / Cancel buttons are hidden. The textarea still holds `from tab A` and the title `Shopping list (A)`; **Content + preview** is still selected and the preview shows `from tab A`. |
 | 4 | Click **Copy current version** and paste somewhere. | `from tab B` (the stored text). |
 | 5 | Click **Discard my changes**. | The editor reloads with the stored text `from tab B`; no "leave page" question (the discard was deliberate). |
 | 6 | Make the conflict again (tab B saves `again from B`, tab A edits and saves). Click **Save mine anyway**. | Saved: the note page shows tab A's text and title `Shopping list (A)`. |
@@ -481,7 +484,7 @@ Context A, Visitor (no session) and `qa.admin@example.com` (Context B).
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Visitor: open `LINK_E`. | As NOTES-22 plus an **Edit** button; the checklist boxes are enabled, with a line above them: "This note can be changed through this link. Your changes are saved as 'Someone'." |
-| 2 | Click **Edit**. | The editor titled **Edit note** with "You are editing the content of a shared note. Only its owner can change the title." and under it "Your changes are saved as 'Someone'."; the title is a grey read-only box ("The title can only be changed by the note's owner."); no tags; the live preview works (side by side from 1024 px wide); **Cancel** returns to the page. |
+| 2 | Click **Edit**. | The editor titled **Edit note** with "You are editing the content of a shared note. Only its owner can change the title." and under it "Your changes are saved as 'Someone'."; the title is a grey read-only box ("The title can only be changed by the note's owner."); no tags; the editor opens on **Content**, and **Content + preview** shows the live preview (side by side from 1024 px wide); **Cancel** returns to the page. |
 | 3 | Change the content, **Save**. | The page shows **Saved.** and the new text; the title is unchanged. In devtools POST a different `title` to `LINK_E/edit`: the title still does not change. |
 | 4 | Tick a checklist box on the shared page. | It saves (no reload): the box stays ticked after a reload. |
 | 5 | Context A (owner): open the note, then **History**. | New rows by **Someone via a shared link** (the edit, and the ticked box if it was more than 10 minutes later or by another editor); **View** shows the text; the oldest row is by **You**. Visitor's page shows nothing about who edited. |
