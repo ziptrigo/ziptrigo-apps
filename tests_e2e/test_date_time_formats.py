@@ -6,6 +6,8 @@ the AI chip. Run on the shared e2e server (`receipts_server`).
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date
 
 import pytest
@@ -94,10 +96,12 @@ def _free_tasks_and_default_formats(receipts_server: ReceiptsServer):
     run(receipts_server, "User.objects.filter(pk=user.pk).update(timezone='')\n")
 
 
-def save_details(page: Page, number: str) -> None:
-    """Press Save on the task page's details form and wait until the panel was swapped."""
+@contextmanager
+def autosaved(page: Page, number: str) -> Iterator[None]:
+    """The task page's details save themselves: expect the block to send one save, and wait until
+    the panel was swapped."""
     with page.expect_response(lambda r: f'/todo/{number}/edit/' in r.url):
-        page.click('#task-details-form button[type="submit"]')
+        yield
     page.wait_for_timeout(300)  # htmx settles the swapped-in panel
 
 
@@ -152,21 +156,18 @@ def test_a_typed_date_is_read_in_the_users_order_and_a_bad_one_changes_nothing(
     receipts_server.login(page)
     page.goto(f'{receipts_server.url}/todo/{number}/')
     box = page.locator(f'#due-date-{number}')
-    hidden = page.locator('#task-details-form input[name="due_date"]')
 
-    box.fill(typed)
-    box.press('Tab')
-    expect(hidden).to_have_value('2026-11-05')
-    save_details(page, number)
+    with autosaved(page, number):
+        box.fill(typed)
+        box.press('Tab')
     expect(page.locator(f'#due-date-{number}')).to_have_value(shown)
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-05')
 
     # ISO is accepted whatever the order.
     box = page.locator(f'#due-date-{number}')
-    box.fill('2026-11-06')
-    box.press('Tab')
-    expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
-    save_details(page, number)
+    with autosaved(page, number):
+        box.fill('2026-11-06')
+        box.press('Tab')
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
 
     # A date that doesn't exist is refused under the box and leaves the saved date alone.
@@ -182,11 +183,11 @@ def test_a_typed_date_is_read_in_the_users_order_and_a_bad_one_changes_nothing(
     ).to_be_visible()
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
 
-    # Pressing Save while the typo stands sends nothing: the message stays under the box, the box
-    # takes focus and the saved date is not "restored" by a re-rendered panel.
+    # Changing another detail while the typo stands saves nothing: the message stays under the
+    # box, the box takes focus and the saved date is not "restored" by a re-rendered panel.
     sent: list[str] = []
     page.on('request', lambda r: sent.append(r.url) if f'/todo/{number}/edit/' in r.url else None)
-    page.click('#task-details-form button[type="submit"]')
+    page.select_option(f'#priority-{number}', '1')
     page.wait_for_timeout(600)
     assert sent == []
     expect(box).to_have_attribute('aria-invalid', 'true')
@@ -195,9 +196,9 @@ def test_a_typed_date_is_read_in_the_users_order_and_a_bad_one_changes_nothing(
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
 
     # Fixing it lets the save through.
-    box.fill('2026-11-07')
-    box.press('Tab')
-    save_details(page, number)
+    with autosaved(page, number):
+        box.fill('2026-11-07')
+        box.press('Tab')
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-07')
 
 
@@ -358,11 +359,9 @@ def test_a_typed_time_shows_on_the_users_clock_and_saves_as_hh_mm(
     page.goto(f'{receipts_server.url}/todo/{number}/')
     box = page.locator(f'#due-time-{number}')
 
-    box.fill('10pm')
-    box.press('Tab')
-    expect(box).to_have_value(shown)
-    expect(page.locator('#task-details-form input[name="due_time"]')).to_have_value('22:00')
-    save_details(page, number)
+    with autosaved(page, number):
+        box.fill('10pm')
+        box.press('Tab')
     expect(page.locator(f'#due-time-{number}')).to_have_value(shown)
     expect(page.locator('#task-details-form input[name="due_time"]')).to_have_value('22:00')
 
@@ -525,9 +524,9 @@ def test_a_refused_save_puts_its_message_under_the_new_date_field(
     # A value the box would never produce, as a forged request would send it.
     page.evaluate(
         """() => { const input = document.querySelector('#task-details-form input[name="due_date"]');
-                   input.value = 'not-a-date'; }"""
+                   input.value = 'not-a-date';
+                   input.dispatchEvent(new Event('change', { bubbles: true })); }"""
     )
-    page.click('#task-details-form button[type="submit"]')
 
     box = page.locator(f'#due-date-{number}')
     expect(box).to_have_attribute('aria-invalid', 'true')

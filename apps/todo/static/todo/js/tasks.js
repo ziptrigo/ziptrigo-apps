@@ -6,7 +6,16 @@
  *  - Checklists. The server renders the description's checkboxes disabled. On a task that can be
  *    edited (the description block has `data-checklist-url`) they are enabled here, and a change
  *    posts `index` and `checked` to that URL; the answer is the description block again.
- *  - Clearing a task's date asks first when it has reminders (they are removed with the date).
+ *  - The task page's details save themselves (`form[data-autosave]`): every change of a named
+ *    control (the date and time fields' hidden inputs, the priority select, an accepted AI chip)
+ *    submits the form, a few at once making one request; the labels and repeat popovers save when
+ *    they close (`popover-closed`; changes inside `[data-save-on-close]` wait for it). A form whose
+ *    values equal those last sent sends nothing, and a time typed before any date waits for the
+ *    date (the server refuses a time alone). `#details-save-status` says "Saving..." / "Saved".
+ *  - Text typed into a field of the task panel while one of its requests is in flight survives the
+ *    panel being swapped (an autosave answers the whole panel).
+ *  - Clearing a task's date asks first when it has reminders (they are removed with the date); saying
+ *    no puts the date back.
  *  - Drag and drop. A list with `data-sortable` is made sortable with core's `initSortableList`
  *    (core/js/sortable_list.js: SortableJS by its `.drag-handle`, arrow keys, announcements);
  *    the new order of the rows' `data-task-id`s is posted to `data-reorder-url` as `ids[]`, with
@@ -244,17 +253,136 @@
 
     // The details form carries the number of reminders in `data-reminder-count`. htmx raises
     // `htmx:confirm` before every request; cancelling it and calling `issueRequest(true)` sends it.
+    // Saying no puts the saved date back in the field (the hidden input's `defaultValue` is what the
+    // server rendered), so the form shows what is saved.
     document.addEventListener('htmx:confirm', function (event) {
         const form = event.target;
         if (!form || !form.matches || !form.matches('form[data-reminder-count]')) return;
         const count = parseInt(form.dataset.reminderCount, 10);
         const date = form.querySelector('input[name="due_date"]');
-        if (!count || !date || date.value) return;
+        if (!count || !date || date.value || !date.defaultValue) return;
         event.preventDefault();
         const noun = count === 1 ? 'reminder' : 'reminders';
         if (window.confirm('Clearing the date removes its ' + count + ' ' + noun + '. Continue?')) {
             event.detail.issueRequest(true);
+        } else {
+            date.value = date.defaultValue;
+            date.dispatchEvent(new CustomEvent('field-set', { detail: { value: date.defaultValue } }));
+            lastSent.set(form, formState(form));
         }
+    });
+
+    // -- Saving the details by themselves ------------------------------------------------------------
+    // What a form would send, to tell a real change from a control that was set to its own value.
+    const lastSent = new WeakMap();
+    function formState(form) {
+        const params = new URLSearchParams(new FormData(form));
+        params.delete('csrfmiddlewaretoken');
+        return params.toString();
+    }
+    function fieldOf(state, name) {
+        return new URLSearchParams(state).get(name) || '';
+    }
+    function rememberState(form) {
+        // After Alpine has bound the repeat control's hidden inputs (a microtask after a swap).
+        setTimeout(function () { if (form.isConnected) lastSent.set(form, formState(form)); }, 0);
+    }
+    function scheduleSave(form) {
+        clearTimeout(form._autosaveTimer);
+        // A tick later: an accepted chip sets the date, the time and the repeat one after the
+        // other, and Alpine refreshes the repeat's hidden inputs on a later microtask.
+        form._autosaveTimer = setTimeout(function () {
+            if (!form.isConnected) return;
+            const state = formState(form);
+            const before = lastSent.has(form) ? lastSent.get(form) : null;
+            if (state === before) return;
+            // A time needs a date: one typed on a task with no date waits until the date is chosen.
+            if (fieldOf(state, 'due_time') && !fieldOf(state, 'due_date') && !fieldOf(before || '', 'due_date')) return;
+            form.requestSubmit();
+        }, 0);
+    }
+    document.addEventListener('change', function (event) {
+        const target = event.target;
+        if (!(target instanceof Element) || !target.name) return;
+        const form = target.closest('form[data-autosave]');
+        if (!form || target.closest('[data-save-on-close], [data-parse-input]')) return;
+        scheduleSave(form);
+    });
+    document.addEventListener('popover-closed', function (event) {
+        const form = event.target instanceof Element ? event.target.closest('form[data-autosave]') : null;
+        if (form) scheduleSave(form);
+    });
+    function saveStatus(form, text) {
+        const status = form && form.querySelector('#details-save-status');
+        if (status) status.textContent = text;
+    }
+    document.addEventListener('htmx:beforeRequest', function (event) {
+        const form = event.detail.elt;
+        if (!(form instanceof HTMLFormElement) || !form.matches('form[data-autosave]')) return;
+        lastSent.set(form, formState(form));
+        saveStatus(form, 'Saving\u2026');
+    });
+    // A refusal (or no answer) leaves the form in place, its message in the panel's slot: the status
+    // line says "Not saved", and the next change sends everything again. A success
+    // swaps a new panel in, whose form then says "Saved". (The old form is out of the page by the
+    // time htmx:afterRequest fires, so the swap's own events carry it.)
+    let justSaved = false;
+    document.addEventListener('htmx:beforeSwap', function (event) {
+        const config = event.detail.requestConfig;
+        const form = config && config.elt;
+        if (!(form instanceof HTMLFormElement) || !form.matches('form[data-autosave]')) return;
+        justSaved = Boolean(event.detail.xhr && event.detail.xhr.status >= 200 && event.detail.xhr.status < 300);
+    });
+    document.addEventListener('htmx:afterRequest', function (event) {
+        const form = event.detail.elt;
+        if (!(form instanceof HTMLFormElement) || !form.isConnected || !form.matches('form[data-autosave]')) return;
+        if (!event.detail.successful) saveStatus(form, 'Not saved');
+    });
+    document.addEventListener('htmx:afterSettle', function () {
+        if (!justSaved) return;
+        justSaved = false;
+        saveStatus(document.querySelector('form[data-autosave]'), 'Saved');
+    });
+
+    // -- Typing while the panel is being swapped ------------------------------------------------------
+    // An autosave (or any action of the task page) answers the whole panel. Someone who already went on
+    // typing in another field of it would see their text replaced by the saved value: keep it. Only a
+    // field whose text changed since its request started is put back, focused, with its selection.
+    const typingAtRequest = new WeakMap();
+    let pendingTyping = null;
+    function isTextField(element) {
+        return element instanceof HTMLTextAreaElement
+            || (element instanceof HTMLInputElement && (element.type === 'text' || element.type === 'search'));
+    }
+    document.addEventListener('htmx:beforeRequest', function (event) {
+        const active = document.activeElement;
+        if (event.detail.xhr && isTextField(active) && active.id) {
+            typingAtRequest.set(event.detail.xhr, { id: active.id, value: active.value });
+        }
+    });
+    document.addEventListener('htmx:beforeSwap', function (event) {
+        pendingTyping = null;
+        const target = event.detail.target;
+        if (!target || target.id !== 'task-panel') return;
+        const active = document.activeElement;
+        if (!isTextField(active) || !active.id || !target.contains(active)) return;
+        const before = event.detail.xhr ? typingAtRequest.get(event.detail.xhr) : null;
+        if (before && before.id === active.id && before.value === active.value) return;
+        pendingTyping = {
+            id: active.id, value: active.value,
+            start: active.selectionStart, end: active.selectionEnd,
+        };
+    });
+    document.addEventListener('htmx:afterSettle', function () {
+        const typing = pendingTyping;
+        pendingTyping = null;
+        if (!typing) return;
+        const field = document.getElementById(typing.id);
+        if (!isTextField(field) || field.value === typing.value) return;
+        field.value = typing.value;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.focus();
+        try { field.setSelectionRange(typing.start, typing.end); } catch (e) { /* not every type has one */ }
     });
 
     htmx.onLoad(function (root) {
@@ -265,5 +393,7 @@
         if (root.matches && root.matches('[data-checklist-url]')) enableChecklist(root);
         scope.querySelectorAll('[data-sortable]').forEach(makeSortable);
         if (root.matches && root.matches('[data-sortable]')) makeSortable(root);
+        scope.querySelectorAll('form[data-autosave]').forEach(rememberState);
+        if (root.matches && root.matches('form[data-autosave]')) rememberState(root);
     });
 })();
