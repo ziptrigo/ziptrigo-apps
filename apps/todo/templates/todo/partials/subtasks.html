@@ -1,3 +1,4 @@
+{% load todo_ui %}
 {% comment %} The subtasks of a top-level task: the list (drag to reorder), and the add box. Rows are the ordinary task rows
    in the `subtask` view, so a completed subtask stays in the list. Adding one re-renders the whole panel. {% endcomment %}
 {% if subtasks or not task.is_trashed %}
@@ -20,10 +21,16 @@
           class="flex items-end gap-3">
         {% csrf_token %}
         <input type="hidden" name="ctx" value="page">
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0 flex-1" data-title-tags>
             <label for="subtask-title" class="block mb-1 text-sm font-medium">New subtask</label>
-            <input id="subtask-title" name="title" type="text" maxlength="500" required autocomplete="off" placeholder="Subtask title"
+            <input id="subtask-title" name="title" type="text" maxlength="500" required autocomplete="off" placeholder="Subtask title (@label)"
+                   data-tag-input
                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+            {% comment %} The labels a `@` tag can name (static/todo/js/title_tags.js completes the tag in the title, which the
+               server reads: a subtask has no label controls, and its project is its parent's). {% endcomment %}
+            <div hidden>{% for label in labels %}<span data-tag-option data-tag-name="{{ label.name }}" data-tag-color="{{ label.color }}" data-tag-dark="{{ label.color|chip_dark }}"></span>{% endfor %}</div>
+            <div id="subtask-tag-pills" data-tag-pills hidden class="mt-2 flex flex-wrap items-center gap-2" role="group" aria-label="Suggested labels"></div>
+            <p data-tag-status class="sr-only" aria-live="polite"></p>
         </div>
         <button type="submit"
                 class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50">

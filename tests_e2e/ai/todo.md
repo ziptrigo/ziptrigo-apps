@@ -32,7 +32,8 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
   sniffed image or PDF; the size and per-task limits; trashed, completed and paused-storage states);
 - reminders (presets, custom, edit, remove, the defaults from Settings, delivery in-app and by email, the history
   page `/todo/reminders/history/`);
-- the AI date chip (with the fake parser, see Preconditions);
+- the AI date chip (with the fake parser, see Preconditions), and the `@label` / `#project` pills under the quick-add and
+  subtask titles (TODO-78);
 - **Search** `/todo/search/` (glob, regular expressions, the filter bar, number search, snippets) and **Filters**
   `/todo/filters/` (saved filters in the sidebar with counts, rename, reorder, delete, update, a deleted label);
 - **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and **Settings**
@@ -1502,3 +1503,24 @@ user `G` with a token `TG`. The server runs tasks inline, so an export is `ready
   needs a phone and HTTPS; TODO-40 posts the same answer with `curl`. That a due in-app reminder is pushed, with
   which buttons, and that a snoozed reminder is left alone by a time-zone change and replaced by a new due date, are
   unit-tested (`test_push_reminders.py`).
+
+### TODO-78 Label and project pills while typing a title
+
+**Preconditions:** for `qa.user@example.com` the labels `home` and `hobby` and an active project `Website relaunch`
+(no other label starting with `ho`), and an open top-level task to add subtasks to.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | On All tasks, type `Call Bob @h` in the quick-add title (do not submit). | Under the title two pills appear at once (no wait): `home` and `hobby`, each with a tag icon in the label's colour and a green check, then a small × (**Hide suggestions**). Nothing is ticked yet: the Labels button still says **Add labels**. |
+| 2 | Type `om`. | Only the `home` pill is left. |
+| 3 | Press Escape. | The pills are hidden. |
+| 4 | Type `e`. | The `home` pill is back (the tag changed). |
+| 5 | Click the `home` pill. | The title is `Call Bob ` (the tag is gone, the caret after the space), the pills are gone, the Labels button says **1 selected** and `home` is ticked in its menu. |
+| 6 | Type `@ho`. | `hobby` comes first; `home` comes after it with a muted **added**. Delete `@ho`. |
+| 7 | Type `#rel, then call`. | A pill **Website relaunch** (a coloured dot) appears; `#rel` is not removed until it is clicked. |
+| 8 | Click it. | The title is `Call Bob, then call`, the Project select shows **Website relaunch**. |
+| 9 | Put the caret at the end of the title, type ` #12`, then delete those 4 characters and press **Add task**. | No pill shows for `#12` (a number is a task reference). The task is added. |
+| 10 | Open the new task. | It is `Call Bob, then call` in **Website relaunch** with the `home` label. |
+| 11 | Quick-add `Water the plants @hom` without clicking the pill. | The task is created as typed (`@hom` names no label exactly), with no label. |
+| 12 | Type `meet @Hóme` (accented, other case). | The `home` pill is offered. |
+| 13 | On the task's page, type `Sub @hom` in **New subtask** and click the `home` pill. | The box reads `Sub @home ` and no pill is left. **Add** creates the subtask `Sub` with the `home` label. |
