@@ -325,6 +325,7 @@ class TestSettings:
             'default_reminder_channel': 'in_app',
             'snooze_minutes': 15,
             'muted_overdue': 'dimmed',
+            'default_view': 'today',
             'sender_allowlist': [],
             'tasks_created_this_month': 0,
             'free_tasks_per_month': 2,

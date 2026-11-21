@@ -1,5 +1,9 @@
 """The task lists and the pages that hold them: Today, Upcoming, All, Closed and Trash.
 
+`/todo/` (`todo:home`, what the header menu and the home page link to) holds no list: it redirects
+to the one the account chose to open on (`TodoAccount.default_view`: Today, Upcoming or All), so
+Today has an address of its own, `/todo/today/`.
+
 Each page and `/todo/list/` (the partial every one of them fetches with htmx) are built from the
 same context (`list_context`), the Receipts dashboard's pattern: a change re-fetches the partial
 into `#task-list` and the response's `HX-Push-Url` puts the *page* URL in the address bar, so a
@@ -12,7 +16,7 @@ from math import ceil
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Prefetch, QuerySet
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
@@ -270,6 +274,18 @@ def _page(request: AuthenticatedHttpRequest, view: str) -> HttpResponse:
         context['form_values'] = {}
         context['selected_label_ids'] = []
     return render_page(request, f'todo/{view}.html', context, nav=view)
+
+
+@login_required
+@require_GET
+def home_page(request: AuthenticatedHttpRequest) -> HttpResponse:
+    """`/todo/`: a redirect to the list the account opens on (`TodoAccount.default_view`), keeping
+    the query string."""
+    view = get_account(request.user).default_view
+    url = page_url(view if view in ('today', 'upcoming', 'all') else 'today')
+    if query := request.GET.urlencode():
+        url = f'{url}?{query}'
+    return HttpResponseRedirect(url)
 
 
 @login_required

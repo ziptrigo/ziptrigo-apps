@@ -171,7 +171,7 @@ inv todo export-files local --out ./zips [--range this-year|last-30-days|... --f
 inv todo exports local | export-get local <id> | export-download local <id> --out ./zips [--force] | export-delete local <id> [--yes]
 inv todo export-xlsx local --out tasks.xlsx [--range ... --from ... --to ... --force]   # the free quick workbook of the tasks (a Tasks and a Comments sheet)
 inv todo filters local | filter-run local <id-or-name> [--limit 20]
-inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both]
+inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both --default-view today|upcoming|all]
 inv todo inbox local                            # the address tasks can be emailed to
 inv todo regenerate local [--yes]               # retire the address and issue a new one
 inv notes login local <email>                   # password: NOTES_PASSWORD, else a hidden prompt (never an argument)
@@ -4987,7 +4987,8 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   (`data-after-reorder-url`), so the sidebar shows the new order.
 - **Views and URLs** (`views/`; every one `@login_required`; another user's task, and a *trashed*
   task where a view doesn't accept one, is a **404**, never a 403: `views.common.owned_task`).
-  `todo:today` `/todo/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
+  `todo:home` `/todo/` (no list of its own: a 302 to the list the account opens on, keeping the
+  query string; see "Start page" below), `todo:today` `/todo/today/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
   due"), `todo:all` `/todo/all/` (50 per page, `?sort=`), `todo:completed`, `todo:trash`,
   `todo:list` `/todo/list/` (the partial every page fetches with htmx: `view`, `sort`, `page`; the
   response's `HX-Push-Url` is the *page* URL, a direct GET redirects to the page),
@@ -5056,6 +5057,17 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   the layout's CSS fades their right edge. A trashed task's page has no Subtasks section (its subtasks are
   trashed with it). Admin: `ReminderDelivery`'s plural is "reminder deliveries", the Tasks changelist's
   Unpaid column says "Unpaid" only for an owed task (a red cross for the normal state read as an alarm).
+- **Start page.** `TodoAccount.default_view` (`DefaultView`: `today` default, `upcoming`, `all`;
+  `db_default` too, migration `0020`) is the list To-do opens on. `/todo/` (`todo:home`, the
+  product's `url_name`, so the header menu and the home page card) only redirects to it
+  (`views.lists.home_page`), which is why Today has its own address, `/todo/today/`; a link that
+  means Today specifically (the sidebar, "Reschedule overdue", the fallback of `redirect_back`) keeps
+  `todo:today`. Chosen on the settings page ("Start page", `SettingsForm.default_view`; a post
+  without it leaves it alone, an unknown value is a 422 `Open To-do on: Choose Today, Upcoming or
+  All.`), `services.accounts.clean_default_view` / `set_default_view`, `GET|PATCH /api/todo/settings`
+  (`default_view`; a bad value, `null` included, is a 400 before `TODO_EDIT_USER` is spent; OpenAPI
+  2.18.0) and `inv todo settings local --default-view upcoming`. Tests:
+  `apps/todo/tests/test_default_view.py`; AI case TODO-78.
 - **Rate limits** (`RATELIMIT_RULES`): `TODO_CREATE_USER` (60 per minute: task and subtask
   creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation), plus `TODO_COMMENT_USER` (60 per
   minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`) and

@@ -1,4 +1,4 @@
-{% comment %} The settings sections. One htmx form re-renders this block: the default due time and the default reminder. Then what tasks cost
+{% comment %} The settings sections. One htmx form re-renders this block: the list To-do opens on, the default due time and the default reminder. Then what tasks cost
    and the reminder history link. Later sub-issues add their own sections here. {% endcomment %}
 <div id="settings-msg" class="mb-4 text-sm" aria-live="polite">
     {% if saved %}<p class="text-green-700 dark:text-green-400" role="status">Saved.</p>{% endif %}
@@ -6,6 +6,18 @@
 <form method="post" action="{% url 'todo:settings' %}" hx-post="{% url 'todo:settings' %}"
       hx-target="#settings-form" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']">
     {% csrf_token %}
+    <section class="mb-8" aria-labelledby="default-view-title">
+        <h2 id="default-view-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Start page</h2>
+        <div>
+            <label for="default-view" class="block mb-1 text-sm font-medium">Open To-do on</label>
+            <select id="default-view" name="default_view" aria-describedby="default-view-help"
+                    class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+                {% for value, label in default_view_choices %}<option value="{{ value }}" {% if value == account.default_view %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </div>
+        <p id="default-view-help" class="mt-2 text-xs text-gray-500 dark:text-gray-400">The list you see when you open To-do from the menu or the home page. The others stay one click away in the sidebar.</p>
+    </section>
+
     <section class="mb-8" aria-labelledby="due-time-title">
         <h2 id="due-time-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Default due time</h2>
         <div>

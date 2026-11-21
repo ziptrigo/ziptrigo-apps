@@ -49,6 +49,7 @@ FIELD_LABELS = {
     'subtasks': 'Subtasks',
     'note': 'Note',
     'muted_overdue': 'On hold or blocked, and overdue',
+    'default_view': 'Open To-do on',
     'blocker': 'Blocker',
     'blocked_by': 'Blocked by',
     'project': 'Project',
