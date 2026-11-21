@@ -95,6 +95,7 @@ def test_edit_through_a_link_notice_history_restore_and_revoke(
         visitor.click('a:has-text("Edit")')
         expect(visitor.locator('#note-title')).to_have_attribute('readonly', '')
         visitor.fill('#note-content', 'edited by a visitor\n\n- [ ] ship it\n')
+        visitor.get_by_role('button', name='Content + preview').click()
         expect(visitor.locator('#note-preview')).to_contain_text('edited by a visitor')
         visitor.click('button[type="submit"]:has-text("Save")')
         visitor.wait_for_url(address)

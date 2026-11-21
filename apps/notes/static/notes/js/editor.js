@@ -6,11 +6,67 @@
  *    with (or while the conflict panel is showing: the typed text is not saved). It is dropped when
  *    a save succeeds (the response redirects: `HX-Redirect`) and when "Discard my changes" is used.
  *    There is no autosave.
+ *  - The view switch, the `noteEditor` Alpine component on the form: Content only (the default every
+ *    time the editor opens), Content + preview, or Preview only. The choice is kept in
+ *    `window.ztNoteEditorView` for the life of the page, so the form re-rendered by a conflict keeps
+ *    it, except that a conflict never opens on Preview only (the person's own text, which the
+ *    conflict panel asks them to compare, would be hidden): it opens on Content + preview instead.
+ *    The preview is only asked for while it shows: the textarea's `input` trigger is filtered on its
+ *    `data-preview`, and switching to a view with the preview fetches it once (`htmx.ajax` from the
+ *    textarea, so its `hx-sync` still applies). Hiding the textarea while it has the focus moves the
+ *    focus to the preview, and a refused save whose field errors name the content switches back to
+ *    a view that shows the textarea, so the message under it can be seen.
+ *
+ * Loaded as a classic script (not `defer`) by both layouts, so its `alpine:init` listener exists
+ * before Alpine starts.
  */
 (function () {
     'use strict';
 
     let skipWarning = false;
+
+    document.addEventListener('alpine:init', function () {
+        window.Alpine.data('noteEditor', function () {
+            return {
+                view: 'content',
+
+                init() {
+                    let view = window.ztNoteEditorView || 'content';
+                    if (view === 'preview' && this.$el.querySelector('#editor-conflict')) view = 'split';
+                    this.view = window.ztNoteEditorView = view;
+                    if (view !== 'content') this.$nextTick(() => this.refreshPreview());
+                },
+
+                setView(view) {
+                    const showed = this.view !== 'content';
+                    const pane = this.$refs.writePane;
+                    const hidesFocus = view === 'preview' && pane && pane.contains(document.activeElement);
+                    this.view = window.ztNoteEditorView = view;
+                    if (view !== 'content' && !showed) this.$nextTick(() => this.refreshPreview());
+                    if (hidesFocus) this.$nextTick(() => this.$refs.preview.focus());
+                },
+
+                refreshPreview() {
+                    const area = this.$refs.content;
+                    htmx.ajax('POST', area.getAttribute('hx-post'), {
+                        source: area, target: '#note-preview', swap: 'innerHTML',
+                    });
+                },
+
+                // A refused save swaps its messages into #editor-msg; when one of them is about the
+                // content while the textarea is hidden, show it again (field_errors.js puts the message
+                // under it).
+                showContentErrors(event) {
+                    if (this.view !== 'preview') return;
+                    const target = event.target;
+                    if (!target || !target.querySelector) return;
+                    if (!target.querySelector('[data-field-error="content"]')) return;
+                    this.setView('split');
+                    this.$nextTick(() => this.$refs.content.focus());
+                },
+            };
+        });
+    });
 
     function editorForm() {
         return document.querySelector('form[data-note-editor]');

@@ -696,7 +696,8 @@ the full page's URL.
 
 **Segmented control** chooses one of a few values (Active / Ended, 7 / 30 / 90 days): a `segmented inline-flex
 rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5` track; each option `btn rounded-md px-3 py-1.5 text-sm font-medium`.
-The selected option is `aria-selected="true"` (a tablist) or `aria-current="true"` (links) and is styled from that
+The selected option is `aria-selected="true"` (a tablist), `aria-current="true"` (links) or `aria-pressed="true"`
+(toggle buttons that change a view in place, like the note editor's Content / Content + preview / Preview) and is styled from that
 attribute (`.segmented` in `site.css`: raised, white or `gray-700`), not from classes, so `tabs.js` can move it after
 an htmx click that swaps only the list below.
 

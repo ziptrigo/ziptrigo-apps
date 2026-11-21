@@ -725,7 +725,10 @@ class TestProjectPage:
 
     def test_quick_add_files_the_task_in_the_project(self, web, funded_user, project):
         page = text(web.get(reverse('todo:project', args=[project.pk])))
-        assert f'<option value="{project.pk}" selected>Website</option>' in page
+        assert (
+            f'<option value="{project.pk}" data-tag-color="{project.color}" selected>Website</option>'
+            in page
+        )
 
         response = web.post(
             reverse('todo:create'),

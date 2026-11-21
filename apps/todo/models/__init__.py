@@ -1,4 +1,4 @@
-from .account import MutedOverdue, TodoAccount
+from .account import DefaultView, MutedOverdue, TodoAccount
 from .attachment import Attachment
 from .blocker import TaskBlocker
 from .comment import Comment, CommentRevision
@@ -49,6 +49,7 @@ __all__ = [
     'InboundMessageStatus',
     'InboxCode',
     'MUTED_STATES',
+    'DefaultView',
     'MutedOverdue',
     'Label',
     'Priority',

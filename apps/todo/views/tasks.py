@@ -321,7 +321,7 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
             back = (
                 reverse('todo:project', args=[task.project_id])
                 if task.project_id is not None
-                else reverse('todo:today')
+                else reverse('todo:home')
             )
         return hx_redirect(request, back)
     view = view if view in VIEWS else 'today'

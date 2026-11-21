@@ -174,7 +174,7 @@ inv todo export-files local --out ./zips [--range this-year|last-30-days|... --f
 inv todo exports local | export-get local <id> | export-download local <id> --out ./zips [--force] | export-delete local <id> [--yes]
 inv todo export-xlsx local --out tasks.xlsx [--range ... --from ... --to ... --force]   # the free quick workbook of the tasks (a Tasks and a Comments sheet)
 inv todo filters local | filter-run local <id-or-name> [--limit 20]
-inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both]
+inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both --default-view today|upcoming|all]
 inv todo inbox local                            # the address tasks can be emailed to
 inv todo regenerate local [--yes]               # retire the address and issue a new one
 inv notes login local <email>                   # password: NOTES_PASSWORD, else a hidden prompt (never an argument)
@@ -1276,7 +1276,7 @@ box and the extension shown beside it. Only rows change: every product keys its 
   flight, a task in the Trash) and `rename_attachment` (locks the attachment row only,
   `select_for_update(of=('self',))`, so the task is read, not locked, keeping To-do's lock order;
   the same name is a no-op; a change
-  is logged, `EventKind.ATTACHMENT_RENAMED`, `{from, to, comment}`, migration `0020`, except for a
+  is logged, `EventKind.ATTACHMENT_RENAMED`, `{from, to, comment}`, migration `0021`, except for a
   comment draft, logged when its comment is saved). A task file's row has **Rename** (an inline
   Alpine form, `POST /todo/attachments/<id>/rename/`, `todo:attachment-rename`, `TODO_EDIT_USER`
   after the check, answers the list with `#attachment-msg` cleared out of band; a refusal is a 422
@@ -1315,7 +1315,7 @@ box and the extension shown beside it. Only rows change: every product keys its 
 - *Tests:* `apps/core/tests/test_filenames.py`, `apps/todo/tests/test_attachment_rename.py`,
   `apps/file_transfer/tests/test_rename_files.py`, `apps/receipts/tests/test_rename_file.py`,
   `admin/tests/test_todo.py`, the Playwright `tests_e2e/test_file_rename.py` (all four surfaces,
-  Escape, Enter, the focus after saving, the send form not submitted); AI cases TODO-78, FT-72,
+  Escape, Enter, the focus after saving, the send form not submitted); AI cases TODO-79, FT-72,
   RCPT-73.
 
 ### Notifications
@@ -2142,7 +2142,7 @@ a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tas
 .../history`), reminders (`POST /tasks/{number}/reminders`, `PATCH|DELETE .../reminders/{id}`,
 `GET /reminders/history`, optionally `?task=<number>` for one task's deliveries), attachments (`POST /tasks/{number}/attachments`, `POST
 .../attachments/{id}/complete`, `POST /attachments/{id}/cancel`, `POST /attachments/{id}/discard`, `GET /attachments/{id}/url`,
-`PATCH /attachments/{id}` (rename, `{filename}` without the extension; OpenAPI 2.18.1), `DELETE /attachments/{id}`), saved
+`PATCH /attachments/{id}` (rename, `{filename}` without the extension; OpenAPI 2.19.0), `DELETE /attachments/{id}`), saved
 filters (`GET|POST /filters`, `GET /filters/counts`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
 /filters/{id}/tasks`), `GET|PATCH /settings`, `GET /inbox`, `POST /inbox/regenerate` and `POST
 /parse`. Status codes (`api/common.py`): **400** a service `ValidationError` (`field: message`, a
@@ -5052,7 +5052,8 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   (`data-after-reorder-url`), so the sidebar shows the new order.
 - **Views and URLs** (`views/`; every one `@login_required`; another user's task, and a *trashed*
   task where a view doesn't accept one, is a **404**, never a 403: `views.common.owned_task`).
-  `todo:today` `/todo/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
+  `todo:home` `/todo/` (no list of its own: a 302 to the list the account opens on, keeping the
+  query string; see "Start page" below), `todo:today` `/todo/today/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
   due"), `todo:all` `/todo/all/` (50 per page, `?sort=`), `todo:completed`, `todo:trash`,
   `todo:list` `/todo/list/` (the partial every page fetches with htmx: `view`, `sort`, `page`; the
   response's `HX-Push-Url` is the *page* URL, a direct GET redirects to the page),
@@ -5121,6 +5122,19 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   the layout's CSS fades their right edge. A trashed task's page has no Subtasks section (its subtasks are
   trashed with it). Admin: `ReminderDelivery`'s plural is "reminder deliveries", the Tasks changelist's
   Unpaid column says "Unpaid" only for an owed task (a red cross for the normal state read as an alarm).
+- **Start page.** `TodoAccount.default_view` (`DefaultView`: `today` default, `upcoming`, `all`;
+  `db_default` too, migration `0020`) is the list To-do opens on. `/todo/` (`todo:home`, the
+  product's `url_name`, so the header menu and the home page card) only redirects to it
+  (`views.lists.home_page`), which is why Today has its own address, `/todo/today/`; a link that
+  means Today specifically (the sidebar, "Reschedule overdue") keeps `todo:today`, while a generic
+  "back to To-do" (the fallback of `redirect_back`, quick add with no usable Referer) goes to
+  `todo:home`, so it lands on the chosen list. The redirect is deliberate (each list keeps one
+  address, which the sidebar highlight and `HX-Push-Url` rely on). Chosen on the settings page ("Start page", `SettingsForm.default_view`; a post
+  without it leaves it alone, an unknown value is a 422 `Open To-do on: Choose Today, Upcoming or
+  All.`), `services.accounts.clean_default_view` / `set_default_view`, `GET|PATCH /api/todo/settings`
+  (`default_view`; a bad value, `null` included, is a 400 before `TODO_EDIT_USER` is spent; OpenAPI
+  2.18.0) and `inv todo settings local --default-view upcoming`. Tests:
+  `apps/todo/tests/test_default_view.py`; AI case TODO-78.
 - **Rate limits** (`RATELIMIT_RULES`): `TODO_CREATE_USER` (60 per minute: task and subtask
   creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation), plus `TODO_COMMENT_USER` (60 per
   minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`) and
@@ -5862,6 +5876,24 @@ line says so).
   the body wins, `labels` and `@` merged) and an emailed subject (read before the date, so the model never sees the
   tags). The date reader puts back a tag its `clean_title` dropped (`title_tags.keep_in`), so Accept never loses one.
   Renaming a task does not read tags. Tests: `apps/todo/tests/test_title_tags.py`; AI case TODO-69.
+- **Tag pills while typing a title** (`static/todo/js/title_tags.js`; the title's container is `data-title-tags`,
+  the pills go in `#quick-tag-pills` / `#subtask-tag-pills`). From the first character after `@` or `#` every matching
+  label or project shows as a pill under the title (like the date chip), up to 3 per tag and 6 in all, matched **in the
+  browser** against what the form renders: nothing is fetched. Matching ignores case, accents, spaces, `-` and `_`: an
+  exact name first, then a name starting with the text, then a later word of a name; a label already ticked or the
+  project already chosen comes last, marked "added". **A click confirms it.** In the quick-add box (the `labels`
+  checkboxes carry `data-tag-name`, `data-tag-color` and `data-tag-dark` -- the `chip_dark` filter, `dark_mode_color`
+  cached per colour -- and the Project options `data-tag-color`) the label's box is ticked or the Project select
+  chooses the project, and the tag leaves the title (punctuation kept; a tag at the end leaves a space so the next tag
+  starts a word). The subtask form has no label controls, so it renders the labels as hidden `[data-tag-option]`s and
+  a click **completes the tag in the title** (`@website-relaunch`, spaces as `-`) for the server's `title_tags` to read;
+  a tag that already names a label exactly offers nothing. A click fires the title's `input`, so the date chip reads it
+  again. Escape in the title, or the row's "Hide suggestions" button, hides the suggestions of the tags typed so far
+  (those exact texts are not offered again). A screen reader hears the number of suggestions once the typing pauses
+  (600 ms), not at every key. A pill not clicked changes nothing (the server still reads an exact tag at creation);
+  submitting does not accept pills (unlike the date chip). The Labels button counts ticked boxes live
+  (`data-labels-summary`, any task form). Tests: `TestPills` in `test_title_tags.py`, the Playwright
+  `tests_e2e/test_todo_tag_pills.py`, AI case TODO-78.
 - **Not done:** reading a project from a renamed title, bulk moves, and
   the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
   To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
@@ -7383,11 +7415,19 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
   trash, delete, restore, duplicate, history restore) are POSTs that flash a message and redirect back
   (`views.common.redirect_back`: a same-site `next`, else the referrer, else the note) through
   `NOTES_EDIT_USER`; a refusal is a flash message.
-- **The editor** (`notes/editor.html`, `partials/editor_form.html`, `static/notes/js/editor.js`). The
-  textarea posts itself to `notes:preview` (`hx-trigger="input changed delay:400ms, load"`, `hx-sync=
-  "this:replace"`, `hx-disabled-elt="unset"`), which answers the rendered `extended` HTML or "Nothing to
-  preview yet."; **over `NOTES_PREVIEW_USER` it answers 204**, so the last preview stays. Side by side from
-  `lg`, two tabs (Write, Preview) below it. Ctrl+S / Cmd+S submits the form; a `beforeunload` warning while
+- **The editor** (`notes/editor.html`, `partials/editor_form.html`, `static/notes/js/editor.js`). A view switch
+  (a segmented group of `aria-pressed` buttons, the `noteEditor` Alpine component in `editor.js`, which both
+  layouts load as a classic script so it is registered before Alpine starts) offers **Content** (the default,
+  every time the editor opens), **Content + preview** (side by side from `lg`, stacked below) and **Preview**
+  (the textarea hidden, still submitted); the choice lives in `window.ztNoteEditorView` for the page only, so the
+  conflict panel's re-render keeps it, except that a conflict never opens on Preview (the text to compare would
+  be hidden): it opens on Content + preview. Hiding the textarea while it has the focus moves the focus to the
+  preview (`tabindex="-1"`), and a refused save whose field errors name `content` while on Preview switches to
+  Content + preview so the message under the textarea shows. The preview is only asked for while it shows: the textarea posts itself
+  to `notes:preview` (`hx-trigger="input[this.dataset.preview=='on'] changed delay:400ms"`, `data-preview`
+  bound to the view, `hx-sync="this:replace"`, `hx-disabled-elt="unset"`; nothing on load) and switching to a
+  view with the preview fetches it once (`htmx.ajax` from the textarea). It answers the rendered `extended` HTML or "Nothing to
+  preview yet."; **over `NOTES_PREVIEW_USER` it answers 204**, so the last preview stays. Ctrl+S / Cmd+S submits the form; a `beforeunload` warning while
   the title or content differs from what the editor opened with (or the conflict panel is up), dropped
   when a save answers `HX-Redirect` and on "Discard my changes"; no autosave. A new note can pick its tags
   in the editor (an existing one has them on its page). The form posts a hidden `base_version`; success is a

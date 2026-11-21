@@ -56,14 +56,31 @@ def test_write_preview_save_and_tick_a_box(page: Page, receipts_server: Receipts
         page.fill('#note-title', 'Zn Python notes')
         page.fill('#note-content', CONTENT)
 
-        # The live preview follows the textarea after a pause: coloured code, a table, checklist boxes.
+        # The editor opens on Content only: no preview until one is chosen.
+        group = page.get_by_role('group', name='Editor view')
+        expect(group.get_by_role('button', name='Content', exact=True)).to_have_attribute(
+            'aria-pressed', 'true'
+        )
         preview = page.locator('#note-preview')
+        expect(preview).to_be_hidden()
+        group.get_by_role('button', name='Content + preview').click()
+        expect(page.locator('#note-content')).to_be_visible()
+
+        # The live preview follows the textarea after a pause: coloured code, a table, checklist boxes.
         expect(preview.locator('pre.hl')).to_be_visible()
         expect(preview.locator('table')).to_be_visible()
         expect(preview.locator('td', has_text='eggs')).to_be_visible()
         assert preview.locator('pre.hl span[class^="hl-"]').count() > 0
         page.fill('#note-content', CONTENT + '\n# Added heading\n')
         expect(preview.locator('h1')).to_have_text('Added heading')
+
+        # Preview only hides the textarea; back to Content hides the preview.
+        group.get_by_role('button', name='Preview', exact=True).click()
+        expect(page.locator('#note-content')).to_be_hidden()
+        expect(preview.locator('h1')).to_have_text('Added heading')
+        group.get_by_role('button', name='Content', exact=True).click()
+        expect(preview).to_be_hidden()
+        expect(page.locator('#note-content')).to_be_visible()
 
         page.click('button[type="submit"]:has-text("Save")')
         page.wait_for_url(re.compile(r'/notes/[0-9a-f-]{36}/$'))
@@ -160,6 +177,11 @@ def test_an_edit_that_lost_a_race_shows_the_conflict_panel(
         page.click('li.note-row a:has-text("Zn A")')
         page.click('a:has-text("Edit")')
         page.fill('#note-content', 'my text')
+        # Saved from Preview only: the panel must still show the person's own text.
+        page.get_by_role('group', name='Editor view').get_by_role(
+            'button', name='Preview', exact=True
+        ).click()
+        expect(page.locator('#note-content')).to_be_hidden()
         # Someone else saves first.
         receipts_server.shell(
             'import os\n'
@@ -174,7 +196,14 @@ def test_an_edit_that_lost_a_race_shows_the_conflict_panel(
             'This note was changed by someone else while you were editing.'
         )
         expect(panel).to_contain_text('their text')
+        expect(page.locator('#note-content')).to_be_visible()
         expect(page.locator('#note-content')).to_have_value('my text')
+        expect(
+            page.get_by_role('group', name='Editor view').get_by_role(
+                'button', name='Content + preview'
+            )
+        ).to_have_attribute('aria-pressed', 'true')
+        expect(page.locator('#note-preview')).to_contain_text('my text')
         page.click('button:has-text("Save mine anyway")')
         page.wait_for_url(re.compile(r'/notes/[0-9a-f-]{36}/$'))
         expect(page.locator('#note-body')).to_contain_text('my text')

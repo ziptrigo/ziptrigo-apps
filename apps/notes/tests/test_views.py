@@ -325,14 +325,52 @@ class TestTags:
         assert Note.objects.get(pk=note.pk).updated_at == before
 
 
+def _tag(text, name, element_id):
+    """The opening tag of the element with that id (its attributes only)."""
+    match = re.search(rf'<{name} id="{element_id}"[^>]*>', text)
+    assert match, element_id
+    return match.group(0)
+
+
+def _view_switch(text):
+    """The editor's view switch: the group and its three buttons."""
+    match = re.search(r'<div role="group" aria-label="Editor view".*?</div>', text, re.S)
+    assert match
+    return match.group(0)
+
+
 class TestEditorCreate:
     def test_the_empty_editor(self, web):
         response = web.get(url('new'))
         text = content(response)
         assert response.status_code == 200
         assert url('preview') in text and 'name="base_version"' in text
-        assert 'hx-trigger="input changed delay:400ms, load"' in text
-        assert 'id="note-preview"' in text and 'role="tablist"' in text
+        # The preview is only asked for while it shows: no request on load, none while typing in Content only.
+        area = _tag(text, 'textarea', 'note-content')
+        assert 'hx-trigger="input[this.dataset.preview==\'on\'] changed delay:400ms"' in area
+        assert 'data-preview="off"' in area and 'load' not in area
+        assert 'id="note-preview"' in text and 'x-data="noteEditor"' in text
+
+    def test_the_view_switch_defaults_to_content_only(self, web):
+        text = content(web.get(url('new')))
+        switch = _view_switch(text)
+        for view, label in (
+            ('content', 'Content'),
+            ('split', 'Content + preview'),
+            ('preview', 'Preview'),
+        ):
+            assert f'data-view="{view}"' in switch and f'>{label}</button>' in switch
+        pressed = re.findall(r'data-view="(\w+)"[^>]* aria-pressed="(true|false)"', switch)
+        assert pressed == [('content', 'true'), ('split', 'false'), ('preview', 'false')]
+        # Before Alpine runs the preview pane is hidden: Content only.
+        assert 'style="display: none"' in _tag(text, 'div', 'pane-preview')
+        # The preview can take the focus when the textarea it replaces had it.
+        assert 'tabindex="-1"' in _tag(text, 'div', 'note-preview')
+
+    def test_the_editor_script_is_loaded_before_alpine(self, web):
+        # editor.js registers the noteEditor component on alpine:init, so it must not be deferred.
+        text = content(web.get(url('new')))
+        assert re.search(r'<script src="[^"]*notes/js/editor\.js"></script>', text)
 
     def test_creates_a_note(self, web, user):
         response = web.post(url('new'), {'title': 'Hello', 'content': 'a\r\nb'})
@@ -534,6 +572,14 @@ class TestConflictPanel:
         assert response.status_code == 200 and 'HX-Redirect' in response
         saved = Note.objects.get(pk=note.pk)
         assert (saved.content, saved.version) == ('my version', 3)
+
+    def test_the_form_is_the_editor_component_again(self, web, user):
+        # The re-rendered form keeps the view switch; editor.js opens it on Content + preview
+        # instead of Preview only when the conflict panel is there (#editor-conflict).
+        _, response = self._conflict(web, user)
+        text = content(response)
+        assert 'x-data="noteEditor"' in text and 'id="editor-conflict"' in text
+        assert 'data-view="preview"' in _view_switch(text)
 
     def test_the_title_is_shown_when_it_differs(self, web, user):
         note = create_note(user, title='Their title', content='base')

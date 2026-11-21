@@ -35,7 +35,7 @@
     <select id="project-{{ uid }}" name="project"
             class="max-w-[12rem] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
         <option value="">No project</option>
-        {% for project in todo_projects %}<option value="{{ project.pk }}"{% if project.pk == form_project_id %} selected{% endif %}>{{ project.name }}</option>{% endfor %}
+        {% for project in todo_projects %}<option value="{{ project.pk }}" data-tag-color="{{ project.color }}"{% if project.pk == form_project_id %} selected{% endif %}>{{ project.name }}</option>{% endfor %}
     </select>
 </div>
 {% elif form_project_id %}<input type="hidden" name="project" value="{{ form_project_id }}">{% endif %}
@@ -50,13 +50,14 @@
     <span class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Labels</span>
     <button type="button" x-ref="trigger" @click="open = !open" :aria-expanded="open"
             class="btn inline-flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
-        <i class="fas fa-tag mr-2 text-gray-500 dark:text-gray-400" aria-hidden="true"></i>{% if selected_label_ids %}{{ selected_label_ids|length }} selected{% else %}Add labels{% endif %}
+        <i class="fas fa-tag mr-2 text-gray-500 dark:text-gray-400" aria-hidden="true"></i><span data-labels-summary>{% if selected_label_ids %}{{ selected_label_ids|length }} selected{% else %}Add labels{% endif %}</span>
     </button>
     <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none"
          class="absolute left-0 top-full mt-1 w-60 max-h-64 overflow-y-auto z-50 rounded-xl shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 py-1 origin-top">
         {% for label in labels %}
         <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
             <input type="checkbox" name="labels" value="{{ label.pk }}"
+                   data-tag-name="{{ label.name }}" data-tag-color="{{ label.color }}" data-tag-dark="{{ label.color|chip_dark }}"
                    {% if label.pk|stringformat:'s' in selected_label_ids %}checked{% endif %}
                    class="h-4 w-4 rounded border-gray-300 accent-sage-500">
             {% label_chip label %}

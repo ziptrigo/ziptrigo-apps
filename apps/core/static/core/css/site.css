@@ -178,16 +178,16 @@ input[type='checkbox']:focus-visible, input[type='radio']:focus-visible { outlin
  * it doesn't blink: put both `row-leave` and `row-enter` on it. */
 
 /* The segmented control (choose one of a few values): the selected option is raised on a grey track. It is
- * driven by `aria-selected="true"` (a tablist) or `aria-current="true"` (links), so a script can move it after an
- * htmx click without touching classes; the layout classes stay in the template. core/js/tabs.js moves aria-selected. */
+ * driven by `aria-selected="true"` (a tablist), `aria-current="true"` (links) or `aria-pressed="true"` (toggle
+ * buttons), so a script can move it after an htmx click without touching classes; the layout classes stay in the template. core/js/tabs.js moves aria-selected. */
 .segmented > * { color: rgb(var(--c-gray-600)); }
 .segmented > *:hover { color: rgb(var(--c-gray-900)); }
-.segmented > [aria-selected='true'], .segmented > [aria-current='true'] {
+.segmented > [aria-selected='true'], .segmented > [aria-current='true'], .segmented > [aria-pressed='true'] {
   background: #fff; color: rgb(var(--c-gray-900)); box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
 }
 .dark .segmented > * { color: rgb(var(--c-gray-300)); }
 .dark .segmented > *:hover { color: rgb(var(--c-gray-100)); }
-.dark .segmented > [aria-selected='true'], .dark .segmented > [aria-current='true'] { background: rgb(var(--c-gray-700)); color: rgb(var(--c-gray-100)); }
+.dark .segmented > [aria-selected='true'], .dark .segmented > [aria-current='true'], .dark .segmented > [aria-pressed='true'] { background: rgb(var(--c-gray-700)); color: rgb(var(--c-gray-100)); }
 
 /* A `data-list` while its refresh is slow (core/js/skeleton.js): the skeleton rows show, the list's own content
  * stays in the DOM (its hidden inputs still travel with the form) but is not displayed. */
