@@ -5061,7 +5061,26 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   re-rendered into `#task-list`, with the cleared form `#quick-add` and the sidebar count swapped
   out of band), `todo:task` `/todo/<number>/` (also a trashed task, read-only with Restore),
   `todo:edit` (`part=title|description|details`, so each part of the page saves on its own; no part
-  is the whole form), `todo:complete`, `uncomplete`, `postpone` (`preset`, `date`), `trash-task`,
+  is the whole form; **the details have no Save button**: `form[data-autosave]` submits itself from
+  `tasks.js` on every change of a named control (the date and time fields' hidden inputs, the
+  priority select, an accepted AI chip), coalesced into one request, `hx-sync="this:queue last"`,
+  nothing sent when the values equal those last sent; the labels and repeat popovers save when they
+  close (their Alpine `open` watch sends `popover-closed`; changes inside `[data-save-on-close]`
+  wait). **A save swaps nothing itself** (`hx-swap="none"`): the answer is still the whole panel, and
+  the script sets `hx-select-oob` per request to the parts the change touched (`#task-msg` always,
+  `#task-details-fields` for any change but the priority, `#task-repeat-line` unless only labels
+  changed, `#task-reminders` for the date or time), so an editor or menu open elsewhere in the panel
+  stays open and the form with `#details-save-status` ("Saving…" / "Saved" / "Not saved", one
+  persistent `role="status"`) is never replaced; those ids must stay in every panel
+  (`tests/test_details_autosave.py`). A time typed on a task with no date waits for the date ("Choose
+  a date to save the time."); typing takes an earlier "Saved" away; the "Type a date" chip is not
+  accepted by an autosave (`title_parse.js` accepts on submit in the quick-add box only); a change not
+  sent when the page is left goes out with `navigator.sendBeacon` on `pagehide` (not one clearing a
+  date that has reminders, which asks first: the count is on `#task-details-fields`, the saved date is
+  the one last sent, since a hidden input's `defaultValue` follows its value); text typed into a field
+  that a swap replaces, while the request was in flight, is put back; and a `<noscript>` Save button
+  covers no JavaScript),
+  `todo:complete`, `uncomplete`, `postpone` (`preset`, `date`), `trash-task`,
   `restore`, `delete` (a trashed task, forever; an unpaid one is a 422, see "Numbering and billing"), `checklist` (`index`, `checked`; answers the
   re-rendered `#task-description`), `subtask-add`, `todo:reorder`, `todo:reschedule-overdue`,
   `todo:labels` (GET the page, POST add) with `labels/<id>/edit/`, `labels/<id>/delete/`,
@@ -6387,7 +6406,8 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
     reminder twice for one due moment. They include completed and trashed tasks, so restoring one
     later finds its reminders already right.
   - **Clearing the due date deletes every reminder of the task** (`fire_at` can't be empty; the
-    details form asks first, `tasks.js`: "Clearing the date removes its N reminders").
+    details form asks first, `tasks.js`: "Clearing the date removes its N reminders"; Cancel puts the
+    saved date back in the field).
 - **Recurrence.** `reminders.copy_extras` (called by `recurrence.copy_extras`) first deletes the
   reminders `create_task` gave the new occurrence by default, then copies each of the completed
   task's (`minutes_before`, `channel`, `fire_at` recomputed for the new date, `sent_at` null): the

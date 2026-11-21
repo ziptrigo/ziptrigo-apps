@@ -151,6 +151,8 @@
         {% else %}
         {% include 'todo/partials/task_form.html' with mode='details' %}
         {% endif %}
+        {% comment %}Always rendered (even empty): a save of the details swaps it in out of band.{% endcomment %}
+        <div id="task-repeat-line">
         {% if task.active_recurrence %}
         <div id="task-repeat" class="-mt-4 mb-4 flex flex-wrap items-center gap-3">
             {% repeat_chip task detail=True %}
@@ -162,6 +164,7 @@
         {% elif task.recurrence_id %}
         <p id="task-repeat" class="-mt-4 mb-4 text-sm text-gray-500 dark:text-gray-400"><i class="fas fa-repeat mr-1" aria-hidden="true"></i>This task no longer repeats.</p>
         {% endif %}
+        </div>
     </section>
 
     {% include 'todo/partials/reminders.html' %}
