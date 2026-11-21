@@ -1,7 +1,9 @@
+{% load filenames %}
 {% comment %} The file control of a comment form (add or edit): "Attach files", the rows of the uploads in flight and the files that will be
    saved with the comment. `static/todo/js/comment_files.js` runs it: each file is uploaded as soon as it is picked (the same calls as the
    task's attachments, with `for_comment`), and a finished one becomes a chip with a hidden `attachment_ids` input that the form submits.
-   When editing, `files` are the comment's current ones, each with a "Remove" checkbox (`remove_attachment_ids`). Needs `task`,
+   When editing, `files` are the comment's current ones, each with its name in a box (`file_name_<id>`, the name without
+   the extension, which is kept: saving renames it) and a "Remove" checkbox (`remove_attachment_ids`). Needs `task`,
    `comment_files_frozen`, `comment_files_max_bytes`, `comment_files_max_files`; `files` is optional. {% endcomment %}
 <div data-comment-files class="mt-3"
      data-start-url="{% url 'todo:attachment-start' task.number %}"
@@ -15,7 +17,12 @@
         {% for file in files %}
         <li class="flex items-center gap-2 text-sm">
             <i class="fas {% if file.inline_type == 'application/pdf' %}fa-file-pdf{% elif file.inline_type %}fa-file-image{% else %}fa-file{% endif %} w-4 text-center text-sage-400" aria-hidden="true"></i>
-            <span class="min-w-0 flex-1 truncate text-gray-900 dark:text-gray-100">{{ file.filename }}</span>
+            <span class="flex min-w-0 flex-1 items-center gap-1">
+                <input type="text" name="file_name_{{ file.pk }}" value="{{ file.filename|file_stem }}" maxlength="255" required autocomplete="off"
+                       aria-label="Name of {{ file.filename }}"
+                       class="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-0.5 text-sm text-gray-900 dark:text-gray-100">
+                {% if file.filename|file_extension %}<span class="text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ file.filename|file_extension }}</span>{% endif %}
+            </span>
             <span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ file.size_bytes|filesizeformat }}</span>
             <label class="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 whitespace-nowrap">
                 <input type="checkbox" name="remove_attachment_ids" value="{{ file.pk }}" class="rounded border-gray-300 dark:border-gray-600 accent-sage-500">Remove

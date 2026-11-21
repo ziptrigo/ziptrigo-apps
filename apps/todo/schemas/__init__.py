@@ -2,6 +2,7 @@
 
 from .activity import ActivityEventSchema, ActivityPageSchema
 from .attachment import (
+    AttachmentRenameSchema,
     AttachmentSchema,
     CommentAttachmentSchema,
     FileUrlSchema,
@@ -92,6 +93,7 @@ __all__ = [
     'SectionSchema',
     'ActivityEventSchema',
     'ActivityPageSchema',
+    'AttachmentRenameSchema',
     'AttachmentSchema',
     'BlockerSchema',
     'BlockerSuggestionSchema',

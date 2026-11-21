@@ -39,6 +39,7 @@ from .attachments import (
     delete_attachment,
     discard_orphan_object,
     download_url,
+    rename_attachment,
     start_upload,
     with_attachment_counts,
 )
@@ -230,6 +231,7 @@ __all__ = [
     'describe_daily_rate',
     'delete_attachment',
     'download_url',
+    'rename_attachment',
     'is_frozen',
     'metering',
     'start_upload',

@@ -5,7 +5,8 @@ from . import views
 app_name = 'todo'
 
 urlpatterns = [
-    path('', views.today_page, name='today'),
+    path('', views.home_page, name='home'),
+    path('today/', views.today_page, name='today'),
     path('upcoming/', views.upcoming_page, name='upcoming'),
     path('all/', views.all_page, name='all'),
     path('closed/', views.closed_page, name='closed'),
@@ -60,6 +61,11 @@ urlpatterns = [
         'attachments/<uuid:attachment_id>/delete/',
         views.attachment_delete,
         name='attachment-delete',
+    ),
+    path(
+        'attachments/<uuid:attachment_id>/rename/',
+        views.attachment_rename,
+        name='attachment-rename',
     ),
     # Exports (issue #326): the quick XLSX, the "Download files" dialog (GET) and its confirmation
     # (POST), the list, one export, its status panel, and the actions on it.

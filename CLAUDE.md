@@ -35,7 +35,9 @@ apps/core/            Site shell: base.html, landing page, the Privacy Policy an
                       `notificationBell`; `core/js/fragment_modal.js`: `fragmentModal`),
                       and the export engine Receipts and To-do share (issue #326:
                       `core/models/exports.py`, `core/services/exports.py`,
-                      `export_names.py`, `export_errors.py`, `core/date_ranges.py`).
+                      `export_names.py`, `export_errors.py`, `core/date_ranges.py`),
+                      and renaming a stored file while keeping its extension
+                      (`apps.core.services.filenames`, `{% load filenames %}`; see "Renaming files").
 apps/accounts/        User model, auth pages + API, JWT auth classes, the memory of confirmed
                       addresses (`KnownEmail`, issue #160), sign-in by emailed code or link (#295).
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
@@ -167,11 +169,12 @@ inv todo list local --project Website [--project none --include-archived --sort 
 inv todo remind local 1234 60 [--channel in_app|email|both] | unremind local 1234 <reminder-id>
 inv todo upload local 1234 contract.pdf photo.jpg   # SHA-256, presigned PUT, complete; exit 1 if any failed
 inv todo download local <attachment-id> [--out contract.pdf --force]   # streams to .part, then renames
+inv todo rename-file local <attachment-id> Whiteboard notes   # the new name without the extension, which is kept
 inv todo export-files local --out ./zips [--range this-year|last-30-days|... --from 2026-01-01 --to 2026-12-31 --yes --force --wait 30]   # the files of the tasks created in the range as zip files: quotes, asks to confirm the cost, waits, downloads (issue #326)
 inv todo exports local | export-get local <id> | export-download local <id> --out ./zips [--force] | export-delete local <id> [--yes]
 inv todo export-xlsx local --out tasks.xlsx [--range ... --from ... --to ... --force]   # the free quick workbook of the tasks (a Tasks and a Comments sheet)
 inv todo filters local | filter-run local <id-or-name> [--limit 20]
-inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both]
+inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both --default-view today|upcoming|all]
 inv todo inbox local                            # the address tasks can be emailed to
 inv todo regenerate local [--yes]               # retire the address and issue a new one
 inv notes login local <email>                   # password: NOTES_PASSWORD, else a hidden prompt (never an argument)
@@ -1253,6 +1256,68 @@ Receipts call sites always had; Receipts' `inbound.py` is untouched).
   test that stayed: `test_inbound.py` patches `MAX_EML_BYTES` on the core module now, and
   `test_admin.py` looks its permissions up by app label too (To-do has an `InboundMessage` model).
 
+### Renaming files
+
+A file's name can be changed after it is added, wherever a user adds files and the name matters:
+To-do's task attachments and comment files, the file transfer send pages (before **Send**) and a
+receipt's file. **The name is edited without its extension, which is kept**
+(`apps.core.services.filenames`): `split_extension` (a final `.` and 1 to 10 ASCII letters or
+digits after at least one other character, so `.env`, `README` and `Report v1.2 final` have none),
+`clean_stem` (control and format characters dropped, except a zero-width joiner between two
+characters, which holds emoji sequences together; `/` and `\` to `_`; white space collapsed)
+and `renamed(current, typed, max_length=255)` (`Whiteboard` for `2026-11-21-10-45-30.webp` is
+`Whiteboard.webp`; a typed name already ending in the same extension isn't given it twice; any
+other ending is part of the name; the name, never the extension, is cut to fit; `''` when nothing is
+left, which each product refuses with `EMPTY_NAME_MESSAGE`, "Give the file a name."). The template
+filters `{{ name|file_stem }}` / `{{ name|file_extension }}` (`{% load filenames %}`) fill a rename
+box and the extension shown beside it. Only rows change: every product keys its objects by id.
+
+- *To-do.* `services.attachments.check_rename` (no lock, no write: an empty name, an upload in
+  flight, a task in the Trash) and `rename_attachment` (locks the attachment row only,
+  `select_for_update(of=('self',))`, so the task is read, not locked, keeping To-do's lock order;
+  the same name is a no-op; a change
+  is logged, `EventKind.ATTACHMENT_RENAMED`, `{from, to, comment}`, migration `0021`, except for a
+  comment draft, logged when its comment is saved). A task file's row has **Rename** (an inline
+  Alpine form, `POST /todo/attachments/<id>/rename/`, `todo:attachment-rename`, `TODO_EDIT_USER`
+  after the check, answers the list with `#attachment-msg` cleared out of band; a refusal is a 422
+  into `#attachment-msg`; not on a trashed task; a comment's file is a 404 there; `tasks.js` puts the
+  focus back on the row's Rename after the swap, on `htmx:afterSettle`, since htmx would otherwise
+  focus the hidden box with the same id). A comment's files are renamed from its forms: each saved
+  file of the edit form, and each freshly attached chip (`comment_files.js`), has a box
+  `file_name_<id>`, which `add_comment` / `edit_comment(..., file_names=)` apply **before**
+  linking (`rename_comment_files(comment, names, attaching)`: the comment's files and the drafts
+  this save attaches, so a draft is logged once, attached under its new name; a name equal to the
+  file's takes no lock; a file the same edit removes isn't renamed first; a files-only change is
+  still not an edit of the text). An empty name is keyed `file_name_<id>` and names the file
+  (`File name: Give photo.png a name.`, `views.common.validation_lines` labels those keys), so
+  `field_errors.js` puts it under that box. The API's `PATCH
+  /api/todo/attachments/{id}` (`AttachmentRenameSchema`, `extra='forbid'`, `filename` at most 255
+  characters, a 422 over it, where the web cuts) renames either kind, 400 for an empty name before
+  the budget is spent, 404 for another user's file or one still uploading;
+  CLI `inv todo rename-file`.
+- *File transfer.* `services.uploads.rename_file(file, name)`: an **uploaded** file of a **draft**
+  only (a paused upload keeps its name: resuming matches the re-picked file by name and size), then
+  `limits.validate_filename`. `POST /transfer/send/<draft>/files/<id>/rename/` (`send-rename-file`,
+  `FT_UPLOAD_USER`) and its anonymous twin (`anon-send-rename-file`, `FT_ANON_UPLOAD_IP`), JSON
+  `{name}` -> `{ok, name}`, an empty name a 422 before the rate limit. `resumable_upload.js` shows a
+  pencil on a finished row when the page passes `canRename: true` (the two send pages; **not** a
+  file request's upload page); the box has no `name` and Enter is caught, since the row sits inside
+  the send form; an answer that is the login page (a followed redirect, or a 200 that isn't JSON)
+  says "Your session has ended. Sign in again to rename the file." Not after sending, and not in
+  the JWT API.
+- *Receipts.* `services.actions.rename_file(receipt, name)` (refused in the Trash and for a receipt
+  with no file name, an email body; conditional on `deleted_at IS NULL`, `updated_at` set by hand).
+  The receipt page shows `File: <name>` with **Rename** (icon Save and Cancel buttons, so no second
+  "Save" text button on the page; `POST /receipts/<id>/rename/`,
+  `receipts:rename-file`, no rate limit like the form's save; success a flash and `HX-Redirect`, a
+  refusal a 422 into `#receipt-file-msg`). The new name is the download name and the one exports
+  use. Not in the JWT API.
+- *Tests:* `apps/core/tests/test_filenames.py`, `apps/todo/tests/test_attachment_rename.py`,
+  `apps/file_transfer/tests/test_rename_files.py`, `apps/receipts/tests/test_rename_file.py`,
+  `admin/tests/test_todo.py`, the Playwright `tests_e2e/test_file_rename.py` (all four surfaces,
+  Escape, Enter, the focus after saving, the send form not submitted); AI cases TODO-79, FT-72,
+  RCPT-73.
+
 ### Notifications
 
 `apps.core` has a site-wide **in-app notification system** (issue #169): a bell in the header of
@@ -2077,7 +2142,7 @@ a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tas
 .../history`), reminders (`POST /tasks/{number}/reminders`, `PATCH|DELETE .../reminders/{id}`,
 `GET /reminders/history`, optionally `?task=<number>` for one task's deliveries), attachments (`POST /tasks/{number}/attachments`, `POST
 .../attachments/{id}/complete`, `POST /attachments/{id}/cancel`, `POST /attachments/{id}/discard`, `GET /attachments/{id}/url`,
-`DELETE /attachments/{id}`), saved
+`PATCH /attachments/{id}` (rename, `{filename}` without the extension; OpenAPI 2.19.0), `DELETE /attachments/{id}`), saved
 filters (`GET|POST /filters`, `GET /filters/counts`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
 /filters/{id}/tasks`), `GET|PATCH /settings`, `GET /inbox`, `POST /inbox/regenerate` and `POST
 /parse`. Status codes (`api/common.py`): **400** a service `ValidationError` (`field: message`, a
@@ -4987,7 +5052,8 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   (`data-after-reorder-url`), so the sidebar shows the new order.
 - **Views and URLs** (`views/`; every one `@login_required`; another user's task, and a *trashed*
   task where a view doesn't accept one, is a **404**, never a 403: `views.common.owned_task`).
-  `todo:today` `/todo/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
+  `todo:home` `/todo/` (no list of its own: a 302 to the list the account opens on, keeping the
+  query string; see "Start page" below), `todo:today` `/todo/today/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
   due"), `todo:all` `/todo/all/` (50 per page, `?sort=`), `todo:completed`, `todo:trash`,
   `todo:list` `/todo/list/` (the partial every page fetches with htmx: `view`, `sort`, `page`; the
   response's `HX-Push-Url` is the *page* URL, a direct GET redirects to the page),
@@ -5075,6 +5141,19 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   the layout's CSS fades their right edge. A trashed task's page has no Subtasks section (its subtasks are
   trashed with it). Admin: `ReminderDelivery`'s plural is "reminder deliveries", the Tasks changelist's
   Unpaid column says "Unpaid" only for an owed task (a red cross for the normal state read as an alarm).
+- **Start page.** `TodoAccount.default_view` (`DefaultView`: `today` default, `upcoming`, `all`;
+  `db_default` too, migration `0020`) is the list To-do opens on. `/todo/` (`todo:home`, the
+  product's `url_name`, so the header menu and the home page card) only redirects to it
+  (`views.lists.home_page`), which is why Today has its own address, `/todo/today/`; a link that
+  means Today specifically (the sidebar, "Reschedule overdue") keeps `todo:today`, while a generic
+  "back to To-do" (the fallback of `redirect_back`, quick add with no usable Referer) goes to
+  `todo:home`, so it lands on the chosen list. The redirect is deliberate (each list keeps one
+  address, which the sidebar highlight and `HX-Push-Url` rely on). Chosen on the settings page ("Start page", `SettingsForm.default_view`; a post
+  without it leaves it alone, an unknown value is a 422 `Open To-do on: Choose Today, Upcoming or
+  All.`), `services.accounts.clean_default_view` / `set_default_view`, `GET|PATCH /api/todo/settings`
+  (`default_view`; a bad value, `null` included, is a 400 before `TODO_EDIT_USER` is spent; OpenAPI
+  2.18.0) and `inv todo settings local --default-view upcoming`. Tests:
+  `apps/todo/tests/test_default_view.py`; AI case TODO-78.
 - **Rate limits** (`RATELIMIT_RULES`): `TODO_CREATE_USER` (60 per minute: task and subtask
   creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation), plus `TODO_COMMENT_USER` (60 per
   minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`) and
@@ -5816,6 +5895,24 @@ line says so).
   the body wins, `labels` and `@` merged) and an emailed subject (read before the date, so the model never sees the
   tags). The date reader puts back a tag its `clean_title` dropped (`title_tags.keep_in`), so Accept never loses one.
   Renaming a task does not read tags. Tests: `apps/todo/tests/test_title_tags.py`; AI case TODO-69.
+- **Tag pills while typing a title** (`static/todo/js/title_tags.js`; the title's container is `data-title-tags`,
+  the pills go in `#quick-tag-pills` / `#subtask-tag-pills`). From the first character after `@` or `#` every matching
+  label or project shows as a pill under the title (like the date chip), up to 3 per tag and 6 in all, matched **in the
+  browser** against what the form renders: nothing is fetched. Matching ignores case, accents, spaces, `-` and `_`: an
+  exact name first, then a name starting with the text, then a later word of a name; a label already ticked or the
+  project already chosen comes last, marked "added". **A click confirms it.** In the quick-add box (the `labels`
+  checkboxes carry `data-tag-name`, `data-tag-color` and `data-tag-dark` -- the `chip_dark` filter, `dark_mode_color`
+  cached per colour -- and the Project options `data-tag-color`) the label's box is ticked or the Project select
+  chooses the project, and the tag leaves the title (punctuation kept; a tag at the end leaves a space so the next tag
+  starts a word). The subtask form has no label controls, so it renders the labels as hidden `[data-tag-option]`s and
+  a click **completes the tag in the title** (`@website-relaunch`, spaces as `-`) for the server's `title_tags` to read;
+  a tag that already names a label exactly offers nothing. A click fires the title's `input`, so the date chip reads it
+  again. Escape in the title, or the row's "Hide suggestions" button, hides the suggestions of the tags typed so far
+  (those exact texts are not offered again). A screen reader hears the number of suggestions once the typing pauses
+  (600 ms), not at every key. A pill not clicked changes nothing (the server still reads an exact tag at creation);
+  submitting does not accept pills (unlike the date chip). The Labels button counts ticked boxes live
+  (`data-labels-summary`, any task form). Tests: `TestPills` in `test_title_tags.py`, the Playwright
+  `tests_e2e/test_todo_tag_pills.py`, AI case TODO-78.
 - **Not done:** reading a project from a renamed title, bulk moves, and
   the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
   To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
@@ -7338,11 +7435,19 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
   trash, delete, restore, duplicate, history restore) are POSTs that flash a message and redirect back
   (`views.common.redirect_back`: a same-site `next`, else the referrer, else the note) through
   `NOTES_EDIT_USER`; a refusal is a flash message.
-- **The editor** (`notes/editor.html`, `partials/editor_form.html`, `static/notes/js/editor.js`). The
-  textarea posts itself to `notes:preview` (`hx-trigger="input changed delay:400ms, load"`, `hx-sync=
-  "this:replace"`, `hx-disabled-elt="unset"`), which answers the rendered `extended` HTML or "Nothing to
-  preview yet."; **over `NOTES_PREVIEW_USER` it answers 204**, so the last preview stays. Side by side from
-  `lg`, two tabs (Write, Preview) below it. Ctrl+S / Cmd+S submits the form; a `beforeunload` warning while
+- **The editor** (`notes/editor.html`, `partials/editor_form.html`, `static/notes/js/editor.js`). A view switch
+  (a segmented group of `aria-pressed` buttons, the `noteEditor` Alpine component in `editor.js`, which both
+  layouts load as a classic script so it is registered before Alpine starts) offers **Content** (the default,
+  every time the editor opens), **Content + preview** (side by side from `lg`, stacked below) and **Preview**
+  (the textarea hidden, still submitted); the choice lives in `window.ztNoteEditorView` for the page only, so the
+  conflict panel's re-render keeps it, except that a conflict never opens on Preview (the text to compare would
+  be hidden): it opens on Content + preview. Hiding the textarea while it has the focus moves the focus to the
+  preview (`tabindex="-1"`), and a refused save whose field errors name `content` while on Preview switches to
+  Content + preview so the message under the textarea shows. The preview is only asked for while it shows: the textarea posts itself
+  to `notes:preview` (`hx-trigger="input[this.dataset.preview=='on'] changed delay:400ms"`, `data-preview`
+  bound to the view, `hx-sync="this:replace"`, `hx-disabled-elt="unset"`; nothing on load) and switching to a
+  view with the preview fetches it once (`htmx.ajax` from the textarea). It answers the rendered `extended` HTML or "Nothing to
+  preview yet."; **over `NOTES_PREVIEW_USER` it answers 204**, so the last preview stays. Ctrl+S / Cmd+S submits the form; a `beforeunload` warning while
   the title or content differs from what the editor opened with (or the conflict panel is up), dropped
   when a save answers `HX-Redirect` and on "Discard my changes"; no autosave. A new note can pick its tags
   in the editor (an existing one has them on its page). The form posts a hidden `base_version`; success is a

@@ -41,7 +41,9 @@ def test_a_comment_carries_a_file_and_an_edit_removes_it(
 
     # The file uploads at once and becomes a chip; the form carries its id.
     chip = box.locator('[data-files-attached] li')
-    expect(chip).to_contain_text('receipt photo.png')
+    # The name is in a box without its extension (it can be renamed before posting).
+    expect(chip.locator('input[name^="file_name_"]')).to_have_value('receipt photo')
+    expect(chip).to_contain_text('.png')
     expect(chip.locator('input[name="attachment_ids"]')).to_have_count(1)
     expect(form.locator('button[type="submit"]')).to_be_enabled()
 
@@ -92,7 +94,7 @@ def test_a_removed_chip_is_not_sent_and_a_bad_file_shows_its_error(
         {'name': 'drop-me.png', 'mimeType': 'image/png', 'buffer': PNG}
     )
     chip = box.locator('[data-files-attached] li')
-    expect(chip).to_contain_text('drop-me.png')
+    expect(chip.locator('input[name^="file_name_"]')).to_have_value('drop-me')
     chip.get_by_role('button', name=re.compile('^Remove')).click()
     expect(box.locator('[data-files-attached] li')).to_have_count(0)
 

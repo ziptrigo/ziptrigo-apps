@@ -12,6 +12,7 @@ from ..services.accounts import inbox_address_for
 from ..services.parsing import ParsedTitle, parse_title
 from ..services.projects import archive_project, create_project
 from ..services.storage import INBOUND_PREFIX
+from ..templatetags.todo_ui import dark_mode_color
 from .api_support import auth, post  # noqa: F401 -- `auth` is a fixture
 from .factories import make_label
 from .test_parsing import ask
@@ -181,6 +182,57 @@ class TestQuickAdd:
         sub = Task.objects.get(parent=parent)
         assert sub.title == 'Sub #WSA' and sub.project is None
         assert list(sub.labels.all()) == [home]
+
+
+class TestPills:
+    """The quick-add form carries what static/todo/js/title_tags.js matches tags against."""
+
+    def test_the_quick_add_form_offers_its_labels_and_projects(self, web, funded_user, wsa):
+        make_label(funded_user, 'home', color='#0000ff')
+
+        html = web.get(reverse('todo:all')).content.decode()
+
+        assert 'data-title-tags' in html and 'id="quick-tag-pills"' in html
+        assert 'data-tag-name="home" data-tag-color="#0000ff"' in html
+        # The dark-mode colour of a label a script draws is the server's, like `label_chip`'s.
+        assert f'data-tag-dark="{dark_mode_color("#0000ff")}"' in html
+        assert dark_mode_color('#0000ff') != '#0000ff'
+        assert f'value="{wsa.pk}" data-tag-color="{wsa.color}"' in html
+        assert '<span data-labels-summary>Add labels</span>' in html
+        assert 'todo/js/title_tags.js' in html
+
+    def test_a_label_name_is_escaped(self, web, funded_user):
+        make_label(funded_user, '"><b>x')
+
+        html = web.get(reverse('todo:all')).content.decode()
+
+        assert 'data-tag-name="&quot;&gt;&lt;b&gt;x"' in html
+
+    def test_the_subtask_form_offers_the_labels_to_complete(self, web, funded_user):
+        make_label(funded_user, 'home', color='#336699')
+        parent = create_task(funded_user, title='Parent')
+
+        html = web.get(reverse('todo:task', args=[parent.number])).content.decode()
+
+        assert 'id="subtask-title"' in html and 'data-tag-input' in html
+        assert 'id="subtask-tag-pills"' in html
+        assert (
+            '<span data-tag-option data-tag-name="home" data-tag-color="#336699" '
+            f'data-tag-dark="{dark_mode_color("#336699")}"></span>'
+        ) in html
+
+    def test_a_completed_tag_is_read_when_the_subtask_is_created(self, web, funded_user):
+        # The subtask pill writes the label's name with `-` for its spaces, as `title_tags` reads it.
+        relaunch = make_label(funded_user, 'Website relaunch')
+        parent = create_task(funded_user, title='Parent')
+
+        web.post(
+            reverse('todo:subtask-add', args=[parent.number]),
+            {'title': 'Mockups @Website-relaunch '},
+        )
+
+        sub = Task.objects.get(parent=parent)
+        assert sub.title == 'Mockups' and list(sub.labels.all()) == [relaunch]
 
 
 class TestApi:

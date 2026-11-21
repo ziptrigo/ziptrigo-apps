@@ -408,6 +408,7 @@ def _channel(value: str | None) -> str | None:
 
 
 MUTED_OVERDUE_CHOICES = ('dimmed', 'hidden', 'section')
+DEFAULT_VIEW_CHOICES = ('today', 'upcoming', 'all')
 _MUTED_OVERDUE_TEXT = {
     'dimmed': 'dimmed (at the bottom of Overdue)',
     'hidden': 'hidden (not on Today)',
@@ -1938,6 +1939,24 @@ def todo_download(
     _say(f'Wrote {target} ({size:,} bytes).')
 
 
+@app.command(name='rename-file')
+def todo_rename_file(
+    environment: EnvironmentAnnotation,
+    attachment_id: str = typer.Argument(..., help='The attachment id (shown by `get`).'),
+    name: list[str] = typer.Argument(..., help='The new name, without the extension.'),
+):
+    """
+    Rename an attachment (a task's file or a comment's). Give the name without the extension,
+    which the file keeps: renaming 2026-11-21-10-45-30.webp to Whiteboard makes Whiteboard.webp.
+
+    Example:
+        todo rename-file local 1b6e2f4a-... Whiteboard after the meeting
+    """
+    select_environment(environment)
+    attachment = _call('patch', f'/attachments/{attachment_id}', json={'filename': ' '.join(name)})
+    _say(f'Renamed to {attachment["filename"]}.')
+
+
 # -- Commands: saved filters ---------------------------------------------------------------------
 
 
@@ -2025,7 +2044,9 @@ def _print_settings(settings: dict) -> None:
         else f'{reminder} minutes before ({settings["default_reminder_channel"]})'
     )
     muted = settings.get('muted_overdue')
+    default_view = settings.get('default_view')
     rows = [
+        ('Open To-do on', default_view.capitalize() if default_view else '-'),
         ('Default due time', settings['default_due_time'][:5]),
         ('Default reminder', default_reminder),
         ('Default channel', settings['default_reminder_channel']),
@@ -2086,6 +2107,11 @@ def todo_settings(
         '--muted-overdue',
         help='Where an overdue On hold or Blocked task shows on Today: dimmed, hidden or section.',
     ),
+    default_view: str | None = typer.Option(
+        None,
+        '--default-view',
+        help='The list the website opens To-do on: today, upcoming or all.',
+    ),
 ):
     """
     Show the settings and this month's usage; pass options to change the defaults.
@@ -2096,6 +2122,7 @@ def todo_settings(
         todo settings local --default-reminder none
         todo settings local --snooze 60
         todo settings local --muted-overdue section
+        todo settings local --default-view upcoming
     """
     select_environment(environment)
     payload: dict = {}
@@ -2124,6 +2151,11 @@ def todo_settings(
         if muted_overdue not in MUTED_OVERDUE_CHOICES:
             raise typer.BadParameter('use dimmed, hidden or section.')
         payload['muted_overdue'] = muted_overdue
+    if default_view is not None:
+        default_view = default_view.lower()
+        if default_view not in DEFAULT_VIEW_CHOICES:
+            raise typer.BadParameter('use today, upcoming or all.')
+        payload['default_view'] = default_view
 
     if payload:
         settings = _call('patch', '/settings', json=payload)

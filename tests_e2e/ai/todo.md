@@ -32,7 +32,8 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
   sniffed image or PDF; the size and per-task limits; trashed, completed and paused-storage states);
 - reminders (presets, custom, edit, remove, the defaults from Settings, delivery in-app and by email, the history
   page `/todo/reminders/history/`);
-- the AI date chip (with the fake parser, see Preconditions);
+- the AI date chip (with the fake parser, see Preconditions), and the `@label` / `#project` pills under the quick-add and
+  subtask titles (TODO-78);
 - **Search** `/todo/search/` (glob, regular expressions, the filter bar, number search, snippets) and **Filters**
   `/todo/filters/` (saved filters in the sidebar with counts, rename, reorder, delete, update, a deleted label);
 - **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and **Settings**
@@ -171,7 +172,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 |---|---|---|
 | 1 | Go to `http://localhost:8765/todo/`. | Redirected to `/account/login/?next=/todo/`. |
 | 2 | Go to `/todo/upcoming/`, `/todo/all/`, `/todo/completed/`, `/todo/trash/`, `/todo/labels/`, `/todo/settings/`, `/todo/search/?q=rent`, `/todo/filters/`, `/todo/reminders/history/` and `/todo/1000/`. | Each redirects to the login page with its path in `next`. Nothing about any task is revealed. |
-| 3 | Sign in as `qa.user@example.com` / `QaE2e-Passw0rd!` from the `/todo/` redirect. | Lands on `/todo/`. |
+| 3 | Sign in as `qa.user@example.com` / `QaE2e-Passw0rd!` from the `/todo/` redirect. | Lands on `/todo/today/` (`/todo/` sends you to the list chosen in Settings, Today by default; TODO-78). |
 
 ### TODO-02 Empty Today and navigation
 
@@ -180,7 +181,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/` and click **To-do** in the top navigation (check-square icon). | Lands on `/todo/`. Tab title "Today - To-do - ZipTrigo". |
+| 1 | Go to `/` and click **To-do** in the top navigation (check-square icon). | Lands on `/todo/today/` (through `/todo/`). Tab title "Today - To-do - ZipTrigo". |
 | 2 | Look at the page. | A sidebar with, from the top: a "Search tasks" box (a `?` help button, **Regex** and **Include closed** checkboxes); Today (highlighted, no count), Upcoming, All, Closed, Labels, Trash, Settings, each with an icon; then a **Filters** heading with "No saved filters". Heading "Today". A quick-add box: an "Add a task (#project @label)" field, an **Add task** button, Date, Time, Priority, State (a select showing "To do") controls and an "Add labels" button, and the line "0 of 10 free tasks used this month." Below, "Today <weekday date>" with an empty state (check icon, "Nothing due today", "Add a task above."). No Overdue section. No raw `{{ }}`/`{% %}`, broken icons or console errors. |
 | 3 | Click each sidebar entry in turn. | Each page opens with its own heading and a sensible empty state ("No open tasks. Add one above.", "No closed tasks yet.", "The trash is empty.", "No labels yet. Add your first below."); Upcoming shows 14 day headings, the first "Tomorrow, <d Mon>", each with "Nothing due", and a "Later: see all tasks" link; the active entry is highlighted. |
 
@@ -358,7 +359,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Default due time" section with a time field showing `9:00 AM` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); "Reminders on your phone" with a "Snooze for" select (TODO-40); one **Save** button for the three; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
+| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Start page" section with an "Open To-do on" select showing "Today" (TODO-78); a "Default due time" section with a time field showing `9:00 AM` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); "Reminders on your phone" with a "Snooze for" select (TODO-40); one **Save** button for them all; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
 | 2 | Change it to `7:45am` (Tab) and **Save**. | "Saved." in green; reload shows `7:45 AM`. A nonsense value (`banana`) shows "Enter a time like 9:00 PM." under the box and saves nothing. |
 | 3 | Clear the field and Save. | The browser's required prompt (or "Default due time: Enter a time."). |
 | 4 | Click the "account page" link. | Goes to the account page where the time zone can be changed. |
@@ -1481,6 +1482,39 @@ user `G` with a token `TG`. The server runs tasks inline, so an export is `ready
 | 3 | `inv todo export-xlsx local --out tasks.xlsx`, then again, then again with `--force`. | `Wrote tasks.xlsx (<n> bytes).` and the workbook opens as in TODO-72 step 2; the second exits 1 `tasks.xlsx already exists. Use --force to replace it.` **before** any request (the website's budget is untouched); `--force` replaces it. No credits are charged and no `.tasks.xlsx.part` is left behind. |
 | 4 | `inv todo export-xlsx local --out ./exports --range last-15-days` (an existing folder), then `--from 2001-01-01 --to 2001-12-31 --out old.xlsx`, then `--out ./nope/t.xlsx`. | The first writes `./exports/tasks-<today>.xlsx`; the second a workbook with only the header rows; the last exits 1 `Not a folder: nope` before any request. |
 
+### TODO-78 The list To-do opens on
+
+**Purpose:** the user chooses whether To-do opens on Today, Upcoming or All; the other lists stay one click away.
+**Preconditions:** logged in as `qa.user@example.com`; Settings shows "Open To-do on: Today".
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open **Settings**. | A "Start page" section first, with the select "Open To-do on" (choices Today, Upcoming, All; "Today" selected) and the note "The list you see whenever you open To-do, from the menu, the home page or a bookmark. The others stay one click away in the sidebar." |
+| 2 | Choose **Upcoming** and **Save**. | "Saved." in green; a reload still shows "Upcoming". |
+| 3 | Click **To-do** in the top navigation, then go to `/` and click the To-do card. | Both land on `/todo/upcoming/` (heading "Upcoming", the Upcoming entry highlighted in the sidebar); the To-do header link is marked as the current product. |
+| 4 | Click **Today** in the sidebar. | `/todo/today/` opens with heading "Today", whatever the setting. |
+| 5 | Back in Settings choose **All**, Save, and open `/todo/?sort=priority` in the address bar. | Redirected to `/todo/all/?sort=priority`: the All list sorted by priority. |
+| 6 | (Console) `POST /todo/settings/` with `default_due_time=09:00&default_view=trash`. | `422` and "Open To-do on: Choose Today, Upcoming or All."; the setting stays "All". |
+| 7 | (Shell) `inv todo settings local --default-view today`, then `inv todo settings local`. | `Saved.` and a table whose first line is `Open To-do on  Today`; `--default-view closed` exits 2 (`use today, upcoming or all.`) before any request. |
+| 8 | Click **To-do** in the top navigation. | Lands on `/todo/today/` again. |
+
+### TODO-79 Renaming attachments: a task's file and a comment's files
+
+**Purpose:** a file's name can be changed after it is attached (a pasted image is named after the time); the extension is kept.
+**Preconditions:** an open task with an attached image pasted from the clipboard (TODO-62), named like `2026-11-21-10-45-30.webp`, and a comment with one file.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In **Attachments**, click **Rename** on the pasted image's row. | The name becomes a box holding `2026-11-21-10-45-30` (selected, focused) with `.webp` beside it, a check (Save) and a cross (Cancel); Download, Open, Rename and Remove are hidden meanwhile. |
+| 2 | Press Escape. | The row shows the old name again, unchanged. |
+| 3 | Rename again, clear the box, type `Whiteboard after the meeting` and press Enter. | The row reads `Whiteboard after the meeting.webp` and the focus is on its **Rename**; Download saves it under that name; **History** shows "File renamed from 2026-11-21-10-45-30.webp to Whiteboard after the meeting.webp". |
+| 4 | Rename, type `Plan.webp` and save; then rename, type `a/b` and save. | `Plan.webp` (not `Plan.webp.webp`); then `a_b.webp`. |
+| 5 | Rename, empty the box (spaces only) and save. | Nothing changes; under the list in red: `File name: Give the file a name.` A later successful rename clears it. |
+| 6 | Move the task to the Trash and open it. | The rows have no Rename (Download and Remove stay). Restore it. |
+| 7 | Edit the comment that has a file. | Each file of the comment shows its name in a box (without the extension, which is shown beside it) next to its Remove box. Change it to `Signed copy` and **Save**. The comment shows `Signed copy.<ext>`; the comment is not marked "(edited)" when its text did not change. |
+| 8 | Add a comment and paste an image into its box. | The finished file appears as a chip whose name is an editable box (`2026-...` without `.webp`); type `Sketch` and post the comment: its file is `Sketch.webp`, and **History** has one entry, "File attached to a comment: Sketch.webp" (no rename entry). Emptying a chip's box to spaces and posting refuses with `File name: Give 2026-....webp a name.` under that box. |
+| 9 | `inv todo get local <n>` to read an attachment id, then `inv todo rename-file local <id> Board photo`. | `Renamed to Board photo.webp.`; the task page lists the new name after a reload. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it
@@ -1504,3 +1538,24 @@ user `G` with a token `TG`. The server runs tasks inline, so an export is `ready
   needs a phone and HTTPS; TODO-40 posts the same answer with `curl`. That a due in-app reminder is pushed, with
   which buttons, and that a snoozed reminder is left alone by a time-zone change and replaced by a new due date, are
   unit-tested (`test_push_reminders.py`).
+
+### TODO-78 Label and project pills while typing a title
+
+**Preconditions:** for `qa.user@example.com` the labels `home` and `hobby` and an active project `Website relaunch`
+(no other label starting with `ho`), and an open top-level task to add subtasks to.
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | On All tasks, type `Call Bob @h` in the quick-add title (do not submit). | Under the title two pills appear at once (no wait): `home` and `hobby`, each with a tag icon in the label's colour and a green check, then a small × (**Hide suggestions**). Nothing is ticked yet: the Labels button still says **Add labels**. |
+| 2 | Type `om`. | Only the `home` pill is left. |
+| 3 | Press Escape. | The pills are hidden. |
+| 4 | Type `e`. | The `home` pill is back (the tag changed). |
+| 5 | Click the `home` pill. | The title is `Call Bob ` (the tag is gone, the caret after the space), the pills are gone, the Labels button says **1 selected** and `home` is ticked in its menu. |
+| 6 | Type `@ho`. | `hobby` comes first; `home` comes after it with a muted **added**. Delete `@ho`. |
+| 7 | Type `#rel, then call`. | A pill **Website relaunch** (a coloured dot) appears; `#rel` is not removed until it is clicked. |
+| 8 | Click it. | The title is `Call Bob, then call`, the Project select shows **Website relaunch**. |
+| 9 | Put the caret at the end of the title, type ` #12`, then delete those 4 characters and press **Add task**. | No pill shows for `#12` (a number is a task reference). The task is added. |
+| 10 | Open the new task. | It is `Call Bob, then call` in **Website relaunch** with the `home` label. |
+| 11 | Quick-add `Water the plants @hom` without clicking the pill. | The task is created as typed (`@hom` names no label exactly), with no label. |
+| 12 | Type `meet @Hóme` (accented, other case). | The `home` pill is offered. |
+| 13 | On the task's page, type `Sub @hom` in **New subtask** and click the `home` pill. | The box reads `Sub @home ` and no pill is left. **Add** creates the subtask `Sub` with the `home` label. |

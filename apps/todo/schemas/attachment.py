@@ -38,6 +38,21 @@ class CommentAttachmentSchema(Schema):
     )
 
 
+class AttachmentRenameSchema(Schema):
+    """Body for `PATCH /attachments/{id}`: the new name **without the extension**, which the file
+    keeps (`Whiteboard` renames `2026-11-21-10-45-30.webp` to `Whiteboard.webp`). A name that
+    already ends in the file's extension doesn't get it twice; any other ending is part of the
+    name. Control characters are dropped and `/` or `\\` become `_`."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    filename: str = Field(
+        max_length=255,
+        description='The new name, without the extension (which is kept). At most 255 characters '
+        '(a longer one is a 422); the name, never the extension, is cut so the whole fits in 255.',
+    )
+
+
 class UploadStartSchema(Schema):
     """Body for `POST /tasks/{number}/attachments`. `checksum_sha256` is the base64 of the file's
     SHA-256 digest; it is bound into the presigned URL's signature, so S3 refuses a body that

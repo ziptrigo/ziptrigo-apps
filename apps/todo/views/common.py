@@ -49,10 +49,12 @@ FIELD_LABELS = {
     'subtasks': 'Subtasks',
     'note': 'Note',
     'muted_overdue': 'On hold or blocked, and overdue',
+    'default_view': 'Open To-do on',
     'blocker': 'Blocker',
     'blocked_by': 'Blocked by',
     'project': 'Project',
     'section': 'Section',
+    'filename': 'File name',
 }
 
 
@@ -178,7 +180,12 @@ def validation_lines(exc: ValidationError, names: Mapping[str, str] | None = Non
     service reports a field under a name the form's input doesn't have (the input is `label_ids`,
     the service says `labels`), pass `names={'labels': 'label_ids'}` so the message lands under
     that input. An unmatched name is harmless: the message is still in the slot."""
-    return core_validation_lines(exc, FIELD_LABELS, names)
+    labels = FIELD_LABELS
+    if hasattr(exc, 'error_dict'):
+        # A comment form's name boxes (`file_name_<id>`): the message names the file.
+        boxes = {key: 'File name' for key in exc.error_dict if key.startswith('file_name_')}
+        labels = {**FIELD_LABELS, **boxes} if boxes else FIELD_LABELS
+    return core_validation_lines(exc, labels, names)
 
 
 def form_error_lines(form) -> ErrorLines:
@@ -230,13 +237,14 @@ def refuse(
 
 def redirect_back(request: HttpRequest, fallback: str = '') -> HttpResponse:
     """Redirect to `next` (a POSTed same-site path), else the referring page, else `fallback`
-    (default: Today) -- for the actions used without htmx."""
+    (default: `todo:home`, the list the account opens on) -- for the actions used without
+    htmx."""
     for candidate in (request.POST.get('next', ''), request.headers.get('Referer', '')):
         if candidate and url_has_allowed_host_and_scheme(
             candidate, allowed_hosts={request.get_host()}, require_https=request.is_secure()
         ):
             return redirect(candidate)
-    return redirect(fallback or reverse('todo:today'))
+    return redirect(fallback or reverse('todo:home'))
 
 
 def limited(request: AuthenticatedHttpRequest, rule: str, *, retarget: str = '#todo-msg'):

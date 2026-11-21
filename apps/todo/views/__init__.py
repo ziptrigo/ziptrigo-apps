@@ -6,6 +6,7 @@ from .attachments import (
     attachment_discard,
     attachment_download,
     attachment_list,
+    attachment_rename,
     attachment_start,
 )
 from .blockers import blocker_add, blocker_remove, blocker_suggest, open_blockers
@@ -42,6 +43,7 @@ from .lists import (
     all_page,
     closed_page,
     completed_page,
+    home_page,
     task_list,
     today_page,
     trash_page,
@@ -92,6 +94,7 @@ __all__ = [
     'attachment_delete',
     'attachment_download',
     'attachment_list',
+    'attachment_rename',
     'attachment_start',
     'all_page',
     'blocker_add',
@@ -166,6 +169,7 @@ __all__ = [
     'task_trash',
     'task_uncomplete',
     'task_wont_do',
+    'home_page',
     'today_page',
     'trash_page',
     'upcoming_page',

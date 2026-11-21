@@ -8,7 +8,8 @@
    `#task-msg`), so an editor or menu open elsewhere on the page stays open, and the form with its status line stays
    in place. Needs `labels` (the user's)
    and `selected_label_ids`; in details mode `task`. Both modes read dates out of text with the AI (static/todo/js/title_parse.js, the
-   `data-title-parse` containers): the title of the quick-add box, and the "Type a date" box of the details. {% endcomment %}
+   `data-title-parse` containers): the title of the quick-add box, and the "Type a date" box of the details. The quick-add
+   title also offers its `@label` and `#project` tags as pills (static/todo/js/title_tags.js, `data-title-tags`). {% endcomment %}
 {% if mode == 'quick' %}
 <form id="quick-add-form" method="post" action="{% url 'todo:create' %}"
       hx-post="{% url 'todo:create' %}" hx-target="#task-list" hx-swap="innerHTML"
@@ -18,12 +19,15 @@
     <input type="hidden" name="view" value="{{ view }}">
     <div id="quick-add-msg" class="mb-2 text-sm" aria-live="polite"></div>
     <div class="flex flex-col gap-2 sm:flex-row">
-        <div class="flex-1" data-title-parse data-parse-url="{% url 'todo:parse' %}">
+        <div class="flex-1" data-title-parse data-title-tags data-parse-url="{% url 'todo:parse' %}">
             <label for="quick-title" class="sr-only">Task title</label>
             <input id="quick-title" type="text" name="title" maxlength="500" required autocomplete="off"
                    placeholder="Add a task (#project @label)" data-parse-input
                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
             {% include 'todo/partials/parse_chip.html' with chip_id='quick-parse-chip' %}
+            {% comment %} The `@label` and `#project` pills static/todo/js/title_tags.js draws as the title is typed. {% endcomment %}
+            <div id="quick-tag-pills" data-tag-pills hidden class="mt-2 flex flex-wrap items-center gap-2" role="group" aria-label="Suggested labels and projects"></div>
+            <p data-tag-status class="sr-only" aria-live="polite"></p>
         </div>
         <button type="submit"
                 class="btn group inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">

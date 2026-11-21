@@ -1371,6 +1371,19 @@ its `POST` answers.
 | 6 | (Shell step) start one that stays "preparing" (RCPT-70 step 1), then `inv receipts export-download local <id> --out ./z2` and press Ctrl-C after a few seconds. | `Preparing your zip files...`, `Written so far: 0 of 1 zip files.`; Ctrl-C exits 130 with `Stopped waiting. The export is still being prepared. Fetch it later with: receipts export-download local <id> --out ./z2`. Then build it (RCPT-70 step 4) and run that command: the zip is downloaded and no credits are charged. Running it a third time says `already downloaded, skipped`. |
 | 7 | `inv receipts export-delete local <id>` answering `n` then `y`; then `export-delete` on the same id again, and on one that is still being prepared. | `n` exits 1 `Cancelled; nothing was deleted.`; `y` prints `Deleted.`; again: `404: Not Found` (exit 1); the preparing one: `409: This export is still being prepared.` |
 
+### RCPT-73 Renaming a receipt's file
+
+**Purpose:** a receipt's file name (what the list shows without a vendor, the download name, the name in an export) can be changed; the extension is kept.
+**Preconditions:** an uploaded receipt whose file is `IMG_4410.jpg` (any image renamed so), and an emailed one whose receipt is the email body.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the uploaded receipt. | Under "Source: uploaded" a line `File: IMG_4410.jpg` with **Rename**. |
+| 2 | Click **Rename**, type `Lunch with Sam`, press the check (Save). | The page reloads with the flash `Renamed to Lunch with Sam.jpg.` and `File: Lunch with Sam.jpg`; **Download** saves `Lunch with Sam.jpg`. |
+| 3 | Rename with only spaces. | Under the name in red: `Give the file a name.`; nothing changes. Escape or the cross (Cancel) closes the box and clears the message. |
+| 4 | Open the email-body receipt. | No `File:` line and no Rename. |
+| 5 | Move the uploaded receipt to the Trash and open it. | `File: Lunch with Sam.jpg` without Rename. |
+
 ## Out of scope
 
 - **Watching a receipt being read.** Processing runs inline during the upload's `complete`, so the

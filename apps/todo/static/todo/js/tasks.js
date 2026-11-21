@@ -443,6 +443,25 @@
         } catch (e) { /* not every field has a selection */ }
     });
 
+    // A renamed attachment's list is swapped in place of the form that was focused, and htmx then puts
+    // the focus back on the element with the focused one's id: the new, hidden name box. Remember which
+    // row was saved (before the swap, while the form is still on the page) and, once the list has
+    // settled, focus that row's Rename button instead.
+    let renamedAttachment = null;
+    document.addEventListener('htmx:beforeSwap', function (event) {
+        // `detail.elt` is the swap's target here; the element that sent the request is the config's.
+        const form = event.detail.requestConfig && event.detail.requestConfig.elt;
+        const id = form && form.getAttribute && form.getAttribute('data-rename-attachment');
+        renamedAttachment = id && event.detail.xhr && event.detail.xhr.status === 200 ? id : null;
+    });
+    document.addEventListener('htmx:afterSettle', function (event) {
+        if (!renamedAttachment || !event.detail.target || event.detail.target.id !== 'attachment-list') return;
+        const id = renamedAttachment;
+        renamedAttachment = null;
+        const button = document.querySelector('[data-rename-button="' + CSS.escape(id) + '"]');
+        if (button) button.focus();
+    });
+
     htmx.onLoad(function (root) {
         const scope = root.querySelectorAll ? root : document;
         nameChecklistBoxes(scope);

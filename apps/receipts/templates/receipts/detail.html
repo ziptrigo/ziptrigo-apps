@@ -3,6 +3,7 @@
 {% load local_time %}
 {% load static %}
 {% load receipts_ui %}
+{% load filenames %}
 
 {% block title %}{% firstof receipt.vendor receipt.original_filename 'Receipt' %} - ZipTrigo{% endblock %}
 {# Two columns (preview, form) need more room than the form pages' max-w-3xl. #}
@@ -64,11 +65,46 @@
                 Source: email{% if inbound_email and inbound_email.from_address %} from <span class="text-gray-700 dark:text-gray-300 break-all">{{ inbound_email.from_address }}</span>{% endif %}
                 {% if inbound_email and inbound_email.subject %}<br><span class="text-gray-700 dark:text-gray-300">&ldquo;{{ inbound_email.subject }}&rdquo;</span>{% endif %}
                 {% elif receipt.source == 'api' %}
-                Source: API upload{% if receipt.original_filename %} &middot; <span class="text-gray-700 dark:text-gray-300 break-all">{{ receipt.original_filename }}</span>{% endif %}
+                Source: API upload
                 {% else %}
-                Source: uploaded{% if receipt.original_filename %} &middot; <span class="text-gray-700 dark:text-gray-300 break-all">{{ receipt.original_filename }}</span>{% endif %}
+                Source: uploaded
                 {% endif %}
             </p>
+            {% if receipt.original_filename %}
+            {% comment %} The file's name, renamed in place: the box holds the name without the extension, which is kept
+               (`services.actions.rename_file`). A refusal goes to #receipt-file-msg. {% endcomment %}
+            <div x-data="{ renaming: false }" id="receipt-file-name">
+                <p x-show="!renaming" class="flex flex-wrap items-baseline gap-x-2">
+                    <span>File:</span>
+                    <span class="text-gray-700 dark:text-gray-300 break-all">{{ receipt.original_filename }}</span>
+                    {% if not receipt.deleted_at %}
+                    <button type="button" @click="renaming = true" aria-label="Rename {{ receipt.original_filename }}"
+                            class="text-sage-600 dark:text-sage-300 hover:underline">Rename</button>
+                    {% endif %}
+                </p>
+                {% if not receipt.deleted_at %}
+                <form x-show="renaming" style="display: none" method="post" action="{% url 'receipts:rename-file' receipt.pk %}"
+                      hx-post="{% url 'receipts:rename-file' receipt.pk %}" hx-disabled-elt="find button[type='submit']"
+                      @keydown.escape="renaming = false; $el.reset(); document.getElementById('receipt-file-msg').replaceChildren()"
+                      class="flex flex-wrap items-center gap-2">
+                    {% csrf_token %}
+                    <label for="receipt-file-name-input" class="sr-only">New name for {{ receipt.original_filename }}</label>
+                    <span class="flex min-w-[12rem] flex-1 items-center gap-1">
+                        <input id="receipt-file-name-input" name="filename" type="text" value="{{ receipt.original_filename|file_stem }}" maxlength="255" required
+                               autocomplete="off" x-effect="if (renaming) $nextTick(() => { $el.focus(); $el.select(); })"
+                               class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-900 dark:text-gray-100">
+                        {% if receipt.original_filename|file_extension %}<span class="whitespace-nowrap">{{ receipt.original_filename|file_extension }}</span>{% endif %}
+                    </span>
+                    <button type="submit" aria-label="Save the new name" title="Save"
+                            class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check" aria-hidden="true"></i></button>
+                    <button type="button" @click="renaming = false; $el.form.reset(); document.getElementById('receipt-file-msg').replaceChildren()"
+                            aria-label="Cancel renaming" title="Cancel"
+                            class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times" aria-hidden="true"></i></button>
+                </form>
+                {% endif %}
+                <div id="receipt-file-msg" class="mt-1 text-sm" aria-live="polite"></div>
+            </div>
+            {% endif %}
             <p id="receipt-added">
                 Added {% local_time receipt.created_at 'short' %}{% if receipt.receipt_date %} (receipt dated {{ receipt.receipt_date|fdate:'compact' }}){% endif %}
             </p>

@@ -28,7 +28,7 @@ class TestWiring:
 
         assert (product.name, product.url_name, product.icon) == (
             'To-do',
-            'todo:today',
+            'todo:home',
             'fas fa-check-square',
         )
         assert reverse(product.url_name) == '/todo/'
@@ -37,7 +37,7 @@ class TestWiring:
         client = Client()
         client.force_login(user)
 
-        assert reverse('todo:today') in client.get('/').content.decode()
+        assert reverse('todo:home') in client.get('/').content.decode()
 
     def test_the_purge_job_is_registered_daily(self):
         # `ready()` registers it at startup; the core scheduler tests clear the global registry, so

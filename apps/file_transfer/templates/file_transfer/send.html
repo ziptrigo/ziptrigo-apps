@@ -114,6 +114,7 @@ document.addEventListener('DOMContentLoaded', function () {
         hintEl: document.getElementById('send-hint'),
         csrftoken: csrftoken,
         existingFiles: existingFiles,
+        canRename: true,
         // Resumable uploads (spec section 2): remember this draft in the URL the moment its
         // first file lands, so a plain page reload's `send_page` GET picks it (and its files)
         // back up via `?resume=` instead of `get_or_create_draft` starting a fresh, empty one.

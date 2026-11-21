@@ -108,6 +108,19 @@ def _refuse(
     return refuse(request, lines, retarget=slot, fallback=_task_url(task))
 
 
+#: The prefix of a comment form's file name boxes: `file_name_<attachment id>`.
+FILE_NAME_PREFIX = 'file_name_'
+
+
+def _file_names(request: AuthenticatedHttpRequest) -> dict[str, str]:
+    """The comment form's file name boxes, `{attachment id: name without the extension}`."""
+    return {
+        key.removeprefix(FILE_NAME_PREFIX): value
+        for key, value in request.POST.items()
+        if key.startswith(FILE_NAME_PREFIX)
+    }
+
+
 @login_required
 @require_POST
 @announces_change
@@ -124,6 +137,7 @@ def comment_add(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
             request.user,
             form.cleaned_data['body'],
             attachment_ids=request.POST.getlist('attachment_ids'),
+            file_names=_file_names(request),
         )
     except ValidationError as exc:
         return _refuse(request, task, validation_lines(exc))
@@ -148,6 +162,7 @@ def comment_edit(request: AuthenticatedHttpRequest, number: int, comment_id: UUI
             form.cleaned_data['body'],
             attachment_ids=request.POST.getlist('attachment_ids'),
             remove_attachment_ids=request.POST.getlist('remove_attachment_ids'),
+            file_names=_file_names(request),
         )
     except ValidationError as exc:
         return _refuse(request, task, validation_lines(exc), slot=slot)
