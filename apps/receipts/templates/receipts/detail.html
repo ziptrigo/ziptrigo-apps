@@ -95,9 +95,11 @@
                                class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-900 dark:text-gray-100">
                         {% if receipt.original_filename|file_extension %}<span class="whitespace-nowrap">{{ receipt.original_filename|file_extension }}</span>{% endif %}
                     </span>
-                    <button type="submit" class="btn px-3 py-1 rounded-lg bg-brand-primary text-gray-900 hover:bg-sage-400 text-sm font-medium">Save</button>
+                    <button type="submit" aria-label="Save the new name" title="Save"
+                            class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check" aria-hidden="true"></i></button>
                     <button type="button" @click="renaming = false; $el.form.reset(); document.getElementById('receipt-file-msg').replaceChildren()"
-                            class="text-sm hover:underline">Cancel</button>
+                            aria-label="Cancel renaming" title="Cancel"
+                            class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times" aria-hidden="true"></i></button>
                 </form>
                 {% endif %}
                 <div id="receipt-file-msg" class="mt-1 text-sm" aria-live="polite"></div>

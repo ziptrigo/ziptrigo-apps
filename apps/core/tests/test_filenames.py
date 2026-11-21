@@ -55,6 +55,26 @@ def test_clean_stem_collapses_white_space():
     assert clean_stem('a\t\n b') == 'a b'
 
 
+@pytest.mark.parametrize(
+    ('typed', 'expected'),
+    [
+        (
+            '\U0001f468\u200d\U0001f469\u200d\U0001f467',
+            '\U0001f468\u200d\U0001f469\u200d\U0001f467',
+        ),
+        ('\u200d', ''),
+        ('a\u200d', 'a'),
+        ('\u200d\u200dx', 'x'),
+        (' \u200d ', ''),
+        ('a \u200db', 'a b'),
+        ('a\u200d\u200db', 'ab'),
+        ('a\u200bb', 'ab'),
+    ],
+)
+def test_a_zero_width_joiner_is_kept_only_between_characters(typed, expected):
+    assert clean_stem(typed) == expected
+
+
 def test_the_template_filters():
     template = Template('{% load filenames %}[{{ n|file_stem }}][{{ n|file_extension }}]')
 

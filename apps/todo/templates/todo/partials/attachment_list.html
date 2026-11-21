@@ -1,7 +1,7 @@
 {% load filenames %}
 {% comment %} The files attached to `task`: name, size, and Download / Open / Rename / Remove. Rename edits the name in place
    (the extension is shown beside the box and kept); it posts to `todo:attachment-rename`, which answers this list again, a
-   refusal going to #attachment-msg. {% endcomment %}
+   refusal going to #attachment-msg. After a save `tasks.js` puts the focus back on the row's Rename button. {% endcomment %}
 {% if attachments %}
 <ul class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800 shadow-sm sm:rounded-xl border border-gray-200 dark:border-gray-700">
     {% for attachment in attachments %}
@@ -11,7 +11,7 @@
         {% if attachments_can_rename %}
         <form x-show="renaming" style="display: none" method="post" action="{% url 'todo:attachment-rename' attachment.pk %}"
               hx-post="{% url 'todo:attachment-rename' attachment.pk %}" hx-target="#attachment-list" hx-swap="innerHTML"
-              hx-disabled-elt="find button[type='submit']"
+              hx-disabled-elt="find button[type='submit']" data-rename-attachment="{{ attachment.pk }}"
               @keydown.escape="renaming = false; todoCancelEdit($el, '#attachment-msg')"
               class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             {% csrf_token %}
@@ -37,7 +37,7 @@
                class="text-sage-600 dark:text-sage-300 hover:underline">Open</a>
             {% endif %}
             {% if attachments_can_rename %}
-            <button type="button" @click="renaming = true" aria-label="Rename {{ attachment.filename }}"
+            <button type="button" @click="renaming = true" aria-label="Rename {{ attachment.filename }}" data-rename-button="{{ attachment.pk }}"
                     class="text-sage-600 dark:text-sage-300 hover:underline">Rename</button>
             {% endif %}
             <button type="button" @click="show($el)"

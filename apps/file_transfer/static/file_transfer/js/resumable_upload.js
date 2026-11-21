@@ -290,7 +290,17 @@ function initFileTransferUpload(options) {
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
                 body: JSON.stringify({ name: box.value }),
             }).catch(function () { return null; });
-            const data = response ? await response.json().catch(function () { return {}; }) : {};
+            // A session that ended is answered by the login page (a redirect followed to an HTML 200),
+            // which must not read as a success.
+            const signedOut = !!response && (response.redirected || (response.ok
+                && (response.headers.get('Content-Type') || '').indexOf('application/json') === -1));
+            const data = response && !signedOut ? await response.json().catch(function () { return {}; }) : {};
+            if (signedOut) {
+                save.disabled = false;
+                error.textContent = 'Your session has ended. Sign in again to rename the file.';
+                error.hidden = false;
+                return;
+            }
             if (response && response.ok) {
                 entry.name = data.name || entry.name;
                 close();

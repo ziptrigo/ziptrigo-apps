@@ -238,7 +238,9 @@ def reprocess_receipt(request: AuthenticatedHttpRequest, receipt_id: str) -> Htt
 @require_POST
 def rename_receipt_file(request: AuthenticatedHttpRequest, receipt_id: str) -> HttpResponse:
     """Rename the receipt's file (`filename`: the new name without the extension, which is kept).
-    Success redirects back with a flash message; a refusal goes to the slot under the name."""
+    Success redirects back with a flash message; a refusal goes to the slot under the name.
+
+    No rate limit, on purpose, like the form's save: one owner-only `UPDATE` of one row."""
     receipt = owned_receipt(request, receipt_id)
     try:
         receipt = rename_file(receipt, request.POST.get('filename', ''))

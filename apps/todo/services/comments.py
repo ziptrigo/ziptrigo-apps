@@ -67,8 +67,8 @@ def add_comment(
     """Add a comment by `user` to their own task. A completed task can be commented on; a task in
     the Trash cannot. Its `#1234` mentions are recorded (`sync_references`), and the uploaded
     drafts in `attachment_ids` become its files (all or nothing: one that isn't ready refuses the
-    comment). `file_names` (`{attachment id: name without the extension}`) renames them as they are
-    attached (`attachments.rename_comment_files`)."""
+    comment). `file_names` (`{attachment id: name without the extension}`) renames them first, so
+    each is logged once, attached under its new name (`attachments.rename_comment_files`)."""
     if task.user_id != user.pk:
         raise _error(NON_FIELD_ERRORS, 'Unknown task.')
     cleaned = clean_comment_body(body)
@@ -83,8 +83,9 @@ def add_comment(
             task=task, user=user, body=cleaned, body_text=_body_text(cleaned)
         )
         sync_references(task, comment)
-        link_to_comment(comment, attachment_ids)
-        rename_comment_files(comment, dict(file_names or {}))
+        attaching = list(attachment_ids)
+        rename_comment_files(comment, file_names or {}, attaching)
+        link_to_comment(comment, attaching)
     return comment
 
 
@@ -112,9 +113,10 @@ def edit_comment(
             raise _error(NON_FIELD_ERRORS, 'This comment no longer exists.')
         if fresh.is_deleted:
             raise _error(NON_FIELD_ERRORS, DELETED_MESSAGE)
-        link_to_comment(fresh, attachment_ids)
+        attaching = list(attachment_ids)
         renames = {key: value for key, value in (file_names or {}).items() if key not in removed}
-        rename_comment_files(fresh, renames)
+        rename_comment_files(fresh, renames, attaching)
+        link_to_comment(fresh, attaching)
         if cleaned != fresh.body:
             if fresh.revision_count >= MAX_REVISIONS:
                 raise _error(NON_FIELD_ERRORS, TOO_MANY_EDITS_MESSAGE)

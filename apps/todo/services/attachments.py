@@ -49,7 +49,7 @@ import binascii
 import hashlib
 import logging
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
@@ -57,7 +57,7 @@ from uuid import UUID
 from botocore.exceptions import BotoCoreError, ClientError
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, OuterRef, QuerySet, Subquery
+from django.db.models import Count, OuterRef, Q, QuerySet, Subquery
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -431,8 +431,10 @@ def rename_attachment(attachment: Attachment, name: str) -> Attachment:
     Returns the row as it is now."""
     check_rename(attachment, name)
     with transaction.atomic():
+        # `of=('self',)`: the task is read, not locked (the To-do lock order is account, task,
+        # then what hangs off it; "delete forever" holds the task while it deletes attachments).
         current = (
-            Attachment.objects.select_for_update()
+            Attachment.objects.select_for_update(of=('self',))
             .select_related('task')
             .filter(pk=attachment.pk)
             .first()
@@ -454,11 +456,21 @@ def rename_attachment(attachment: Attachment, name: str) -> Attachment:
     return current
 
 
-def rename_comment_files(comment: Comment, names: dict[str, str]) -> None:
-    """Rename files of `comment` (`{attachment id: new name without the extension}`); ids that are
-    not its files, and anything that is not an id, are ignored. The caller holds the comment's lock
-    inside a transaction, after linking the drafts it adds, so a just-attached file can be renamed in
-    the same save. Raises `ValidationError` keyed `filename` for an empty name."""
+#: The prefix of a comment form's file name boxes, `file_name_<attachment id>`: what a refused name
+#: is keyed by, so the message shows under that box.
+FILE_NAME_FIELD = 'file_name_'
+
+
+def rename_comment_files(
+    comment: Comment, names: Mapping[str, str], attaching: Iterable[object] = ()
+) -> None:
+    """Rename files of `comment` (`{attachment id: new name without the extension}`): the ones it
+    has, and the drafts in `attaching` that the same save is about to link to it. Called *before*
+    `link_to_comment`, so a draft renamed while the comment was written is logged once, as attached
+    under its new name (a draft's rename isn't logged). Ids that are neither, and anything that is
+    not an id, are ignored; a name that is already the file's changes nothing and takes no lock.
+    The caller holds the comment's lock inside a transaction. An empty name raises
+    `ValidationError` keyed `file_name_<id>` (the box's name) naming the file."""
     wanted: dict[str, str] = {}
     for key, value in names.items():
         try:
@@ -467,9 +479,30 @@ def rename_comment_files(comment: Comment, names: dict[str, str]) -> None:
             continue
     if not wanted:
         return
-    rows = Attachment.objects.filter(pk__in=list(wanted), comment=comment).select_related('task')
+    drafts: set[str] = set()
+    for item in attaching:
+        try:
+            drafts.add(str(UUID(str(item))))
+        except ValueError:
+            continue
+    rows = Attachment.objects.filter(
+        Q(comment=comment) | Q(pk__in=[pk for pk in wanted if pk in drafts], comment__isnull=True),
+        pk__in=list(wanted),
+        task_id=comment.task_id,
+        user_id=comment.user_id,
+        for_comment=True,
+    ).select_related('task')
     for row in rows:
-        rename_attachment(row, wanted[str(row.pk)])
+        try:
+            if check_rename(row, wanted[str(row.pk)]) == row.filename:
+                continue
+            rename_attachment(row, wanted[str(row.pk)])
+        except ValidationError as exc:
+            if not hasattr(exc, 'error_dict'):
+                raise
+            raise ValidationError(
+                {f'{FILE_NAME_FIELD}{row.pk}': f'Give {row.filename} a name.'}
+            ) from None
 
 
 def delete_for_tasks(task_ids: Iterable[UUID]) -> int:

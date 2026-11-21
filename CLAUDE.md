@@ -1263,7 +1263,8 @@ To-do's task attachments and comment files, the file transfer send pages (before
 receipt's file. **The name is edited without its extension, which is kept**
 (`apps.core.services.filenames`): `split_extension` (a final `.` and 1 to 10 ASCII letters or
 digits after at least one other character, so `.env`, `README` and `Report v1.2 final` have none),
-`clean_stem` (control and format characters dropped, `/` and `\` to `_`, white space collapsed)
+`clean_stem` (control and format characters dropped, except a zero-width joiner between two
+characters, which holds emoji sequences together; `/` and `\` to `_`; white space collapsed)
 and `renamed(current, typed, max_length=255)` (`Whiteboard` for `2026-11-21-10-45-30.webp` is
 `Whiteboard.webp`; a typed name already ending in the same extension isn't given it twice; any
 other ending is part of the name; the name, never the extension, is cut to fit; `''` when nothing is
@@ -1272,18 +1273,27 @@ filters `{{ name|file_stem }}` / `{{ name|file_extension }}` (`{% load filenames
 box and the extension shown beside it. Only rows change: every product keys its objects by id.
 
 - *To-do.* `services.attachments.check_rename` (no lock, no write: an empty name, an upload in
-  flight, a task in the Trash) and `rename_attachment` (row lock; the same name is a no-op; a change
+  flight, a task in the Trash) and `rename_attachment` (locks the attachment row only,
+  `select_for_update(of=('self',))`, so the task is read, not locked, keeping To-do's lock order;
+  the same name is a no-op; a change
   is logged, `EventKind.ATTACHMENT_RENAMED`, `{from, to, comment}`, migration `0020`, except for a
   comment draft, logged when its comment is saved). A task file's row has **Rename** (an inline
   Alpine form, `POST /todo/attachments/<id>/rename/`, `todo:attachment-rename`, `TODO_EDIT_USER`
   after the check, answers the list with `#attachment-msg` cleared out of band; a refusal is a 422
-  into `#attachment-msg`; not on a trashed task; a comment's file is a 404 there). A comment's files
-  are renamed from its forms: each saved file of the edit form, and each freshly attached chip
-  (`comment_files.js`), has a box `file_name_<id>`, which `add_comment` / `edit_comment(...,
-  file_names=)` apply after linking (`rename_comment_files`; a file the same edit removes isn't
-  renamed first; a files-only change is still not an edit of the text). The API's `PATCH
-  /api/todo/attachments/{id}` (`AttachmentRenameSchema`, `extra='forbid'`) renames either kind, 400
-  for an empty name before the budget is spent, 404 for another user's file or one still uploading;
+  into `#attachment-msg`; not on a trashed task; a comment's file is a 404 there; `tasks.js` puts the
+  focus back on the row's Rename after the swap, on `htmx:afterSettle`, since htmx would otherwise
+  focus the hidden box with the same id). A comment's files are renamed from its forms: each saved
+  file of the edit form, and each freshly attached chip (`comment_files.js`), has a box
+  `file_name_<id>`, which `add_comment` / `edit_comment(..., file_names=)` apply **before**
+  linking (`rename_comment_files(comment, names, attaching)`: the comment's files and the drafts
+  this save attaches, so a draft is logged once, attached under its new name; a name equal to the
+  file's takes no lock; a file the same edit removes isn't renamed first; a files-only change is
+  still not an edit of the text). An empty name is keyed `file_name_<id>` and names the file
+  (`File name: Give photo.png a name.`, `views.common.validation_lines` labels those keys), so
+  `field_errors.js` puts it under that box. The API's `PATCH
+  /api/todo/attachments/{id}` (`AttachmentRenameSchema`, `extra='forbid'`, `filename` at most 255
+  characters, a 422 over it, where the web cuts) renames either kind, 400 for an empty name before
+  the budget is spent, 404 for another user's file or one still uploading;
   CLI `inv todo rename-file`.
 - *File transfer.* `services.uploads.rename_file(file, name)`: an **uploaded** file of a **draft**
   only (a paused upload keeps its name: resuming matches the re-picked file by name and size), then
@@ -1292,16 +1302,21 @@ box and the extension shown beside it. Only rows change: every product keys its 
   `{name}` -> `{ok, name}`, an empty name a 422 before the rate limit. `resumable_upload.js` shows a
   pencil on a finished row when the page passes `canRename: true` (the two send pages; **not** a
   file request's upload page); the box has no `name` and Enter is caught, since the row sits inside
-  the send form. Not after sending, and not in the JWT API.
+  the send form; an answer that is the login page (a followed redirect, or a 200 that isn't JSON)
+  says "Your session has ended. Sign in again to rename the file." Not after sending, and not in
+  the JWT API.
 - *Receipts.* `services.actions.rename_file(receipt, name)` (refused in the Trash and for a receipt
   with no file name, an email body; conditional on `deleted_at IS NULL`, `updated_at` set by hand).
-  The receipt page shows `File: <name>` with **Rename** (`POST /receipts/<id>/rename/`,
+  The receipt page shows `File: <name>` with **Rename** (icon Save and Cancel buttons, so no second
+  "Save" text button on the page; `POST /receipts/<id>/rename/`,
   `receipts:rename-file`, no rate limit like the form's save; success a flash and `HX-Redirect`, a
   refusal a 422 into `#receipt-file-msg`). The new name is the download name and the one exports
   use. Not in the JWT API.
 - *Tests:* `apps/core/tests/test_filenames.py`, `apps/todo/tests/test_attachment_rename.py`,
   `apps/file_transfer/tests/test_rename_files.py`, `apps/receipts/tests/test_rename_file.py`,
-  `admin/tests/test_todo.py`; AI cases TODO-78, FT-72, RCPT-73.
+  `admin/tests/test_todo.py`, the Playwright `tests_e2e/test_file_rename.py` (all four surfaces,
+  Escape, Enter, the focus after saving, the send form not submitted); AI cases TODO-78, FT-72,
+  RCPT-73.
 
 ### Notifications
 
@@ -2127,7 +2142,7 @@ a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tas
 .../history`), reminders (`POST /tasks/{number}/reminders`, `PATCH|DELETE .../reminders/{id}`,
 `GET /reminders/history`, optionally `?task=<number>` for one task's deliveries), attachments (`POST /tasks/{number}/attachments`, `POST
 .../attachments/{id}/complete`, `POST /attachments/{id}/cancel`, `POST /attachments/{id}/discard`, `GET /attachments/{id}/url`,
-`PATCH /attachments/{id}` (rename, `{filename}` without the extension; OpenAPI 2.18.0), `DELETE /attachments/{id}`), saved
+`PATCH /attachments/{id}` (rename, `{filename}` without the extension; OpenAPI 2.18.1), `DELETE /attachments/{id}`), saved
 filters (`GET|POST /filters`, `GET /filters/counts`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
 /filters/{id}/tasks`), `GET|PATCH /settings`, `GET /inbox`, `POST /inbox/regenerate` and `POST
 /parse`. Status codes (`api/common.py`): **400** a service `ValidationError` (`field: message`, a

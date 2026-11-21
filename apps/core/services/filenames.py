@@ -12,7 +12,8 @@ any other ending is part of the name (`photo.png` for a `.webp` is `photo.png.we
 still a WebP).
 
 The new name is cleaned the way every product cleans a file name: control and format characters
-(zero-width, bidi overrides) dropped, `/` and `\\` turned into `_` (a name is never a path), white
+(zero-width spaces, bidi overrides) dropped, except a zero-width joiner between two characters (it
+holds emoji sequences such as 👨‍👩‍👧 together), `/` and `\\` turned into `_` (a name is never a path), white
 space collapsed, and cut so that the name and its extension fit in `max_length`. Each product still
 applies its own rules on top (a reserved name, its own length).
 """
@@ -36,10 +37,17 @@ def split_extension(name: str) -> tuple[str, str]:
     return name[: match.start()], match.group()
 
 
+#: The zero-width joiner: a format character, but the glue of emoji sequences (a family, a
+#: profession with a skin tone), so it is kept between two other characters.
+ZWJ = '\u200d'
+
+
 def clean_stem(value: str) -> str:
     """The typed name, cleaned (see the module docstring); `''` when nothing is left."""
-    kept = ''.join(ch for ch in value if unicodedata.category(ch) not in ('Cc', 'Cf'))
+    kept = ''.join(ch for ch in value if ch == ZWJ or unicodedata.category(ch) not in ('Cc', 'Cf'))
     kept = kept.replace('/', '_').replace('\\', '_')
+    # A joiner that joins nothing (at an end, next to a space or another joiner) is dropped.
+    kept = re.sub(f'(?<![^\\s{ZWJ}]){ZWJ}|{ZWJ}(?![^\\s{ZWJ}])', '', kept)
     return _WHITESPACE.sub(' ', kept).strip()
 
 

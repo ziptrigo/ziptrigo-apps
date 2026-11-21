@@ -179,7 +179,12 @@ def validation_lines(exc: ValidationError, names: Mapping[str, str] | None = Non
     service reports a field under a name the form's input doesn't have (the input is `label_ids`,
     the service says `labels`), pass `names={'labels': 'label_ids'}` so the message lands under
     that input. An unmatched name is harmless: the message is still in the slot."""
-    return core_validation_lines(exc, FIELD_LABELS, names)
+    labels = FIELD_LABELS
+    if hasattr(exc, 'error_dict'):
+        # A comment form's name boxes (`file_name_<id>`): the message names the file.
+        boxes = {key: 'File name' for key in exc.error_dict if key.startswith('file_name_')}
+        labels = {**FIELD_LABELS, **boxes} if boxes else FIELD_LABELS
+    return core_validation_lines(exc, labels, names)
 
 
 def form_error_lines(form) -> ErrorLines:

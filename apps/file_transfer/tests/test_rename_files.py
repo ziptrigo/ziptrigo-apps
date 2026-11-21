@@ -73,6 +73,14 @@ class TestLoggedInView:
 
         assert _post_json(client, _rename_url(uploaded_file), {'name': 'x'}).status_code == 404
 
+    def test_the_upload_script_tells_a_signed_out_answer_apart(self):
+        from pathlib import Path
+
+        script = (
+            Path(__file__).parents[1] / 'static/file_transfer/js/resumable_upload.js'
+        ).read_text()
+        assert 'Your session has ended. Sign in again to rename the file.' in script
+
     def test_the_send_page_turns_renaming_on(self, client, funded_user):
         client.force_login(funded_user)
 
@@ -103,6 +111,17 @@ class TestAnonymousView:
         response = _post_json(client, self._url(file), {'name': 'Receipt'})
 
         assert response.json() == {'ok': True, 'name': 'Receipt.png'}
+
+    def test_an_empty_name_spends_nothing_then_the_ip_budget_is_charged(
+        self, client, anon_enabled, fake_storage, settings
+    ):
+        file = self._uploaded(client, fake_storage)
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'FT_ANON_UPLOAD_IP': (1, 3600)}
+
+        assert _post_json(client, self._url(file), {'name': ''}).status_code == 422
+        assert _post_json(client, self._url(file), {'name': 'a'}).status_code == 200
+        assert _post_json(client, self._url(file), {'name': 'b'}).status_code == 429
 
     def test_another_session_is_a_404(self, client, anon_enabled, fake_storage):
         file = self._uploaded(client, fake_storage)

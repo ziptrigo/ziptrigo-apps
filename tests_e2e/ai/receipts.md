@@ -1379,8 +1379,8 @@ its `POST` answers.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open the uploaded receipt. | Under "Source: uploaded" a line `File: IMG_4410.jpg` with **Rename**. |
-| 2 | Click **Rename**, type `Lunch with Sam`, **Save**. | The page reloads with the flash `Renamed to Lunch with Sam.jpg.` and `File: Lunch with Sam.jpg`; **Download** saves `Lunch with Sam.jpg`. |
-| 3 | Rename with only spaces. | Under the name in red: `Give the file a name.`; nothing changes. Escape or **Cancel** closes the box and clears the message. |
+| 2 | Click **Rename**, type `Lunch with Sam`, press the check (Save). | The page reloads with the flash `Renamed to Lunch with Sam.jpg.` and `File: Lunch with Sam.jpg`; **Download** saves `Lunch with Sam.jpg`. |
+| 3 | Rename with only spaces. | Under the name in red: `Give the file a name.`; nothing changes. Escape or the cross (Cancel) closes the box and clears the message. |
 | 4 | Open the email-body receipt. | No `File:` line and no Rename. |
 | 5 | Move the uploaded receipt to the Trash and open it. | `File: Lunch with Sam.jpg` without Rename. |
 

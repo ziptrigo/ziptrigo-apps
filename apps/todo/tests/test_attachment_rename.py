@@ -155,6 +155,27 @@ class TestView:
 
         assert web.post(self.url(file), {'filename': 'x'}).status_code == 404
 
+    def test_the_rename_button_and_form_are_tied_for_the_focus_hook(self, web, task, pasted):
+        html = web.get(reverse('todo:task', args=[task.number])).content.decode()
+
+        assert f'data-rename-attachment="{pasted.pk}"' in html
+        assert f'data-rename-button="{pasted.pk}"' in html
+
+    def test_the_lock_takes_only_the_attachment_row(self, pasted, monkeypatch):
+        from django.db.models import QuerySet
+
+        seen = []
+        original = QuerySet.select_for_update
+
+        def spy(self, *args, **kwargs):
+            seen.append(kwargs.get('of'))
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(QuerySet, 'select_for_update', spy)
+        rename_attachment(pasted, 'Whiteboard')
+
+        assert seen == [('self',)]
+
     def test_a_trashed_task_shows_no_rename(self, web, task, pasted):
         trash_task(task)
 
@@ -163,14 +184,48 @@ class TestView:
 
 
 class TestCommentFiles:
-    def test_add_renames_a_draft_as_it_is_attached(self, task, funded_user, fake_storage):
+    def test_add_renames_a_draft_and_logs_it_once_under_its_new_name(
+        self, task, funded_user, fake_storage
+    ):
         draft = make_attachment(task, fake_storage, for_comment=True, filename='clip.png')
 
         add_comment(task, funded_user, 'Look', [draft.pk], file_names={str(draft.pk): 'Sketch'})
 
         draft.refresh_from_db()
         assert draft.filename == 'Sketch.png'
-        assert renames(task)[0].data['comment'] is True
+        assert renames(task) == []
+        [added] = TaskEvent.objects.filter(task=task, kind=EventKind.ATTACHMENT_ADDED)
+        assert added.data == {'filename': 'Sketch.png', 'comment': True}
+
+    def test_a_draft_not_being_attached_is_not_renamed(self, task, funded_user, fake_storage):
+        other = make_attachment(task, fake_storage, for_comment=True, filename='other.png')
+
+        add_comment(task, funded_user, 'Look', [], file_names={str(other.pk): 'Sneaky'})
+
+        other.refresh_from_db()
+        assert other.filename == 'other.png'
+
+    def test_an_unchanged_name_takes_no_lock(self, task, fake_storage, monkeypatch):
+        comment = make_comment(task, 'Hi')
+        file = make_attachment(task, fake_storage, for_comment=True, comment=comment)
+        calls = []
+        monkeypatch.setattr(
+            'apps.todo.services.attachments.rename_attachment',
+            lambda *args, **kwargs: calls.append(args),
+        )
+
+        edit_comment(comment, 'Hi', file_names={str(file.pk): 'photo'})
+
+        assert calls == []
+
+    def test_an_empty_name_names_the_file_under_its_box(self, task, fake_storage):
+        comment = make_comment(task, 'Hi')
+        file = make_attachment(task, fake_storage, for_comment=True, comment=comment)
+
+        with pytest.raises(ValidationError) as caught:
+            edit_comment(comment, 'Hi', file_names={str(file.pk): ' '})
+
+        assert caught.value.message_dict == {f'file_name_{file.pk}': ['Give photo.png a name.']}
 
     def test_edit_renames_but_not_a_file_being_removed(self, task, fake_storage):
         comment = make_comment(task, 'Hi')
@@ -213,6 +268,34 @@ class TestCommentFiles:
         assert response.status_code == 200
         file.refresh_from_db()
         assert file.filename == 'Plan.png'
+
+    def test_the_add_form_renames_a_draft(self, web, task, fake_storage):
+        draft = make_attachment(task, fake_storage, for_comment=True, filename='clip.png')
+
+        response = web.post(
+            reverse('todo:comment-add', args=[task.number]),
+            {'body': 'Look', 'attachment_ids': [str(draft.pk)], f'file_name_{draft.pk}': 'Sketch'},
+            **HTMX,
+        )
+
+        assert response.status_code == 200
+        draft.refresh_from_db()
+        assert draft.filename == 'Sketch.png'
+
+    def test_a_refused_name_is_labelled_and_lands_under_its_box(self, web, task, fake_storage):
+        comment = make_comment(task, 'Hi')
+        file = make_attachment(task, fake_storage, for_comment=True, comment=comment)
+
+        response = web.post(
+            reverse('todo:comment-edit', args=[task.number, comment.pk]),
+            {'body': 'Hi', f'file_name_{file.pk}': '  '},
+            **HTMX,
+        )
+
+        assert response.status_code == 422
+        html = response.content.decode()
+        assert 'File name: Give photo.png a name.' in html
+        assert f'data-field-error="file_name_{file.pk}"' in html
 
     def test_the_edit_form_shows_a_name_box(self, web, task, fake_storage):
         comment = make_comment(task, 'Hi')

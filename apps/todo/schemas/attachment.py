@@ -47,7 +47,9 @@ class AttachmentRenameSchema(Schema):
     model_config = ConfigDict(extra='forbid')
 
     filename: str = Field(
-        max_length=255, description='The new name, without the extension (which is kept).'
+        max_length=255,
+        description='The new name, without the extension (which is kept). At most 255 characters '
+        '(a longer one is a 422); the name, never the extension, is cut so the whole fits in 255.',
     )
 
 
