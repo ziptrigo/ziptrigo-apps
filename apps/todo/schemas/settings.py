@@ -17,7 +17,9 @@ class SettingsSchema(Schema):
     of a pushed reminder waits. `muted_overdue` is where an overdue task that is On hold or Blocked
     shows on Today: `dimmed` (at the bottom of the Overdue group, dimmed; the default), `hidden`
     (not on Today at all) or `section` (in a collapsed "On hold & blocked" section at the bottom of
-    Today). A muted task due today stays in Today's list whatever this says. `sender_allowlist` is who may add tasks by email (exact addresses
+    Today). A muted task due today stays in Today's list whatever this says. `default_view` is the
+    list the website opens when the user goes to To-do: `today` (the default), `upcoming` or `all`;
+    an app can open on the same one. `sender_allowlist` is who may add tasks by email (exact addresses
     and `*@domain`; an empty list accepts anyone).
 
     Read-only: `tasks_created_this_month` (in the account's time zone) against
@@ -36,6 +38,7 @@ class SettingsSchema(Schema):
     default_reminder_channel: str
     snooze_minutes: int
     muted_overdue: Literal['dimmed', 'hidden', 'section']
+    default_view: Literal['today', 'upcoming', 'all']
     sender_allowlist: list[str]
     tasks_created_this_month: int
     free_tasks_per_month: int
@@ -60,8 +63,9 @@ class SettingsUpdateSchema(Schema):
     """Body for `PATCH /settings`; only the fields present are applied, and they are saved together
     or not at all. An explicit `null` clears: `default_reminder_minutes` to no default reminder,
     `sender_allowlist` to accept anyone. `default_due_time`, `default_reminder_channel`,
-    `snooze_minutes` and `muted_overdue` (`dimmed`, `hidden` or `section`; any other value is a 400)
-    cannot be empty, so `null` there is a 400. A key that is not one of these is a 422."""
+    `snooze_minutes`, `muted_overdue` (`dimmed`, `hidden` or `section`) and `default_view`
+    (`today`, `upcoming` or `all`) cannot be empty, so `null` there is a 400, as is any other
+    value. A key that is not one of these is a 422."""
 
     model_config = ConfigDict(extra='forbid')
 
@@ -70,6 +74,7 @@ class SettingsUpdateSchema(Schema):
     default_reminder_channel: str | None = None
     snooze_minutes: int | None = None
     muted_overdue: str | None = None
+    default_view: str | None = None
     sender_allowlist: list[str] | None = None
 
 

@@ -14,7 +14,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.core.services.mail.addresses import parse_allowlist
 
-from ..models import InboxCode, MutedOverdue, TodoAccount
+from ..models import DefaultView, InboxCode, MutedOverdue, TodoAccount
 
 
 def get_account(user: User) -> TodoAccount:
@@ -190,4 +190,19 @@ def set_muted_overdue(account: TodoAccount, value: str) -> TodoAccount:
     value = clean_muted_overdue(value)
     account.muted_overdue = value
     account.save(update_fields=['muted_overdue'])
+    return account
+
+
+def clean_default_view(value: object) -> str:
+    """The `DefaultView` value, or a `ValidationError` keyed `default_view` (no database)."""
+    if value not in DefaultView.values:
+        raise ValidationError({'default_view': 'Choose Today, Upcoming or All.'})
+    return str(value)
+
+
+def set_default_view(account: TodoAccount, value: str) -> TodoAccount:
+    """Choose the list that opens when the user goes to To-do (`DefaultView`)."""
+    value = clean_default_view(value)
+    account.default_view = value
+    account.save(update_fields=['default_view'])
     return account

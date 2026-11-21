@@ -172,7 +172,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 |---|---|---|
 | 1 | Go to `http://localhost:8765/todo/`. | Redirected to `/account/login/?next=/todo/`. |
 | 2 | Go to `/todo/upcoming/`, `/todo/all/`, `/todo/completed/`, `/todo/trash/`, `/todo/labels/`, `/todo/settings/`, `/todo/search/?q=rent`, `/todo/filters/`, `/todo/reminders/history/` and `/todo/1000/`. | Each redirects to the login page with its path in `next`. Nothing about any task is revealed. |
-| 3 | Sign in as `qa.user@example.com` / `QaE2e-Passw0rd!` from the `/todo/` redirect. | Lands on `/todo/`. |
+| 3 | Sign in as `qa.user@example.com` / `QaE2e-Passw0rd!` from the `/todo/` redirect. | Lands on `/todo/today/` (`/todo/` sends you to the list chosen in Settings, Today by default; TODO-78). |
 
 ### TODO-02 Empty Today and navigation
 
@@ -181,7 +181,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/` and click **To-do** in the top navigation (check-square icon). | Lands on `/todo/`. Tab title "Today - To-do - ZipTrigo". |
+| 1 | Go to `/` and click **To-do** in the top navigation (check-square icon). | Lands on `/todo/today/` (through `/todo/`). Tab title "Today - To-do - ZipTrigo". |
 | 2 | Look at the page. | A sidebar with, from the top: a "Search tasks" box (a `?` help button, **Regex** and **Include closed** checkboxes); Today (highlighted, no count), Upcoming, All, Closed, Labels, Trash, Settings, each with an icon; then a **Filters** heading with "No saved filters". Heading "Today". A quick-add box: an "Add a task (#project @label)" field, an **Add task** button, Date, Time, Priority, State (a select showing "To do") controls and an "Add labels" button, and the line "0 of 10 free tasks used this month." Below, "Today <weekday date>" with an empty state (check icon, "Nothing due today", "Add a task above."). No Overdue section. No raw `{{ }}`/`{% %}`, broken icons or console errors. |
 | 3 | Click each sidebar entry in turn. | Each page opens with its own heading and a sensible empty state ("No open tasks. Add one above.", "No closed tasks yet.", "The trash is empty.", "No labels yet. Add your first below."); Upcoming shows 14 day headings, the first "Tomorrow, <d Mon>", each with "Nothing due", and a "Later: see all tasks" link; the active entry is highlighted. |
 
@@ -357,7 +357,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Default due time" section with a time field showing `9:00 AM` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); "Reminders on your phone" with a "Snooze for" select (TODO-40); one **Save** button for the three; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
+| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Start page" section with an "Open To-do on" select showing "Today" (TODO-78); a "Default due time" section with a time field showing `9:00 AM` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); "Reminders on your phone" with a "Snooze for" select (TODO-40); one **Save** button for them all; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
 | 2 | Change it to `7:45am` (Tab) and **Save**. | "Saved." in green; reload shows `7:45 AM`. A nonsense value (`banana`) shows "Enter a time like 9:00 PM." under the box and saves nothing. |
 | 3 | Clear the field and Save. | The browser's required prompt (or "Default due time: Enter a time."). |
 | 4 | Click the "account page" link. | Goes to the account page where the time zone can be changed. |
@@ -1479,6 +1479,22 @@ user `G` with a token `TG`. The server runs tasks inline, so an export is `ready
 | 2 | `inv todo export-delete local <id>` answering `n` then `y`; then `export-delete` on the same id again, and on one that is still being prepared. | `n` exits 1 `Cancelled.`; `y` prints `Deleted.`; again: `404: Not Found` (exit 1); the preparing one: `409: This export is still being prepared.` `--yes` skips the question. |
 | 3 | `inv todo export-xlsx local --out tasks.xlsx`, then again, then again with `--force`. | `Wrote tasks.xlsx (<n> bytes).` and the workbook opens as in TODO-72 step 2; the second exits 1 `tasks.xlsx already exists. Use --force to replace it.` **before** any request (the website's budget is untouched); `--force` replaces it. No credits are charged and no `.tasks.xlsx.part` is left behind. |
 | 4 | `inv todo export-xlsx local --out ./exports --range last-15-days` (an existing folder), then `--from 2001-01-01 --to 2001-12-31 --out old.xlsx`, then `--out ./nope/t.xlsx`. | The first writes `./exports/tasks-<today>.xlsx`; the second a workbook with only the header rows; the last exits 1 `Not a folder: nope` before any request. |
+
+### TODO-78 The list To-do opens on
+
+**Purpose:** the user chooses whether To-do opens on Today, Upcoming or All; the other lists stay one click away.
+**Preconditions:** logged in as `qa.user@example.com`; Settings shows "Open To-do on: Today".
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open **Settings**. | A "Start page" section first, with the select "Open To-do on" (choices Today, Upcoming, All; "Today" selected) and the note "The list you see whenever you open To-do, from the menu, the home page or a bookmark. The others stay one click away in the sidebar." |
+| 2 | Choose **Upcoming** and **Save**. | "Saved." in green; a reload still shows "Upcoming". |
+| 3 | Click **To-do** in the top navigation, then go to `/` and click the To-do card. | Both land on `/todo/upcoming/` (heading "Upcoming", the Upcoming entry highlighted in the sidebar); the To-do header link is marked as the current product. |
+| 4 | Click **Today** in the sidebar. | `/todo/today/` opens with heading "Today", whatever the setting. |
+| 5 | Back in Settings choose **All**, Save, and open `/todo/?sort=priority` in the address bar. | Redirected to `/todo/all/?sort=priority`: the All list sorted by priority. |
+| 6 | (Console) `POST /todo/settings/` with `default_due_time=09:00&default_view=trash`. | `422` and "Open To-do on: Choose Today, Upcoming or All."; the setting stays "All". |
+| 7 | (Shell) `inv todo settings local --default-view today`, then `inv todo settings local`. | `Saved.` and a table whose first line is `Open To-do on  Today`; `--default-view closed` exits 2 (`use today, upcoming or all.`) before any request. |
+| 8 | Click **To-do** in the top navigation. | Lands on `/todo/today/` again. |
 
 ## Out of scope
 

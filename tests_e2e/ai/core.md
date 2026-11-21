@@ -323,8 +323,8 @@ set to the page you were on), never renders the login page inside the form (issu
 | # | Action | Expected result |
 |---|---|---|
 | 1 | In tab B log out. | - |
-| 2 | In tab A type `Core session check` into the quick-add box and press **Add task**. | The whole tab navigates to `/account/login/?next=/todo/` (a normal page with one header and one footer); the login page is **not** shown inside the To-do list. |
-| 3 | Sign in as `CORE_USER`. | You land on `/todo/` (Today). `Core session check` was not created (search **All**). |
+| 2 | In tab A type `Core session check` into the quick-add box and press **Add task**. | The whole tab navigates to `/account/login/?next=/todo/today/` (a normal page with one header and one footer); the login page is **not** shown inside the To-do list. |
+| 3 | Sign in as `CORE_USER`. | You land on `/todo/today/` (Today). `Core session check` was not created (search **All**). |
 
 ### CORE-23 Times are shown in the visitor's time zone
 

@@ -2,7 +2,7 @@ from django import forms
 
 from apps.core.services.mail.addresses import parse_allowlist
 
-from ..models import MutedOverdue, ReminderChannel, SnoozeChoice
+from ..models import DefaultView, MutedOverdue, ReminderChannel, SnoozeChoice
 from .reminder import UNITS, to_minutes
 
 SENDER_MODES = (('any', 'Anyone'), ('only', 'Only these'))
@@ -59,6 +59,14 @@ class SettingsForm(forms.Form):
         error_messages={
             'invalid_choice': 'Choose Today (dimmed), Hidden from Today or On hold & blocked section.'
         },
+    )
+
+    # The list that opens when the user goes to To-do. A request without it leaves it alone.
+    default_view = forms.ChoiceField(
+        label='Open To-do on',
+        required=False,
+        choices=DefaultView.choices,
+        error_messages={'invalid_choice': 'Choose Today, Upcoming or All.'},
     )
 
     #: `(minutes or None, channel)` to save, or None to leave the default reminder as it is.

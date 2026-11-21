@@ -1899,6 +1899,7 @@ SETTINGS = {
     'default_reminder_channel': 'in_app',
     'snooze_minutes': 15,
     'muted_overdue': 'dimmed',
+    'default_view': 'today',
     'sender_allowlist': ['me@example.com'],
     'tasks_created_this_month': 4,
     'free_tasks_per_month': 10,
@@ -1981,6 +1982,7 @@ def test_settings_default_reminder_none(api):
         ['--default-channel', 'sms'],
         ['--snooze', '30'],
         ['--muted-overdue', 'gone'],
+        ['--default-view', 'closed'],
     ],
 )
 def test_settings_refuses_bad_values_before_calling(api, args):
@@ -2007,6 +2009,16 @@ def test_settings_muted_overdue(api):
     assert result.exit_code == 0
     assert api.calls[0]['json'] == {'muted_overdue': 'section'}
     assert 'Muted overdue on Today' in result.output and 'section' in result.output
+
+
+def test_settings_default_view(api):
+    api.on('patch', '/todo/settings', FakeResponse(200, {**SETTINGS, 'default_view': 'upcoming'}))
+
+    result = invoke('settings', 'local', '--default-view', 'Upcoming')
+
+    assert result.exit_code == 0
+    assert api.calls[0]['json'] == {'default_view': 'upcoming'}
+    assert 'Open To-do on' in result.output and 'Upcoming' in result.output
 
 
 def test_settings_shows_muted_overdue(api):

@@ -22,6 +22,14 @@ class MutedOverdue(models.TextChoices):
     SECTION = 'section', 'On hold & blocked section'
 
 
+class DefaultView(models.TextChoices):
+    """Which list opens when the user goes to To-do (`/todo/`)."""
+
+    TODAY = 'today', 'Today'
+    UPCOMING = 'upcoming', 'Upcoming'
+    ALL = 'all', 'All'
+
+
 class TodoAccount(models.Model):
     """A user's To-do account: their task numbering, their default due time and the billing state
     of task creation. Created lazily on first use, through
@@ -106,6 +114,16 @@ class TodoAccount(models.Model):
             db_default=MutedOverdue.DIMMED,
             help_text='Where an overdue task that is On hold or Blocked shows on Today: dimmed at the bottom '
             'of Overdue, hidden, or in its own collapsed section.',
+        ),
+    )
+    default_view = cast(
+        str,
+        models.CharField(
+            max_length=8,
+            choices=DefaultView,
+            default=DefaultView.TODAY,
+            db_default=DefaultView.TODAY,
+            help_text='The list that opens when the user goes to To-do: Today, Upcoming or All.',
         ),
     )
     sender_allowlist = cast(

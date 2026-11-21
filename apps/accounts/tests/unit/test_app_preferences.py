@@ -188,7 +188,9 @@ def test_htmx_save_stores_the_choice_and_answers_the_nav_out_of_band(client, use
     assert 'id="product-nav"' in content
     assert 'hx-swap-oob="true"' in content
     # Only the apps left on, in their order.
-    assert content.index(reverse('todo:today')) < content.index(reverse('qr_code:dashboard'))
+    assert content.index(f'href="{reverse("todo:home")}"') < content.index(
+        reverse('qr_code:dashboard')
+    )
     assert reverse('receipts:dashboard') not in content
     assert reverse('short_url:dashboard') not in content
     assert reverse('file_transfer:dashboard') not in content
@@ -328,7 +330,7 @@ def test_saved_choice_shapes_the_header_on_another_page(client, user):
     nav = re.search(r'<div id="product-nav".*?</div>', content, flags=re.DOTALL)
 
     assert nav is not None
-    assert reverse('todo:today') in nav.group(0)
+    assert f'href="{reverse("todo:home")}"' in nav.group(0)
     assert reverse('qr_code:dashboard') not in nav.group(0)
     assert reverse('receipts:dashboard') not in nav.group(0)
 
@@ -340,7 +342,7 @@ def test_another_users_choice_does_not_apply(client, user, regular_user):
     content = client.get(reverse('core:home')).content.decode()
 
     assert 'id="no-apps"' not in content
-    assert reverse('todo:today') in content
+    assert f'href="{reverse("todo:home")}"' in content
 
 
 # --- the admin ---

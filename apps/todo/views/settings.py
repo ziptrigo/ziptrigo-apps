@@ -1,4 +1,4 @@
-"""`/todo/settings/`: the default due time, the default reminder, where an overdue On hold or Blocked task shows on
+"""`/todo/settings/`: the list To-do opens on, the default due time, the default reminder, where an overdue On hold or Blocked task shows on
 Today, the free-tasks line and the price,
 the storage line and the email address tasks can be sent to (`views.inbox`).
 """
@@ -18,7 +18,7 @@ from apps.core.htmx import is_htmx
 
 from ..forms import SettingsForm
 from ..forms.reminder import UNITS as REMINDER_UNITS
-from ..models import MutedOverdue, ReminderChannel, SnoozeChoice, TodoSettings
+from ..models import DefaultView, MutedOverdue, ReminderChannel, SnoozeChoice, TodoSettings
 from ..services import (
     daily_storage_rate,
     describe_daily_rate,
@@ -26,7 +26,7 @@ from ..services import (
     reminders,
     update_default_due_time,
 )
-from ..services.accounts import set_muted_overdue
+from ..services.accounts import set_default_view, set_muted_overdue
 from ..services.reminders import split_offset
 from .common import (
     form_error_lines,
@@ -62,6 +62,7 @@ def _form_context(request: AuthenticatedHttpRequest, *, saved: bool = False) -> 
         'reminder_channels': ReminderChannel.choices,
         'snooze_choices': SnoozeChoice.choices,
         'muted_overdue_choices': MutedOverdue.choices,
+        'default_view_choices': DefaultView.choices,
     }
 
 
@@ -69,8 +70,8 @@ def _form_context(request: AuthenticatedHttpRequest, *, saved: bool = False) -> 
 @require_http_methods(['GET', 'POST'])
 @ensure_csrf_cookie
 def settings_page(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """GET: the page. POST: save the default due time, the default reminder and how long Snooze
-    waits."""
+    """GET: the page. POST: save the list To-do opens on, the default due time, the default
+    reminder, how long Snooze waits and where an overdue muted task shows."""
     if request.method == 'POST':
         return _save(request)
     context = {**_form_context(request), **inbox_context(request.user)}
@@ -86,7 +87,9 @@ def _save(request: AuthenticatedHttpRequest) -> HttpResponse:
         return response
     account = get_account(request.user)
     try:
-        with transaction.atomic():  # both settings are saved, or neither
+        with transaction.atomic():  # every setting is saved, or none
+            if form.cleaned_data.get('default_view'):
+                set_default_view(account, form.cleaned_data['default_view'])
             update_default_due_time(account, form.cleaned_data['default_due_time'])
             if form.reminder_defaults is not None:
                 reminders.set_defaults(

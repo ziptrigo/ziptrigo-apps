@@ -21,7 +21,7 @@ class TodoConfig(AppConfig):
                 label=self.label,
                 name='To-do',
                 description='Tasks with due dates, labels and reminders, repeating when you need them.',
-                url_name='todo:today',
+                url_name='todo:home',
                 icon='fas fa-check-square',
                 costs=cost_section,
                 actions=account_actions,
