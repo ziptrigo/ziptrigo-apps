@@ -58,6 +58,11 @@ urlpatterns = [
         name='attachment-download',
     ),
     path(
+        'attachments/<uuid:attachment_id>/thumbnail/',
+        views.attachment_thumbnail,
+        name='attachment-thumbnail',
+    ),
+    path(
         'attachments/<uuid:attachment_id>/delete/',
         views.attachment_delete,
         name='attachment-delete',

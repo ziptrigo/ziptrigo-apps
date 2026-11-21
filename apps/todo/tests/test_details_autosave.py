@@ -78,6 +78,8 @@ class TestDetailsForm:
 
     def test_the_quick_add_form_does_not_save_itself(self, web):
         html = web.get(reverse('todo:today')).content.decode()
-        quick = re.search(r'<form id="quick-add-form".*?</form>', html, re.S).group(0)
+        match = re.search(r'<form id="quick-add-form".*?</form>', html, re.S)
+        assert match is not None
+        quick = match.group(0)
         assert 'data-autosave' not in quick
         assert 'type="submit"' in quick

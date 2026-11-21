@@ -11,6 +11,12 @@ from apps.accounts.models import User
 from .comment import Comment
 from .task import Task
 
+# The sniffed types a thumbnail is shown for: the images a browser can draw in an `<img>` (a PDF is
+# inline-safe too, but has no thumbnail). Never decided by the declared type or the file name.
+THUMBNAIL_TYPES = frozenset({'image/jpeg', 'image/png', 'image/gif', 'image/webp'})
+# The browser scales the full original for an 80 px box, so a bigger image gets no thumbnail.
+THUMBNAIL_MAX_BYTES = 10 * 1024 * 1024
+
 
 class Attachment(models.Model):
     """A file attached to a task (issue #184), uploaded straight to S3 with a presigned PUT.
@@ -95,3 +101,14 @@ class Attachment(models.Model):
     def is_inline(self) -> bool:
         """Whether "Open" (shown in the browser) is offered: a sniffed inline-safe type."""
         return bool(self.inline_type)
+
+    @property
+    def is_image(self) -> bool:
+        """Whether the bytes were sniffed as a browser-drawable image and the upload completed."""
+        return self.uploaded and self.inline_type in THUMBNAIL_TYPES
+
+    @property
+    def has_thumbnail(self) -> bool:
+        """Whether a thumbnail is offered (the template) and served (the endpoint): an uploaded,
+        sniffed image of at most `THUMBNAIL_MAX_BYTES`."""
+        return self.is_image and self.size_bytes <= THUMBNAIL_MAX_BYTES

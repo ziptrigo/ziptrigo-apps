@@ -570,6 +570,26 @@ def download_url(attachment: Attachment, *, inline: bool = False) -> str:
     )
 
 
+def thumbnail_url(attachment: Attachment) -> str:
+    """A short-lived inline URL of an image attachment, for the `<img>` of its thumbnail (issue
+    #344). The browser scales the full image; nothing is rendered here.
+
+    Raises:
+        ValidationError: the file has no thumbnail (not an uploaded image by its sniffed type, or
+            over `THUMBNAIL_MAX_BYTES`) or the account's storage is frozen. Nothing is signed then.
+    """
+    if not attachment.has_thumbnail or is_frozen(attachment.user_id):
+        raise ValidationError('There is no thumbnail for this file.')
+    return get_storage().presigned_get_url(
+        attachment_key(attachment.user_id, attachment.pk),
+        attachment.filename or 'file',
+        GET_URL_EXPIRES_SECONDS,
+        disposition='inline',
+        content_type=attachment.inline_type,
+        cache_control=f'private, max-age={GET_URL_EXPIRES_SECONDS}',
+    )
+
+
 def discard_draft(attachment: Attachment) -> None:
     """Delete a comment file that was uploaded but not saved with a comment (the user removed it
     from the form). Raises `ValidationError` for any other attachment. A storage error raises and
