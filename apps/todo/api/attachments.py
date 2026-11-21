@@ -11,6 +11,8 @@ A client that gives up between 1 and 3 calls `POST /attachments/{id}/cancel` (a 
 toward the task's file cap until it is cancelled or abandoned after 24 hours, so a client whose
 `PUT` fails must cancel it); `DELETE /attachments/{id}` on a pending row does the same.
 
+`PATCH /attachments/{id}` renames a file (a task's or a comment's), keeping its extension.
+
 Downloading is a short-lived presigned URL (`GET /attachments/{id}/url`), never a redirect and
 never the S3 key. While the account's storage is paused (unpaid) uploads and downloads are a 402.
 """
@@ -24,7 +26,13 @@ from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
 
 from ..models import Attachment
-from ..schemas import AttachmentSchema, FileUrlSchema, UploadStartSchema, UploadTicketSchema
+from ..schemas import (
+    AttachmentRenameSchema,
+    AttachmentSchema,
+    FileUrlSchema,
+    UploadStartSchema,
+    UploadTicketSchema,
+)
 from ..services import attachments
 from ..services.storage import GET_URL_EXPIRES_SECONDS
 from .common import attachment_data, charge, choice, mapped_errors, owned_task
@@ -152,6 +160,22 @@ def discard_attachment(request, attachment_id: UUID):
         logger.exception('Could not delete the unused comment file %s', attachment.pk)
         raise HttpError(503, 'The file could not be removed right now. Try again later.') from exc
     return 204, None
+
+
+@router.patch('/attachments/{attachment_id}', response=AttachmentSchema)
+def rename_attachment(request, attachment_id: UUID, payload: AttachmentRenameSchema):
+    """Rename a file of a task or of a comment. `filename` is the new name **without the
+    extension**, which is kept (`Whiteboard` makes `2026-11-21-10-45-30.webp` `Whiteboard.webp`).
+    The same name changes nothing; a change is logged on the task (`attachment_renamed`). 400 for a
+    name that is empty once cleaned (`filename: Give the file a name.`) or a task in the Trash; 404
+    for another user's file or one still uploading. Spends `TODO_EDIT_USER`, after the 400s."""
+    attachment = _owned_attachment(request, attachment_id)
+    with mapped_errors():
+        attachments.check_rename(attachment, payload.filename)
+    charge(request, 'TODO_EDIT_USER')
+    with mapped_errors():
+        attachment = attachments.rename_attachment(attachment, payload.filename)
+    return attachment_data(attachment, attachment.task.number)
 
 
 @router.delete('/attachments/{attachment_id}', response={204: None})

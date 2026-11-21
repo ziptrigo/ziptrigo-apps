@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.18.0
+  version: 2.19.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -3144,6 +3144,43 @@ paths:
       security:
       - JWTAuth: []
   /api/todo/attachments/{attachment_id}:
+    patch:
+      operationId: apps_todo_api_attachments_rename_attachment
+      summary: Rename Attachment
+      parameters:
+      - in: path
+        name: attachment_id
+        schema:
+          format: uuid
+          title: Attachment Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentSchema'
+      description: 'Rename a file of a task or of a comment. `filename` is the new name **without the
+
+        extension**, which is kept (`Whiteboard` makes `2026-11-21-10-45-30.webp` `Whiteboard.webp`).
+
+        The same name changes nothing; a change is logged on the task (`attachment_renamed`). 400 for a
+
+        name that is empty once cleaned (`filename: Give the file a name.`) or a task in the Trash; 404
+
+        for another user''s file or one still uploading. Spends `TODO_EDIT_USER`, after the 400s.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachmentRenameSchema'
+        required: true
+      security:
+      - JWTAuth: []
     delete:
       operationId: apps_todo_api_attachments_delete_attachment
       summary: Delete Attachment
@@ -10212,7 +10249,7 @@ components:
 
         `subtask_closed` (`number`, `title`, ...), `moved` (`parent`), `attachment_added` and
 
-        `attachment_removed` (`filename`, `comment`), `trashed` and `restored` (`via`).'
+        `attachment_removed` (`filename`, `comment`), `attachment_renamed` (`from`, `to`, `comment`), `trashed` and `restored` (`via`).'
       properties:
         id:
           description: The entry's id.
@@ -10246,6 +10283,7 @@ components:
           - section
           - attachment_added
           - attachment_removed
+          - attachment_renamed
           - trashed
           - restored
           title: Kind
@@ -10351,6 +10389,25 @@ components:
       - inline_type
       - created_at
       title: AttachmentSchema
+      type: object
+    AttachmentRenameSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /attachments/{id}`: the new name **without the extension**, which the file
+
+        keeps (`Whiteboard` renames `2026-11-21-10-45-30.webp` to `Whiteboard.webp`). A name that
+
+        already ends in the file''s extension doesn''t get it twice; any other ending is part of the
+
+        name. Control characters are dropped and `/` or `\` become `_`.'
+      properties:
+        filename:
+          description: The new name, without the extension (which is kept). At most 255 characters (a longer one is a 422); the name, never the extension, is cut so the whole fits in 255.
+          maxLength: 255
+          title: Filename
+          type: string
+      required:
+      - filename
+      title: AttachmentRenameSchema
       type: object
     LabelRefSchema:
       description: 'A label as a task carries it: enough to show and to filter by.'

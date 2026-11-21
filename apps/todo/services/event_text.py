@@ -254,6 +254,9 @@ def describe(event: Any) -> str:
             where = ' to a comment' if data.get('comment') and added else ''
             where = ' from a comment' if data.get('comment') and not added else where
             return f'File {"attached" if added else "removed"}{where}: {data.get("filename")}'
+        case EventKind.ATTACHMENT_RENAMED:
+            where = ' of a comment' if data.get('comment') else ''
+            return f'File{where} renamed from {data.get("from")} to {data.get("to")}'
         case EventKind.TRASHED | EventKind.RESTORED:
             text = 'Moved to the Trash' if kind == EventKind.TRASHED else 'Restored'
             if data.get('via'):

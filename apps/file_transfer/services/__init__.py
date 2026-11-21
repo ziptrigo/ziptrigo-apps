@@ -76,6 +76,7 @@ from .uploads import (
     part_count_for,
     presign_parts,
     remove_file,
+    rename_file,
     restart_upload,
 )
 from .zip import ensure_zip_build_started
@@ -141,6 +142,7 @@ __all__ = [
     'reenable_transfer_action',
     'release_hold',
     'remove_file',
+    'rename_file',
     'remove_password',
     'requires_password',
     'record_download',

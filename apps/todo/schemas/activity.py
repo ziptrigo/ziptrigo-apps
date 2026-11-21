@@ -37,7 +37,7 @@ class ActivityEventSchema(Schema):
     `blocker_added` and `blocker_removed` (`number`, `title`), `blocked` (`from`, `blockers`),
     `unblocked` (`blockers` with each `reason`), `subtask_added`, `subtask_removed` and
     `subtask_closed` (`number`, `title`, ...), `moved` (`parent`), `attachment_added` and
-    `attachment_removed` (`filename`, `comment`), `trashed` and `restored` (`via`).
+    `attachment_removed` (`filename`, `comment`), `attachment_renamed` (`from`, `to`, `comment`), `trashed` and `restored` (`via`).
     """
 
     id: UUID = Field(description="The entry's id.")

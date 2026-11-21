@@ -13,7 +13,7 @@ comment; `edit_comment` also deletes the ones the edit removes. A refusal keyed 
 means a file was not ready or not the user's.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import transaction
@@ -25,7 +25,7 @@ from apps.accounts.models import User
 from apps.core.markdown import search_text
 
 from ..models import Comment, CommentRevision, Task
-from .attachments import link_to_comment, remove_from_comment
+from .attachments import link_to_comment, remove_from_comment, rename_comment_files
 from .references import sync_references
 
 #: The longest comment, in characters.
@@ -58,12 +58,17 @@ def _body_text(body: str) -> str:
 
 
 def add_comment(
-    task: Task, user: User, body: str, attachment_ids: Iterable[object] = ()
+    task: Task,
+    user: User,
+    body: str,
+    attachment_ids: Iterable[object] = (),
+    file_names: Mapping[str, str] | None = None,
 ) -> Comment:
     """Add a comment by `user` to their own task. A completed task can be commented on; a task in
     the Trash cannot. Its `#1234` mentions are recorded (`sync_references`), and the uploaded
     drafts in `attachment_ids` become its files (all or nothing: one that isn't ready refuses the
-    comment)."""
+    comment). `file_names` (`{attachment id: name without the extension}`) renames them first, so
+    each is logged once, attached under its new name (`attachments.rename_comment_files`)."""
     if task.user_id != user.pk:
         raise _error(NON_FIELD_ERRORS, 'Unknown task.')
     cleaned = clean_comment_body(body)
@@ -78,7 +83,9 @@ def add_comment(
             task=task, user=user, body=cleaned, body_text=_body_text(cleaned)
         )
         sync_references(task, comment)
-        link_to_comment(comment, attachment_ids)
+        attaching = list(attachment_ids)
+        rename_comment_files(comment, file_names or {}, attaching)
+        link_to_comment(comment, attaching)
     return comment
 
 
@@ -87,13 +94,16 @@ def edit_comment(
     body: str,
     attachment_ids: Iterable[object] = (),
     remove_attachment_ids: Iterable[object] = (),
+    file_names: Mapping[str, str] | None = None,
 ) -> Comment:
     """Replace the comment's text, keeping the old text as a revision (oldest first in
     `comment_history`). Refused for a deleted comment and after `MAX_REVISIONS` edits; the same
     text makes no revision. The comment is re-read under its row lock, so two edits at once make
     two revisions, never one lost. `attachment_ids` (uploaded drafts) are added to its files and
     `remove_attachment_ids` (files it has) deleted; changing only the files is not an edit of the
-    text, so it leaves no revision and no "(edited)"."""
+    text, so it leaves no revision and no "(edited)". `file_names` renames its files (those it keeps:
+    a file also being removed is not renamed first), the same way."""
+    removed = {str(item) for item in remove_attachment_ids}
     cleaned = clean_comment_body(body)
     with transaction.atomic():
         fresh = (
@@ -103,7 +113,10 @@ def edit_comment(
             raise _error(NON_FIELD_ERRORS, 'This comment no longer exists.')
         if fresh.is_deleted:
             raise _error(NON_FIELD_ERRORS, DELETED_MESSAGE)
-        link_to_comment(fresh, attachment_ids)
+        attaching = list(attachment_ids)
+        renames = {key: value for key, value in (file_names or {}).items() if key not in removed}
+        rename_comment_files(fresh, renames, attaching)
+        link_to_comment(fresh, attaching)
         if cleaned != fresh.body:
             if fresh.revision_count >= MAX_REVISIONS:
                 raise _error(NON_FIELD_ERRORS, TOO_MANY_EDITS_MESSAGE)
@@ -117,7 +130,7 @@ def edit_comment(
             sync_references(fresh.task, fresh)
     # Outside the transaction: a storage call must not hold the comment's lock.
     _copy_state(fresh, comment)
-    remove_from_comment(fresh, remove_attachment_ids)
+    remove_from_comment(fresh, removed)
     return comment
 
 

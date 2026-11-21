@@ -6,6 +6,7 @@ from .attachments import (
     attachment_discard,
     attachment_download,
     attachment_list,
+    attachment_rename,
     attachment_start,
 )
 from .blockers import blocker_add, blocker_remove, blocker_suggest, open_blockers
@@ -93,6 +94,7 @@ __all__ = [
     'attachment_delete',
     'attachment_download',
     'attachment_list',
+    'attachment_rename',
     'attachment_start',
     'all_page',
     'blocker_add',

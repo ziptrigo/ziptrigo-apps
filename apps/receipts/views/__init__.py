@@ -13,6 +13,7 @@ from .detail import (
     detail,
     dismiss_duplicate_flag,
     download,
+    rename_receipt_file,
     reprocess_receipt,
     trash_receipt,
 )
@@ -60,6 +61,7 @@ __all__ = [
     'restore_receipt',
     'settings_page',
     'trash_page',
+    'rename_receipt_file',
     'trash_receipt',
     'update_inbox',
     'upload_complete',

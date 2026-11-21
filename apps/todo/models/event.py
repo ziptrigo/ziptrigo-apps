@@ -39,6 +39,7 @@ class EventKind(models.TextChoices):
     SECTION = 'section', 'Section changed'
     ATTACHMENT_ADDED = 'attachment_added', 'File attached'
     ATTACHMENT_REMOVED = 'attachment_removed', 'File removed'
+    ATTACHMENT_RENAMED = 'attachment_renamed', 'File renamed'
     TRASHED = 'trashed', 'Moved to the Trash'
     RESTORED = 'restored', 'Restored'
 

@@ -21,6 +21,11 @@ checksum, a task in the trash) *and* for a frozen account (with `frozen` and a `
 for an upload whose row is gone (the task was deleted, or the upload cancelled or abandoned,
 meanwhile): `complete` then also deletes any object the browser's PUT left behind.
 
+Renaming (`POST /todo/attachments/<id>/rename/`, the row's Rename) edits the name without its
+extension, which stays (`services.attachments.rename_attachment`); it answers the re-rendered
+list, a refusal a 422 into `#attachment-msg`. A comment's files are renamed from the comment's
+edit form instead.
+
 Downloading redirects to a short-lived presigned URL (`?inline=1` for "Open", honoured only for a
 sniffed image or PDF); removing is a plain POST from the shared confirmation modal, redirecting
 back with a flash message.
@@ -45,9 +50,19 @@ from apps.core.json_numbers import whole_number
 from ..models import Attachment, Task, TodoSettings
 from ..services import attachments, get_account
 from ..services.errors import AccountFrozenError
-from .common import announces_change, credits_url, limited, owned_task
+from .common import (
+    announces_change,
+    credits_url,
+    limited,
+    owned_task,
+    refuse,
+    validation_lines,
+)
 
 logger = logging.getLogger(__name__)
+
+#: Where a refused rename's message goes on the task page.
+MSG_SLOT = '#attachment-msg'
 
 
 def attachments_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
@@ -63,6 +78,7 @@ def attachments_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
             )
         ),
         'attachments_can_upload': not task.is_trashed and not task.is_completed,
+        'attachments_can_rename': not task.is_trashed,
         'attachments_frozen': account.is_frozen,
         'attachments_max_bytes': config.max_attachment_bytes,
         'attachments_max_files': config.max_attachments_per_task,
@@ -258,3 +274,36 @@ def attachment_delete(request: AuthenticatedHttpRequest, attachment_id: str) -> 
     else:
         messages.success(request, f'Removed {attachment.filename}.')
     return hx_redirect(request, task_url)
+
+
+@login_required
+@require_POST
+@announces_change
+def attachment_rename(request: AuthenticatedHttpRequest, attachment_id: str) -> HttpResponse:
+    """Rename one of the task's files (`filename` is the new name without the extension). The name
+    is checked before `TODO_EDIT_USER` is spent, so a refused one costs nothing."""
+    attachment = get_object_or_404(
+        Attachment.objects.select_related('task'),
+        pk=attachment_id,
+        user=request.user,
+        uploaded=True,
+        for_comment=False,
+    )
+    task = attachment.task
+    task_url = reverse('todo:task', args=[task.number])
+    name = request.POST.get('filename', '')
+    try:
+        attachments.check_rename(attachment, name)
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), retarget=MSG_SLOT, fallback=task_url)
+    if (response := limited(request, 'TODO_EDIT_USER', retarget=MSG_SLOT)) is not None:
+        return response
+    try:
+        attachment = attachments.rename_attachment(attachment, name)
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), retarget=MSG_SLOT, fallback=task_url)
+    if not is_htmx(request):
+        messages.success(request, f'Renamed to {attachment.filename}.')
+        return redirect(task_url)
+    context = attachments_context(request, task) | {'attachments_clear_msg': True}
+    return render(request, 'todo/partials/attachment_list.html', context)

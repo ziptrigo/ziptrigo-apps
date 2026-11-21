@@ -29,6 +29,11 @@ urlpatterns = [
         name='send-remove-file',
     ),
     path(
+        'send/<uuid:draft_id>/files/<uuid:file_id>/rename/',
+        views.rename_file,
+        name='send-rename-file',
+    ),
+    path(
         'send/<uuid:draft_id>/files/<uuid:file_id>/resume/',
         views.resume_file,
         name='send-resume-file',
@@ -93,6 +98,11 @@ urlpatterns = [
         'send/anon/<uuid:draft_id>/files/<uuid:file_id>/remove/',
         anon_views.remove_file,
         name='anon-send-remove-file',
+    ),
+    path(
+        'send/anon/<uuid:draft_id>/files/<uuid:file_id>/rename/',
+        anon_views.rename_file,
+        name='anon-send-rename-file',
     ),
     path(
         'send/anon/<uuid:draft_id>/files/<uuid:file_id>/resume/',

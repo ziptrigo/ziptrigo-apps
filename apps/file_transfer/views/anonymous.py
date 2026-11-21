@@ -35,6 +35,7 @@ from apps.core.services.email_verification import (
     IncorrectCode,
     ResendTooSoon,
 )
+from apps.core.services.filenames import EMPTY_NAME_MESSAGE, clean_stem
 
 from .. import services
 from ..forms import AnonymousSendOptionsForm, ConfirmCodeForm, add_service_errors
@@ -492,6 +493,27 @@ def remove_file(request: AnonymousHttpRequest, draft_id: str, file_id: str) -> H
     file = get_object_or_404(transfer.files, id=file_id)
     services.remove_file(file)
     return _finish(request, JsonResponse({'ok': True}), cookie_id)
+
+
+@require_POST
+def rename_file(request: AnonymousHttpRequest, draft_id: str, file_id: str) -> HttpResponse:
+    """The anonymous twin of `views.uploads.rename_file`: rename a finished file of the session's
+    draft (the new name without the extension, which is kept). Spends `FT_ANON_UPLOAD_IP` once
+    the name is known not to be empty."""
+    cookie_id = _cookie_id(request)
+    transfer = _owned_draft(request, draft_id)
+    file = get_object_or_404(transfer.files, id=file_id)
+    name = str(_json_body(request).get('name', ''))
+    if not clean_stem(name):
+        return _finish(request, JsonResponse({'error': EMPTY_NAME_MESSAGE}, status=422), cookie_id)
+    limited = ratelimit.hit_ip(request, 'FT_ANON_UPLOAD_IP')
+    if not limited.allowed:
+        return _finish(request, ratelimit.json_response(limited), cookie_id)
+    try:
+        file = services.rename_file(file, name)
+    except ValidationError as exc:
+        return _finish(request, JsonResponse({'error': exc.messages[0]}, status=422), cookie_id)
+    return _finish(request, JsonResponse({'ok': True, 'name': file.name}), cookie_id)
 
 
 @require_POST

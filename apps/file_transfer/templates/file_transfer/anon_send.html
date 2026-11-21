@@ -113,6 +113,7 @@ document.addEventListener('DOMContentLoaded', function () {
         hintEl: document.getElementById('send-hint'),
         csrftoken: csrftoken,
         existingFiles: existingFiles,
+        canRename: true,
     });
 
     pickFilesBtn.addEventListener('click', function () { fileInput.click(); });

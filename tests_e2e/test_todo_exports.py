@@ -46,7 +46,10 @@ def _task_with_files(page: Page, server: ReceiptsServer, title: str) -> str:
     box.locator('[data-files-input]').set_input_files(
         {'name': 'comment-file.png', 'mimeType': 'image/png', 'buffer': PNG}
     )
-    expect(box.locator('[data-files-attached] li')).to_contain_text('comment-file.png')
+    # The chip holds the name without its extension in a box (it can be renamed before posting).
+    expect(box.locator('[data-files-attached] li input[name^="file_name_"]')).to_have_value(
+        'comment-file'
+    )
     form.locator('textarea[name="body"]').fill('=HYPERLINK("http://evil.example","click")')
     form.locator('button[type="submit"]').click()
     expect(page.locator('#task-comments ul > li').first).to_contain_text('comment-file.png')
