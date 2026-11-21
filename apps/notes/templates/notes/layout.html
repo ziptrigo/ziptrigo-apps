@@ -45,5 +45,6 @@
 {% block notes_js_libs %}{% endblock %}
 <script defer src="{% static 'notes/js/notes.js' %}"></script>
 <script defer src="{% static 'notes/js/note_view.js' %}"></script>
-<script defer src="{% static 'notes/js/editor.js' %}"></script>
+{# Classic, not deferred: it registers the noteEditor Alpine component, which must exist before Alpine starts. #}
+<script src="{% static 'notes/js/editor.js' %}"></script>
 {% endblock %}

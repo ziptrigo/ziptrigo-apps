@@ -4,12 +4,13 @@
    one), `preview_url` (where the live preview posts; the owner's by default) and `title_readonly` (an edit through a share link:
    the title is shown, not sent), `error_lines` and, after a refused save of an out-of-date note, `conflict` (what is stored now): the form is then
    sent again (422, swapped over itself) with the person's own text kept and "Save mine anyway" posting the current
-   version. The live preview posts the textarea to `notes:preview` after a pause in typing (and once on load).
+   version. The view switch picks Content only (default), Content + preview or Preview only; while the preview shows, it
+   posts the textarea to `notes:preview` after a pause in typing.
    `notes/js/editor.js` adds Ctrl+S / Cmd+S and the warning about unsaved changes. {% endcomment %}
 <form id="editor-form" method="post" action="{{ action }}"
       hx-post="{{ action }}" hx-target="#editor-msg" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']"
       data-note-editor data-cancel-url="{{ cancel_url }}"
-      x-data="{ tab: 'write' }">
+      x-data="noteEditor" @htmx:after-settle="showContentErrors($event)">
     {% csrf_token %}
     <input type="hidden" name="base_version" value="{{ values.base_version }}">
 
@@ -65,19 +66,24 @@
     </fieldset>
     {% endif %}
 
-    <div role="tablist" aria-label="Editor view" class="mb-2 flex gap-1 lg:hidden">
-        <button type="button" role="tab" id="tab-write" aria-controls="pane-write" :aria-selected="tab === 'write'" @click="tab = 'write'"
-                :class="tab === 'write' ? 'bg-sage-100 dark:bg-gray-700 font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
-                class="btn rounded-lg px-3 py-1.5 text-sm">Write</button>
-        <button type="button" role="tab" id="tab-preview" aria-controls="pane-preview" :aria-selected="tab === 'preview'" @click="tab = 'preview'"
-                :class="tab === 'preview' ? 'bg-sage-100 dark:bg-gray-700 font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
-                class="btn rounded-lg px-3 py-1.5 text-sm">Preview</button>
+    {% comment %} The view switch (the `noteEditor` component in notes/js/editor.js): Content only (the default), Content +
+       preview (side by side from lg, stacked below), or Preview only. The preview is only asked for while it shows. {% endcomment %}
+    <div class="mb-2 flex justify-end">
+        <div role="group" aria-label="Editor view" class="segmented inline-flex flex-wrap rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5">
+            <button type="button" data-view="content" :aria-pressed="(view === 'content').toString()" @click="setView('content')" aria-pressed="true"
+                    class="btn rounded-md px-3 py-1.5 text-sm font-medium">Content</button>
+            <button type="button" data-view="split" :aria-pressed="(view === 'split').toString()" @click="setView('split')" aria-pressed="false"
+                    class="btn rounded-md px-3 py-1.5 text-sm font-medium">Content + preview</button>
+            <button type="button" data-view="preview" :aria-pressed="(view === 'preview').toString()" @click="setView('preview')" aria-pressed="false"
+                    class="btn rounded-md px-3 py-1.5 text-sm font-medium">Preview</button>
+        </div>
     </div>
-    <div class="grid gap-4 lg:grid-cols-2">
-        <div id="pane-write" role="tabpanel" aria-labelledby="tab-write" :class="tab === 'write' ? '' : 'hidden lg:block'">
-            <label for="note-content" class="mb-1 text-sm font-medium sr-only lg:not-sr-only">Content (Markdown)</label>
-            <textarea id="note-content" name="content" rows="22" maxlength="50000" spellcheck="true"
-                      hx-post="{% if preview_url %}{{ preview_url }}{% else %}{% url 'notes:preview' %}{% endif %}" hx-trigger="input changed delay:400ms, load"
+    <div class="grid gap-4" :class="view === 'split' ? 'lg:grid-cols-2' : ''">
+        <div id="pane-write" x-ref="writePane" x-show="view !== 'preview'">
+            <label for="note-content" class="block mb-1 text-sm font-medium">Content (Markdown)</label>
+            <textarea id="note-content" name="content" rows="22" maxlength="50000" spellcheck="true" x-ref="content"
+                      :data-preview="view === 'content' ? 'off' : 'on'" data-preview="off"
+                      hx-post="{% if preview_url %}{{ preview_url }}{% else %}{% url 'notes:preview' %}{% endif %}" hx-trigger="input[this.dataset.preview=='on'] changed delay:400ms"
                       hx-target="#note-preview" hx-swap="innerHTML" hx-sync="this:replace" hx-disabled-elt="unset"
                       class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 font-mono text-sm">{{ values.content }}</textarea>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -86,9 +92,9 @@
                 <code>&gt; quotes</code> and <code>[links](https://...)</code>. Up to 50,000 characters.
             </p>
         </div>
-        <div id="pane-preview" role="tabpanel" aria-labelledby="tab-preview" :class="tab === 'preview' ? '' : 'hidden lg:block'">
-            <p class="mb-1 text-sm font-medium sr-only lg:not-sr-only" id="preview-label">Preview</p>
-            <div id="note-preview" aria-live="polite" aria-labelledby="preview-label"
+        <div id="pane-preview" x-show="view !== 'content'" style="display: none">
+            <p class="mb-1 text-sm font-medium" id="preview-label">Preview</p>
+            <div id="note-preview" x-ref="preview" tabindex="-1" aria-live="polite" aria-labelledby="preview-label"
                  class="min-h-[8rem] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4"></div>
         </div>
     </div>

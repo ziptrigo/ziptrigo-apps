@@ -7318,11 +7318,19 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
   trash, delete, restore, duplicate, history restore) are POSTs that flash a message and redirect back
   (`views.common.redirect_back`: a same-site `next`, else the referrer, else the note) through
   `NOTES_EDIT_USER`; a refusal is a flash message.
-- **The editor** (`notes/editor.html`, `partials/editor_form.html`, `static/notes/js/editor.js`). The
-  textarea posts itself to `notes:preview` (`hx-trigger="input changed delay:400ms, load"`, `hx-sync=
-  "this:replace"`, `hx-disabled-elt="unset"`), which answers the rendered `extended` HTML or "Nothing to
-  preview yet."; **over `NOTES_PREVIEW_USER` it answers 204**, so the last preview stays. Side by side from
-  `lg`, two tabs (Write, Preview) below it. Ctrl+S / Cmd+S submits the form; a `beforeunload` warning while
+- **The editor** (`notes/editor.html`, `partials/editor_form.html`, `static/notes/js/editor.js`). A view switch
+  (a segmented group of `aria-pressed` buttons, the `noteEditor` Alpine component in `editor.js`, which both
+  layouts load as a classic script so it is registered before Alpine starts) offers **Content** (the default,
+  every time the editor opens), **Content + preview** (side by side from `lg`, stacked below) and **Preview**
+  (the textarea hidden, still submitted); the choice lives in `window.ztNoteEditorView` for the page only, so the
+  conflict panel's re-render keeps it, except that a conflict never opens on Preview (the text to compare would
+  be hidden): it opens on Content + preview. Hiding the textarea while it has the focus moves the focus to the
+  preview (`tabindex="-1"`), and a refused save whose field errors name `content` while on Preview switches to
+  Content + preview so the message under the textarea shows. The preview is only asked for while it shows: the textarea posts itself
+  to `notes:preview` (`hx-trigger="input[this.dataset.preview=='on'] changed delay:400ms"`, `data-preview`
+  bound to the view, `hx-sync="this:replace"`, `hx-disabled-elt="unset"`; nothing on load) and switching to a
+  view with the preview fetches it once (`htmx.ajax` from the textarea). It answers the rendered `extended` HTML or "Nothing to
+  preview yet."; **over `NOTES_PREVIEW_USER` it answers 204**, so the last preview stays. Ctrl+S / Cmd+S submits the form; a `beforeunload` warning while
   the title or content differs from what the editor opened with (or the conflict panel is up), dropped
   when a save answers `HX-Redirect` and on "Discard my changes"; no autosave. A new note can pick its tags
   in the editor (an existing one has them on its page). The form posts a hidden `base_version`; success is a
