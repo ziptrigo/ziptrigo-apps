@@ -177,6 +177,11 @@ def test_an_edit_that_lost_a_race_shows_the_conflict_panel(
         page.click('li.note-row a:has-text("Zn A")')
         page.click('a:has-text("Edit")')
         page.fill('#note-content', 'my text')
+        # Saved from Preview only: the panel must still show the person's own text.
+        page.get_by_role('group', name='Editor view').get_by_role(
+            'button', name='Preview', exact=True
+        ).click()
+        expect(page.locator('#note-content')).to_be_hidden()
         # Someone else saves first.
         receipts_server.shell(
             'import os\n'
@@ -191,7 +196,14 @@ def test_an_edit_that_lost_a_race_shows_the_conflict_panel(
             'This note was changed by someone else while you were editing.'
         )
         expect(panel).to_contain_text('their text')
+        expect(page.locator('#note-content')).to_be_visible()
         expect(page.locator('#note-content')).to_have_value('my text')
+        expect(
+            page.get_by_role('group', name='Editor view').get_by_role(
+                'button', name='Content + preview'
+            )
+        ).to_have_attribute('aria-pressed', 'true')
+        expect(page.locator('#note-preview')).to_contain_text('my text')
         page.click('button:has-text("Save mine anyway")')
         page.wait_for_url(re.compile(r'/notes/[0-9a-f-]{36}/$'))
         expect(page.locator('#note-body')).to_contain_text('my text')

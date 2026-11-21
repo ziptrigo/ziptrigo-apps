@@ -10,19 +10,7 @@
 <form id="editor-form" method="post" action="{{ action }}"
       hx-post="{{ action }}" hx-target="#editor-msg" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']"
       data-note-editor data-cancel-url="{{ cancel_url }}"
-      x-data="{
-          view: window.ztNoteEditorView || 'content',
-          init() { if (this.view !== 'content') this.$nextTick(() => this.refreshPreview()); },
-          setView(view) {
-              const showed = this.view !== 'content';
-              this.view = window.ztNoteEditorView = view;
-              if (view !== 'content' && !showed) this.$nextTick(() => this.refreshPreview());
-          },
-          refreshPreview() {
-              const area = this.$refs.content;
-              htmx.ajax('POST', area.getAttribute('hx-post'), {source: area, target: '#note-preview', swap: 'innerHTML'});
-          },
-      }">
+      x-data="noteEditor" @htmx:after-settle="showContentErrors($event)">
     {% csrf_token %}
     <input type="hidden" name="base_version" value="{{ values.base_version }}">
 
@@ -78,10 +66,8 @@
     </fieldset>
     {% endif %}
 
-    {% comment %} The view: Content only (the default), Content + preview (side by side from lg, stacked below), or Preview
-       only. The choice is kept in `window.ztNoteEditorView` for the life of the page, so a conflict re-render keeps it; a
-       new visit starts on Content. The preview is only asked for while it shows: typing in Content only sends nothing,
-       and switching to a view with the preview fetches it once. {% endcomment %}
+    {% comment %} The view switch (the `noteEditor` component in notes/js/editor.js): Content only (the default), Content +
+       preview (side by side from lg, stacked below), or Preview only. The preview is only asked for while it shows. {% endcomment %}
     <div class="mb-2 flex justify-end">
         <div role="group" aria-label="Editor view" class="segmented inline-flex flex-wrap rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5">
             <button type="button" data-view="content" :aria-pressed="(view === 'content').toString()" @click="setView('content')" aria-pressed="true"
@@ -93,7 +79,7 @@
         </div>
     </div>
     <div class="grid gap-4" :class="view === 'split' ? 'lg:grid-cols-2' : ''">
-        <div id="pane-write" x-show="view !== 'preview'">
+        <div id="pane-write" x-ref="writePane" x-show="view !== 'preview'">
             <label for="note-content" class="block mb-1 text-sm font-medium">Content (Markdown)</label>
             <textarea id="note-content" name="content" rows="22" maxlength="50000" spellcheck="true" x-ref="content"
                       :data-preview="view === 'content' ? 'off' : 'on'" data-preview="off"
@@ -108,7 +94,7 @@
         </div>
         <div id="pane-preview" x-show="view !== 'content'" style="display: none">
             <p class="mb-1 text-sm font-medium" id="preview-label">Preview</p>
-            <div id="note-preview" aria-live="polite" aria-labelledby="preview-label"
+            <div id="note-preview" x-ref="preview" tabindex="-1" aria-live="polite" aria-labelledby="preview-label"
                  class="min-h-[8rem] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4"></div>
         </div>
     </div>
