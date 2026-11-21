@@ -13,7 +13,9 @@
  *
  * Dismiss hides the chip and remembers the text, which is not parsed again. Submitting the form
  * while the chip is showing accepts it first (the user typed a date and expects the task to have
- * it); a dismissed chip, or text still waiting for its answer, is sent as typed. The server never
+ * it); a dismissed chip, or text still waiting for its answer, is sent as typed. Not in the "date"
+ * mode: the task page's details save themselves on any change (tasks.js), so a submit there is
+ * not the user asking for the date, and the chip waits for its own Accept. The server never
  * re-parses: the form posts the explicit fields.
  *
  * A time relative to now ("in 2 hours", `relative: true` in the answer) is right for the moment it
@@ -241,9 +243,11 @@
                 ask();
             });
         }
-        // Submitting with the chip showing accepts it: the user typed a date and expects the task to
-        // have it. Capture phase, so this runs before htmx's own submit listener reads the fields.
-        if (form) {
+        // Submitting with the chip showing accepts it: the user typed a date and expects the task
+        // to have it. Capture phase, so this runs before htmx's own submit listener reads the
+        // fields. Not in the date box: the details save themselves when another field changes, which is
+        // no answer to the chip.
+        if (form && !dateMode) {
             form.addEventListener('submit', function () {
                 if (result && !chip.hidden) accept();
             }, true);

@@ -1,9 +1,12 @@
 {% load todo_ui %}
 {% comment %} The task form, in two modes. `mode='quick'`: the quick-add box (title, date, time, priority, labels; posts
    to todo:create and re-renders the list in `view`). `mode='details'`: the task page's details (the same
-   controls without a title; saves `part=details` of the task and re-renders the panel). The details have no Save
-   button: they save themselves on every change (`data-autosave`, static/todo/js/tasks.js); the labels and repeat
-   popovers save when they close. Needs `labels` (the user's)
+   controls without a title; saves `part=details` of the task). The details have no Save button: they save
+   themselves on every change (`data-autosave`, static/todo/js/tasks.js); the labels and repeat popovers save when
+   they close. A save swaps nothing itself (`hx-swap="none"`): the script picks out of the answered panel only the
+   parts the change touched (`hx-select-oob`: `#task-details-fields`, `#task-repeat-line`, `#task-reminders`,
+   `#task-msg`), so an editor or menu open elsewhere on the page stays open, and the form with its status line stays
+   in place. Needs `labels` (the user's)
    and `selected_label_ids`; in details mode `task`. Both modes read dates out of text with the AI (static/todo/js/title_parse.js, the
    `data-title-parse` containers): the title of the quick-add box, and the "Type a date" box of the details. {% endcomment %}
 {% if mode == 'quick' %}
@@ -35,9 +38,9 @@
 </form>
 {% else %}
 <form id="task-details-form" method="post" action="{% url 'todo:edit' task.number %}"
-      hx-post="{% url 'todo:edit' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
-      hx-vals='{"ctx": "page", "part": "details"}'
-      data-reminder-count="{{ reminders|length }}" data-autosave hx-sync="this:queue last"
+      hx-post="{% url 'todo:edit' task.number %}" hx-target="#task-panel" hx-swap="none"
+      hx-select-oob="task-msg" hx-vals='{"ctx": "page", "part": "details"}'
+      data-autosave hx-sync="this:queue last"
       class="mb-8">
     {% csrf_token %}
     <input type="hidden" name="part" value="details">
@@ -51,10 +54,12 @@
         {% include 'todo/partials/parse_chip.html' with chip_id='details-parse-chip' %}
     </div>
     <div class="flex flex-wrap items-end gap-3">
-        {% include 'todo/partials/task_form_fields.html' with show_labels_text=True %}
+        <div id="task-details-fields" class="contents" data-reminder-count="{{ reminders|length }}">
+            {% include 'todo/partials/task_form_fields.html' with show_labels_text=True %}
+        </div>
         <noscript><button type="submit"
                 class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">Save</button></noscript>
-        <p id="details-save-status" class="pb-2 text-xs text-gray-500 dark:text-gray-400" role="status" aria-live="polite"></p>
+        <p id="details-save-status" class="pb-2 text-xs text-gray-500 dark:text-gray-400" role="status"></p>
     </div>
 </form>
 {% endif %}

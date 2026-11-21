@@ -5000,9 +5000,20 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   priority select, an accepted AI chip), coalesced into one request, `hx-sync="this:queue last"`,
   nothing sent when the values equal those last sent; the labels and repeat popovers save when they
   close (their Alpine `open` watch sends `popover-closed`; changes inside `[data-save-on-close]`
-  wait), a time typed on a task with no date waits for the date, `#details-save-status` says
-  "Saving…" / "Saved" / "Not saved", text typed in another field of `#task-panel` while a request is
-  in flight is put back after the swap, and a `<noscript>` Save button covers no JavaScript),
+  wait). **A save swaps nothing itself** (`hx-swap="none"`): the answer is still the whole panel, and
+  the script sets `hx-select-oob` per request to the parts the change touched (`#task-msg` always,
+  `#task-details-fields` for any change but the priority, `#task-repeat-line` unless only labels
+  changed, `#task-reminders` for the date or time), so an editor or menu open elsewhere in the panel
+  stays open and the form with `#details-save-status` ("Saving…" / "Saved" / "Not saved", one
+  persistent `role="status"`) is never replaced; those ids must stay in every panel
+  (`tests/test_details_autosave.py`). A time typed on a task with no date waits for the date ("Choose
+  a date to save the time."); typing takes an earlier "Saved" away; the "Type a date" chip is not
+  accepted by an autosave (`title_parse.js` accepts on submit in the quick-add box only); a change not
+  sent when the page is left goes out with `navigator.sendBeacon` on `pagehide` (not one clearing a
+  date that has reminders, which asks first: the count is on `#task-details-fields`, the saved date is
+  the one last sent, since a hidden input's `defaultValue` follows its value); text typed into a field
+  that a swap replaces, while the request was in flight, is put back; and a `<noscript>` Save button
+  covers no JavaScript),
   `todo:complete`, `uncomplete`, `postpone` (`preset`, `date`), `trash-task`,
   `restore`, `delete` (a trashed task, forever; an unpaid one is a 422, see "Numbering and billing"), `checklist` (`index`, `checked`; answers the
   re-rendered `#task-description`), `subtask-add`, `todo:reorder`, `todo:reschedule-overdue`,
