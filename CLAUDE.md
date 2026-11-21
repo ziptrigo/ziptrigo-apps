@@ -5061,8 +5061,10 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   `db_default` too, migration `0020`) is the list To-do opens on. `/todo/` (`todo:home`, the
   product's `url_name`, so the header menu and the home page card) only redirects to it
   (`views.lists.home_page`), which is why Today has its own address, `/todo/today/`; a link that
-  means Today specifically (the sidebar, "Reschedule overdue", the fallback of `redirect_back`) keeps
-  `todo:today`. Chosen on the settings page ("Start page", `SettingsForm.default_view`; a post
+  means Today specifically (the sidebar, "Reschedule overdue") keeps `todo:today`, while a generic
+  "back to To-do" (the fallback of `redirect_back`, quick add with no usable Referer) goes to
+  `todo:home`, so it lands on the chosen list. The redirect is deliberate (each list keeps one
+  address, which the sidebar highlight and `HX-Push-Url` rely on). Chosen on the settings page ("Start page", `SettingsForm.default_view`; a post
   without it leaves it alone, an unknown value is a 422 `Open To-do on: Choose Today, Upcoming or
   All.`), `services.accounts.clean_default_view` / `set_default_view`, `GET|PATCH /api/todo/settings`
   (`default_view`; a bad value, `null` included, is a 400 before `TODO_EDIT_USER` is spent; OpenAPI

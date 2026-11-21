@@ -1,6 +1,7 @@
 """The list To-do opens on (`TodoAccount.default_view`): `/todo/` redirects to it, the settings
 page and `PATCH /api/todo/settings` change it."""
 
+import re
 from html import unescape
 
 import pytest
@@ -27,6 +28,33 @@ def web(funded_user):
 
 def text(response) -> str:
     return unescape(response.content.decode())
+
+
+def heading(response) -> str:
+    """The page's `<h1>` text."""
+    found = re.search(r'<h1[^>]*>(.*?)</h1>', response.content.decode(), flags=re.DOTALL)
+    assert found is not None
+    return unescape(found.group(1)).strip()
+
+
+def current_nav(response) -> str:
+    """The `href` of the sidebar entry marked as the current page."""
+    found = re.search(r'<a href="([^"]+)" aria-current="page"', response.content.decode())
+    assert found is not None
+    return found.group(1)
+
+
+def options(response) -> dict[str, bool]:
+    """The "Open To-do on" select: `{value: selected}`, in order."""
+    body = response.content.decode()
+    select = re.search(r'<select id="default-view".*?</select>', body, flags=re.DOTALL)
+    assert select is not None
+    return {
+        value: bool(selected.strip())
+        for value, selected in re.findall(
+            r'<option value="([^"]+)"\s*(selected)?\s*>', select.group(0)
+        )
+    }
 
 
 class TestModel:
@@ -69,7 +97,18 @@ class TestHome:
 
         assert response.redirect_chain == [(reverse('todo:today'), 302)]
         assert response.status_code == 200
-        assert '<h1' in response.content.decode()
+        assert heading(response) == 'Today'
+        assert current_nav(response) == reverse('todo:today')
+
+    @pytest.mark.parametrize(('view', 'title'), [('upcoming', 'Upcoming'), ('all', 'All tasks')])
+    def test_the_chosen_page_opens(self, web, funded_user, view, title):
+        set_default_view(get_account(funded_user), view)
+
+        response = web.get('/todo/', follow=True)
+
+        assert response.status_code == 200
+        assert heading(response) == title
+        assert current_nav(response) == reverse(f'todo:{view}')
 
     def test_the_query_string_is_kept(self, web, funded_user):
         set_default_view(get_account(funded_user), 'all')
@@ -84,7 +123,8 @@ class TestHome:
         response = web.get(reverse('todo:today'))
 
         assert response.status_code == 200
-        assert 'Today' in text(response)
+        assert heading(response) == 'Today'
+        assert current_nav(response) == reverse('todo:today')
 
     def test_a_visitor_without_a_session_is_sent_to_sign_in(self):
         response = Client().get('/todo/')
@@ -100,16 +140,32 @@ class TestHome:
         assert f'href="{reverse("todo:today")}"' in body
 
 
+class TestBackToTodo:
+    def test_a_generic_way_back_lands_on_the_chosen_list(self, web, funded_user):
+        set_default_view(get_account(funded_user), 'upcoming')
+
+        response = web.post(
+            reverse('todo:create'),
+            {'title': 'T'},
+            HTTP_REFERER='https://evil.test/',
+            follow=True,
+        )
+
+        assert [url for url, _ in response.redirect_chain] == [
+            reverse('todo:home'),
+            reverse('todo:upcoming'),
+        ]
+        assert heading(response) == 'Upcoming'
+
+
 class TestSettingsPage:
     def test_the_page_lists_the_three_choices_with_the_saved_one_selected(self, web, funded_user):
         set_default_view(get_account(funded_user), 'upcoming')
 
-        body = text(web.get(reverse('todo:settings')))
+        response = web.get(reverse('todo:settings'))
 
-        assert 'Open To-do on' in body
-        assert '<option value="upcoming" selected>Upcoming</option>' in body
-        assert '<option value="today" >Today</option>' in body
-        assert '<option value="all" >All</option>' in body
+        assert 'Open To-do on' in text(response)
+        assert options(response) == {'today': False, 'upcoming': True, 'all': False}
 
     def test_the_choice_is_saved(self, web, funded_user):
         response = web.post(

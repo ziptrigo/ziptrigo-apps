@@ -280,7 +280,12 @@ def _page(request: AuthenticatedHttpRequest, view: str) -> HttpResponse:
 @require_GET
 def home_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """`/todo/`: a redirect to the list the account opens on (`TodoAccount.default_view`), keeping
-    the query string."""
+    the query string.
+
+    The redirect is deliberate: rendering the chosen list here would give that list two addresses,
+    and every list relies on having exactly one (the sidebar marks the current entry by it, and the
+    list partial's `HX-Push-Url` and the pager write it back to the address bar). It costs one round
+    trip on the way in."""
     view = get_account(request.user).default_view
     url = page_url(view if view in ('today', 'upcoming', 'all') else 'today')
     if query := request.GET.urlencode():

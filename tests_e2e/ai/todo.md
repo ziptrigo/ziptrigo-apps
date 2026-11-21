@@ -1486,7 +1486,7 @@ user `G` with a token `TG`. The server runs tasks inline, so an export is `ready
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open **Settings**. | A "Start page" section first, with the select "Open To-do on" (choices Today, Upcoming, All; "Today" selected) and the note "The list you see when you open To-do from the menu or the home page. The others stay one click away in the sidebar." |
+| 1 | Open **Settings**. | A "Start page" section first, with the select "Open To-do on" (choices Today, Upcoming, All; "Today" selected) and the note "The list you see whenever you open To-do, from the menu, the home page or a bookmark. The others stay one click away in the sidebar." |
 | 2 | Choose **Upcoming** and **Save**. | "Saved." in green; a reload still shows "Upcoming". |
 | 3 | Click **To-do** in the top navigation, then go to `/` and click the To-do card. | Both land on `/todo/upcoming/` (heading "Upcoming", the Upcoming entry highlighted in the sidebar); the To-do header link is marked as the current product. |
 | 4 | Click **Today** in the sidebar. | `/todo/today/` opens with heading "Today", whatever the setting. |

@@ -200,11 +200,11 @@ def test_header_and_home_page_follow_the_users_choice(client, user):
     content = client.get(reverse('core:home')).content.decode()
 
     assert f'href="{reverse("file_transfer:dashboard")}"' not in content
-    todo = content.index(f'href="{reverse("todo:today")}"')
+    todo = content.index(f'href="{reverse("todo:home")}"')
     qr = content.index(f'href="{reverse("qr_code:dashboard")}"')
     assert todo < qr
     # Once in the header, once on the landing page card.
-    assert content.count(f'href="{reverse("todo:today")}"') == 2
+    assert content.count(f'href="{reverse("todo:home")}"') == 2
     assert 'id="product-nav"' in content
     assert 'id="no-apps"' not in content
 

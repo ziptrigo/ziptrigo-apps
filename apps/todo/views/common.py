@@ -231,13 +231,14 @@ def refuse(
 
 def redirect_back(request: HttpRequest, fallback: str = '') -> HttpResponse:
     """Redirect to `next` (a POSTed same-site path), else the referring page, else `fallback`
-    (default: Today) -- for the actions used without htmx."""
+    (default: `todo:home`, the list the account opens on) -- for the actions used without
+    htmx."""
     for candidate in (request.POST.get('next', ''), request.headers.get('Referer', '')):
         if candidate and url_has_allowed_host_and_scheme(
             candidate, allowed_hosts={request.get_host()}, require_https=request.is_secure()
         ):
             return redirect(candidate)
-    return redirect(fallback or reverse('todo:today'))
+    return redirect(fallback or reverse('todo:home'))
 
 
 def limited(request: AuthenticatedHttpRequest, rule: str, *, retarget: str = '#todo-msg'):

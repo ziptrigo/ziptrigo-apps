@@ -463,7 +463,8 @@ class TestQuickAdd:
             reverse('todo:create'), {'title': 'T'}, HTTP_REFERER='https://evil.test/'
         )
 
-        assert response['Location'] == reverse('todo:today')
+        # Back to To-do: `/todo/`, which opens the list the account chose (`test_default_view`).
+        assert response['Location'] == reverse('todo:home')
 
     def test_without_htmx_a_refusal_is_a_flash_message(self, web):
         response = web.post(reverse('todo:create'), {'title': ''}, follow=True)
