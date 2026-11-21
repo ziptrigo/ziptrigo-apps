@@ -214,6 +214,12 @@ def dark_mode_color(color: str) -> str:
     return '#{:02x}{:02x}{:02x}'.format(*candidate)
 
 
+@register.filter
+def chip_dark(color: str) -> str:
+    """`dark_mode_color` as a filter, for the `--chip-dark` of a label drawn by a script."""
+    return dark_mode_color(color)
+
+
 @register.simple_tag
 def label_chip(label: Label) -> SafeString:
     """The label as a chip: its colour at 20% as the background and as the text. In dark mode the text

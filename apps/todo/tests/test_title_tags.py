@@ -183,6 +183,30 @@ class TestQuickAdd:
         assert list(sub.labels.all()) == [home]
 
 
+class TestPills:
+    """The quick-add form carries what static/todo/js/title_tags.js matches tags against."""
+
+    def test_the_quick_add_form_offers_its_labels_and_projects(self, web, funded_user, wsa):
+        make_label(funded_user, 'home', color='#0000ff')
+
+        html = web.get(reverse('todo:all')).content.decode()
+
+        assert 'data-title-tags' in html and 'id="quick-tag-pills"' in html
+        assert 'data-tag-name="home" data-tag-color="#0000ff"' in html
+        # The dark-mode colour of a label a script draws is the server's, like `label_chip`'s.
+        assert 'data-tag-dark="#0000ff"' not in html
+        assert f'value="{wsa.pk}" data-tag-color="{wsa.color}"' in html
+        assert '<span data-labels-summary>Add labels</span>' in html
+        assert 'todo/js/title_tags.js' in html
+
+    def test_a_label_name_is_escaped(self, web, funded_user):
+        make_label(funded_user, '"><b>x')
+
+        html = web.get(reverse('todo:all')).content.decode()
+
+        assert 'data-tag-name="&quot;&gt;&lt;b&gt;x"' in html
+
+
 class TestApi:
     def test_the_title_files_the_task_and_labels_it(self, client, auth, funded_user, wsa):
         home = make_label(funded_user, 'home')
