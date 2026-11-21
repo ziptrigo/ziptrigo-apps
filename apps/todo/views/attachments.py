@@ -50,6 +50,7 @@ from apps.core.json_numbers import whole_number
 from ..models import Attachment, Task, TodoSettings
 from ..services import attachments, get_account
 from ..services.errors import AccountFrozenError
+from ..services.storage import GET_URL_EXPIRES_SECONDS
 from .common import (
     announces_change,
     credits_url,
@@ -258,9 +259,9 @@ def attachment_download(request: AuthenticatedHttpRequest, attachment_id: str) -
     return response
 
 
-#: How long a browser may reuse the thumbnail's redirect. Below `GET_URL_EXPIRES_SECONDS` (15
-#: minutes), the lifetime of the presigned URL it points at, so a cached redirect never expires.
-THUMBNAIL_CACHE_SECONDS = 600
+#: How long a browser may reuse the thumbnail's redirect: two thirds of the presigned URL's
+#: lifetime (`GET_URL_EXPIRES_SECONDS`, 15 minutes), so a cached redirect never outlives its URL.
+THUMBNAIL_CACHE_SECONDS = GET_URL_EXPIRES_SECONDS * 2 // 3
 
 
 @login_required
@@ -268,8 +269,10 @@ THUMBNAIL_CACHE_SECONDS = 600
 def attachment_thumbnail(request: AuthenticatedHttpRequest, attachment_id: str) -> HttpResponse:
     """The `src` of an image attachment's thumbnail (issue #344): a redirect to a fresh presigned
     inline URL. It is only ever fetched by an `<img>`, so it answers nothing a page could show: no
-    flash message, no login or error page, an empty 404 for another user's file, a file that isn't
-    an image and frozen storage, and an empty 429 over `TODO_THUMBNAIL_USER`."""
+    flash message (nothing is added to the session) and nothing a person would see in the `<img>`
+    slot matters: a plain 404 for another user's file, a file with no thumbnail (not an image, or
+    over the size cap) and frozen storage, and a JSON 429 with `Retry-After` over
+    `TODO_THUMBNAIL_USER`."""
     result = ratelimit.hit_user(request.user, 'TODO_THUMBNAIL_USER')
     if not result.allowed:
         return ratelimit.json_response(result)

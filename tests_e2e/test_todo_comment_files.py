@@ -134,7 +134,7 @@ def test_an_image_shows_a_thumbnail_on_the_task_and_on_its_comment(
     expect(page.locator('#attachment-list')).to_contain_text('notes.txt')
     thumb = page.locator('#attachment-list [data-attachment-thumbnail] img')
     expect(thumb).to_have_count(1)
-    expect(thumb).to_have_attribute('alt', 'Preview of task-photo.png')
+    expect(thumb).to_have_attribute('alt', '')
     page.wait_for_function(
         "() => { const i = document.querySelector('#attachment-list img'); return i && i.complete && i.naturalWidth > 0; }"
     )
@@ -149,13 +149,14 @@ def test_an_image_shows_a_thumbnail_on_the_task_and_on_its_comment(
     box.locator('[data-files-input]').set_input_files(
         {'name': 'comment-photo.png', 'mimeType': 'image/png', 'buffer': PNG}
     )
-    expect(box.locator('[data-files-attached] li')).to_contain_text('comment-photo.png')
+    chip = box.locator('[data-files-attached] li')
+    expect(chip.locator('input[name^="file_name_"]')).to_have_value('comment-photo')
     form.locator('textarea[name="body"]').fill('With a picture')
     form.locator('button[type="submit"]').click()
 
     comment_thumb = page.locator('#task-comments [data-attachment-thumbnail] img')
     expect(comment_thumb).to_have_count(1)
-    expect(comment_thumb).to_have_attribute('alt', 'Preview of comment-photo.png')
+    expect(comment_thumb).to_have_attribute('alt', '')
     page.wait_for_function(
-        '() => { const i = document.querySelector(\'#task-comments img[alt^="Preview"]\'); return i && i.complete && i.naturalWidth > 0; }'
+        "() => { const i = document.querySelector('#task-comments [data-attachment-thumbnail] img'); return i && i.complete && i.naturalWidth > 0; }"
     )

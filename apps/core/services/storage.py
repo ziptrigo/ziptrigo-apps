@@ -446,6 +446,7 @@ class S3Storage:
         *,
         disposition: Disposition = 'attachment',
         content_type: str | None = None,
+        cache_control: str | None = None,
     ) -> str:
         """A short-lived download URL. By default it forces "Save As" with `filename`
         (`disposition='attachment'`); `'inline'` lets the browser display it instead (a PDF, an
@@ -458,7 +459,8 @@ class S3Storage:
         run script. To make that hard to get wrong, an `inline` request with an explicit
         `content_type` outside `INLINE_CONTENT_TYPES` (PDF, JPEG, PNG, WebP, GIF, plain text)
         raises `ValueError`. With no `content_type`, S3 serves whatever type the object was
-        stored with, which the caller must have already vetted.
+        stored with, which the caller must have already vetted. `cache_control`, when given, sets
+        the `Cache-Control` S3 responds with (`ResponseCacheControl`); by default none is sent.
         """
         if (
             disposition == 'inline'
@@ -473,6 +475,8 @@ class S3Storage:
         }
         if content_type is not None:
             params['ResponseContentType'] = content_type
+        if cache_control is not None:
+            params['ResponseCacheControl'] = cache_control
         return self.client.generate_presigned_url('get_object', Params=params, ExpiresIn=expires_in)
 
     # -- Deletion ---------------------------------------------------------------------------

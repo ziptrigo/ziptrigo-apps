@@ -1,11 +1,13 @@
 {% comment %} A small preview of an image attachment (issue #344), under its row: a link that opens the image like "Open".
-   Needs `file` (an uploaded Attachment) and `frozen` (the account's storage is paused: no thumbnails then). Only a file whose
-   bytes were sniffed as an image (`file.is_image`) gets one. The `src` is the thumbnail endpoint, which redirects to a
-   short-lived presigned URL, so nothing here goes stale when htmx re-renders the list; the browser scales the full image. {% endcomment %}
-{% if file.is_image and not frozen %}
+   Needs `file` (an uploaded Attachment) and `frozen` (the account's storage is paused: no thumbnails then). Only a file with
+   `file.has_thumbnail` (bytes sniffed as an image, not over the size cap) gets one. The link is not a tab stop and is hidden
+   from assistive technology: **Open** in the row is the keyboard and screen-reader path to the same image, so the thumbnail
+   is only a mouse shortcut. The `src` is the thumbnail endpoint, which redirects to a short-lived presigned URL, so nothing
+   here goes stale when htmx re-renders the list; the browser scales the full image. {% endcomment %}
+{% if file.has_thumbnail and not frozen %}
 <a href="{% url 'todo:attachment-download' file.pk %}?inline=1" target="_blank" rel="noopener noreferrer"
-   class="block basis-full" data-attachment-thumbnail>
-    <img src="{% url 'todo:attachment-thumbnail' file.pk %}" alt="Preview of {{ file.filename }}"
+   tabindex="-1" aria-hidden="true" class="block basis-full" data-attachment-thumbnail>
+    <img src="{% url 'todo:attachment-thumbnail' file.pk %}" alt=""
          loading="lazy" decoding="async"
          class="h-20 w-auto min-w-[5rem] max-w-full sm:max-w-xs object-contain rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
 </a>

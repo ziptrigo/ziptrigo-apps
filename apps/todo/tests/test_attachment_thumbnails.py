@@ -8,8 +8,12 @@ from django.contrib.messages import get_messages
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.core.services.storage import GET_URL_EXPIRES_SECONDS
+
 from ..models import Attachment, TodoAccount
+from ..models.attachment import THUMBNAIL_MAX_BYTES
 from ..services import add_comment, trash_task
+from ..views.attachments import THUMBNAIL_CACHE_SECONDS
 from .factories import make_attachment, make_task
 
 pytestmark = [
@@ -43,12 +47,24 @@ class TestRendering:
 
         assert html.count(MARKER) == 1
         assert f'src="{thumb_url(attachment)}"' in html
-        assert 'alt="Preview of photo.png"' in html
+        # Not a tab stop and hidden from assistive tech: "Open" is the keyboard path.
+        assert 'tabindex="-1" aria-hidden="true"' in html
+        assert 'alt=""' in html
         assert 'loading="lazy"' in html
         # Clicking it opens the image, like the "Open" link.
         assert (
             f'href="{reverse("todo:attachment-download", args=[attachment.pk])}?inline=1"' in html
         )
+
+    def test_an_image_over_the_size_cap_has_none(self, web, task, fake_storage):
+        make_attachment(task, fake_storage, size_bytes=THUMBNAIL_MAX_BYTES + 1)
+
+        assert MARKER not in page(web, task)
+
+    def test_an_image_exactly_at_the_cap_has_one(self, web, task, fake_storage):
+        make_attachment(task, fake_storage, size_bytes=THUMBNAIL_MAX_BYTES)
+
+        assert page(web, task).count(MARKER) == 1
 
     def test_a_pdf_has_none(self, web, task, fake_storage):
         make_attachment(
@@ -132,7 +148,26 @@ class TestEndpoint:
         assert 'disposition=inline' in response['Location']
         assert fake_storage.get_urls[0]['content_type'] == 'image/png'
         # Cached for less than the presigned URL lives (15 minutes).
-        assert response['Cache-Control'] == 'private, max-age=600'
+        assert response['Cache-Control'] == f'private, max-age={THUMBNAIL_CACHE_SECONDS}'
+        # The object itself is signed to be cached for the URL's lifetime.
+        assert (
+            fake_storage.get_urls[0]['cache_control']
+            == f'private, max-age={GET_URL_EXPIRES_SECONDS}'
+        )
+
+    def test_the_redirect_is_cached_for_less_than_the_url_lives(self):
+        assert 0 < THUMBNAIL_CACHE_SECONDS < GET_URL_EXPIRES_SECONDS
+
+    def test_an_image_over_the_cap_is_a_404_and_signs_nothing(self, web, task, fake_storage):
+        big = make_attachment(task, fake_storage, size_bytes=THUMBNAIL_MAX_BYTES + 1)
+
+        assert web.get(thumb_url(big)).status_code == 404
+        assert fake_storage.get_urls == []
+
+    def test_an_image_exactly_at_the_cap_is_served(self, web, task, fake_storage):
+        exact = make_attachment(task, fake_storage, size_bytes=THUMBNAIL_MAX_BYTES)
+
+        assert web.get(thumb_url(exact)).status_code == 302
 
     def test_a_non_image_is_a_404_and_signs_nothing(self, web, task, fake_storage):
         pdf = make_attachment(
@@ -173,9 +208,7 @@ class TestEndpoint:
 
         assert web.get(thumb_url(attachment)).status_code == 302
 
-    def test_over_the_limit_is_an_empty_429_with_no_message(
-        self, web, task, fake_storage, settings
-    ):
+    def test_over_the_limit_is_a_json_429_with_no_message(self, web, task, fake_storage, settings):
         settings.RATELIMIT_ENABLE = True
         settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'TODO_THUMBNAIL_USER': (1, 60)}
         attachment = make_attachment(task, fake_storage)
@@ -201,6 +234,14 @@ class TestEndpoint:
 
         assert client.get(thumb_url(attachment)).status_code == 302
         assert web.post(thumb_url(attachment)).status_code == 405
+
+
+def test_has_thumbnail_needs_an_image_within_the_cap():
+    assert Attachment(inline_type='image/png', uploaded=True, size_bytes=1).has_thumbnail
+    assert not Attachment(
+        inline_type='image/png', uploaded=True, size_bytes=THUMBNAIL_MAX_BYTES + 1
+    ).has_thumbnail
+    assert not Attachment(inline_type='application/pdf', uploaded=True, size_bytes=1).has_thumbnail
 
 
 def test_is_image_follows_the_sniffed_type_only():

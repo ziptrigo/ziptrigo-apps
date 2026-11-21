@@ -176,6 +176,7 @@ class FakeTodoStorage:
         *,
         disposition: str = 'attachment',
         content_type: str | None = None,
+        cache_control: str | None = None,
     ) -> str:
         self.get_urls.append(
             {
@@ -183,6 +184,7 @@ class FakeTodoStorage:
                 'filename': filename,
                 'disposition': disposition,
                 'content_type': content_type,
+                'cache_control': cache_control,
             }
         )
         return f'https://fake-s3.test/{key}?get&disposition={disposition}'

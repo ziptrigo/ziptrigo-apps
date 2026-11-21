@@ -826,6 +826,7 @@ class TestDownloadUrl:
             'filename': 'photo.png',
             'disposition': 'inline',
             'content_type': 'image/png',
+            'cache_control': None,
         }
         assert url.startswith('https://fake-s3.test/')
 

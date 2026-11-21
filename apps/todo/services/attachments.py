@@ -575,10 +575,10 @@ def thumbnail_url(attachment: Attachment) -> str:
     #344). The browser scales the full image; nothing is rendered here.
 
     Raises:
-        ValidationError: the file is not an uploaded image (by its sniffed type) or the account's
-            storage is frozen. Nothing is signed then.
+        ValidationError: the file has no thumbnail (not an uploaded image by its sniffed type, or
+            over `THUMBNAIL_MAX_BYTES`) or the account's storage is frozen. Nothing is signed then.
     """
-    if not attachment.is_image or is_frozen(attachment.user_id):
+    if not attachment.has_thumbnail or is_frozen(attachment.user_id):
         raise ValidationError('There is no thumbnail for this file.')
     return get_storage().presigned_get_url(
         attachment_key(attachment.user_id, attachment.pk),
@@ -586,6 +586,7 @@ def thumbnail_url(attachment: Attachment) -> str:
         GET_URL_EXPIRES_SECONDS,
         disposition='inline',
         content_type=attachment.inline_type,
+        cache_control=f'private, max-age={GET_URL_EXPIRES_SECONDS}',
     )
 
 

@@ -523,7 +523,7 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'TODO_DOWNLOAD_USER': (120, 60),
     # The thumbnails of image attachments (issue #344): one `<img>` request per image each time the
     # attachments or comments are drawn, so much looser than the downloads. Over it the image just
-    # doesn't load (an empty 429), never an error message.
+    # doesn't load (a JSON 429 with Retry-After), never an error message.
     'TODO_THUMBNAIL_USER': (600, 60),
     # Reading a date out of a task title with the AI (issue #183), `POST /todo/parse/`: per user,
     # charged before the model is called. The page asks after a 600 ms pause in typing, so a
