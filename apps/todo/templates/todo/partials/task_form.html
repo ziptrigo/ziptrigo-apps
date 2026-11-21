@@ -21,7 +21,7 @@
                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
             {% include 'todo/partials/parse_chip.html' with chip_id='quick-parse-chip' %}
             {% comment %} The `@label` and `#project` pills static/todo/js/title_tags.js draws as the title is typed. {% endcomment %}
-            <div id="quick-tag-pills" data-tag-pills hidden class="mt-2 flex flex-wrap gap-2" role="group" aria-label="Suggested labels and projects"></div>
+            <div id="quick-tag-pills" data-tag-pills hidden class="mt-2 flex flex-wrap items-center gap-2" role="group" aria-label="Suggested labels and projects"></div>
             <p data-tag-status class="sr-only" aria-live="polite"></p>
         </div>
         <button type="submit"

@@ -5,6 +5,7 @@ Load with `{% load todo_ui %}`.
 """
 
 import colorsys
+import functools
 import logging
 import re
 from collections.abc import Sequence
@@ -195,6 +196,7 @@ def _contrast(first: Sequence[float], second: Sequence[float]) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+@functools.lru_cache(maxsize=1024)
 def dark_mode_color(color: str) -> str:
     """`color` (`#rrggbb`) lightened, keeping its hue, until it reads on the dark card with the chip's
     own 20% tint on it (contrast of at least 4.5:1); a colour that already does is returned as it is."""
@@ -216,7 +218,8 @@ def dark_mode_color(color: str) -> str:
 
 @register.filter
 def chip_dark(color: str) -> str:
-    """`dark_mode_color` as a filter, for the `--chip-dark` of a label drawn by a script."""
+    """`dark_mode_color` as a filter, for the `--chip-dark` of a label drawn by a script (the quick-add
+    box renders it for every label: the computation is cached per colour)."""
     return dark_mode_color(color)
 
 

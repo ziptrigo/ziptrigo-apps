@@ -5797,18 +5797,24 @@ line says so).
   the body wins, `labels` and `@` merged) and an emailed subject (read before the date, so the model never sees the
   tags). The date reader puts back a tag its `clean_title` dropped (`title_tags.keep_in`), so Accept never loses one.
   Renaming a task does not read tags. Tests: `apps/todo/tests/test_title_tags.py`; AI case TODO-69.
-- **Tag pills in the quick-add box** (`static/todo/js/title_tags.js`, the title's container is `data-title-tags`, the
-  pills go in `#quick-tag-pills`). From the first character after `@` or `#` every matching label or project shows as
-  a pill under the title (like the date chip), up to 3 per tag and 6 in all, matched **in the browser** against the
-  form's own controls (the `labels` checkboxes carry `data-tag-name`, `data-tag-color` and `data-tag-dark`, the
-  `chip_dark` filter; the Project select's options `data-tag-color`): nothing is fetched. Matching ignores case,
-  accents, spaces, `-` and `_`: an exact name first, then a name starting with the text, then a later word of a name.
-  **A click confirms it**: the label's box is ticked or the Project select chooses the project, and the tag leaves the
-  title (punctuation kept; a tag at the end leaves a space so the next tag starts a word), firing the title's `input`
-  so the date chip reads it again. A pill not clicked changes nothing (the server still reads an exact tag at
-  creation); submitting does not accept pills (unlike the date chip). The Labels button now counts ticked boxes live
-  (`data-labels-summary`, any task form). Not offered in the subtask form (it has no label controls). Tests:
-  `TestPills` in `test_title_tags.py`, the Playwright `tests_e2e/test_todo_tag_pills.py`, AI case TODO-78.
+- **Tag pills while typing a title** (`static/todo/js/title_tags.js`; the title's container is `data-title-tags`,
+  the pills go in `#quick-tag-pills` / `#subtask-tag-pills`). From the first character after `@` or `#` every matching
+  label or project shows as a pill under the title (like the date chip), up to 3 per tag and 6 in all, matched **in the
+  browser** against what the form renders: nothing is fetched. Matching ignores case, accents, spaces, `-` and `_`: an
+  exact name first, then a name starting with the text, then a later word of a name; a label already ticked or the
+  project already chosen comes last, marked "added". **A click confirms it.** In the quick-add box (the `labels`
+  checkboxes carry `data-tag-name`, `data-tag-color` and `data-tag-dark` -- the `chip_dark` filter, `dark_mode_color`
+  cached per colour -- and the Project options `data-tag-color`) the label's box is ticked or the Project select
+  chooses the project, and the tag leaves the title (punctuation kept; a tag at the end leaves a space so the next tag
+  starts a word). The subtask form has no label controls, so it renders the labels as hidden `[data-tag-option]`s and
+  a click **completes the tag in the title** (`@website-relaunch`, spaces as `-`) for the server's `title_tags` to read;
+  a tag that already names a label exactly offers nothing. A click fires the title's `input`, so the date chip reads it
+  again. Escape in the title, or the row's "Hide suggestions" button, hides the suggestions of the tags typed so far
+  (those exact texts are not offered again). A screen reader hears the number of suggestions once the typing pauses
+  (600 ms), not at every key. A pill not clicked changes nothing (the server still reads an exact tag at creation);
+  submitting does not accept pills (unlike the date chip). The Labels button counts ticked boxes live
+  (`data-labels-summary`, any task form). Tests: `TestPills` in `test_title_tags.py`, the Playwright
+  `tests_e2e/test_todo_tag_pills.py`, AI case TODO-78.
 - **Not done:** reading a project from a renamed title, bulk moves, and
   the sidebar's order updating without a reload after a drag on the Projects page. The Privacy Policy's
   To-do line names projects; `TERMS_VERSION` was **not** bumped for it (the owner decides).
