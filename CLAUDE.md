@@ -6090,6 +6090,27 @@ long reasoning.
   never completed, and presigns a GET: `disposition='inline'` **only** when the caller asked and
   `inline_type` is set, `content_type=inline_type or None`. So a `.exe` named `photo.png` is always a
   download; the declared type is never consulted.
+- **Thumbnails** (issue #344; `Attachment.is_image`, `services.attachments.thumbnail_url`, `views.attachments.
+  attachment_thumbnail`, `partials/attachment_thumbnail.html`, no migration). An **uploaded** attachment whose *sniffed*
+  `inline_type` is JPEG, PNG, GIF or WebP (`models.attachment.THUMBNAIL_TYPES`; never the declared type or the name, and
+  never a PDF) shows a small preview (`<img loading="lazy" decoding="async">`, 5 rem high, alt `Preview of <name>`) on its
+  own line under its row, both in the task's Attachments list (`attachment_list.html`, so the list the upload script
+  re-fetches too) and under a comment's files (`comment_files.html`); the `<img>` sits in a link to the file's
+  `?inline=1` download (new tab, `rel="noopener noreferrer"`), i.e. a click is "Open". Pending uploads and draft comment
+  chips have none, and **none are rendered while the account's storage is frozen** (`attachments_frozen` /
+  `comment_files_frozen`). The `src` is **`GET /todo/attachments/<id>/thumbnail/`** (`todo:attachment-thumbnail`), not a
+  presigned URL in the HTML (those expire and htmx re-renders the lists): it redirects (302) to a fresh presigned
+  *inline* URL of the very object, with `Cache-Control: private, max-age=600`, **below the URL's 15 minutes**, so a
+  cached redirect never outlives it. It is a separate view from `attachment_download` because only an `<img>` ever loads
+  it: the download view's frozen answer (a flash message and a redirect to the task) and `limited()`'s page/htmx 429
+  would leave junk in the session or the image slot. Here a refusal (another user's file, a pending upload, a file that
+  isn't an image, frozen storage) is a plain **404**, over the limit an empty JSON **429** with `Retry-After`; no answer
+  adds a flash message. Another user's file stays a 404 (`_owned_attachment`), a trashed task's file is still served
+  (as the download is). **Rate limit `TODO_THUMBNAIL_USER` (600/min per user)**, its own budget so a page of images
+  can't spend `TODO_DOWNLOAD_USER` (120/min): one hit per thumbnail each time the list or comments are drawn. The
+  browser scales the full image; no rendition is built (so a huge image is still downloaded, only cached for 10
+  minutes), no Pillow, no child process. Tests: `apps/todo/tests/test_attachment_thumbnails.py`, the Playwright
+  `tests_e2e/test_todo_comment_files.py` (the image really loads), AI case TODO-80.
 - **Deleting.** `delete_attachment` deletes the object first (a storage error raises and leaves
   everything as it was), then, under the row lock, the row and -- for an uploaded one, only by the
   call that actually deleted the row -- its bytes. **Trashing a task keeps its attachments, still

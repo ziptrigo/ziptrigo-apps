@@ -13,6 +13,7 @@
         <a href="{% url 'todo:attachment-download' file.pk %}?inline=1" target="_blank" rel="noopener noreferrer"
            class="text-sage-600 dark:text-sage-300 hover:underline">Open</a>
         {% endif %}
+        {% include 'todo/partials/attachment_thumbnail.html' with file=file frozen=comment_files_frozen %}
     </li>
     {% endfor %}
 </ul>

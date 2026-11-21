@@ -258,6 +258,33 @@ def attachment_download(request: AuthenticatedHttpRequest, attachment_id: str) -
     return response
 
 
+#: How long a browser may reuse the thumbnail's redirect. Below `GET_URL_EXPIRES_SECONDS` (15
+#: minutes), the lifetime of the presigned URL it points at, so a cached redirect never expires.
+THUMBNAIL_CACHE_SECONDS = 600
+
+
+@login_required
+@require_GET
+def attachment_thumbnail(request: AuthenticatedHttpRequest, attachment_id: str) -> HttpResponse:
+    """The `src` of an image attachment's thumbnail (issue #344): a redirect to a fresh presigned
+    inline URL. It is only ever fetched by an `<img>`, so it answers nothing a page could show: no
+    flash message, no login or error page, an empty 404 for another user's file, a file that isn't
+    an image and frozen storage, and an empty 429 over `TODO_THUMBNAIL_USER`."""
+    result = ratelimit.hit_user(request.user, 'TODO_THUMBNAIL_USER')
+    if not result.allowed:
+        return ratelimit.json_response(result)
+    attachment = _owned_attachment(request, attachment_id)
+    try:
+        url = attachments.thumbnail_url(attachment)
+    except ValidationError as exc:
+        # Includes frozen storage (`AccountFrozenError` is a `ValidationError`): the page doesn't
+        # render thumbnails then, so this is a stale page, and it needs no message.
+        raise Http404(exc.messages[0]) from exc
+    response = redirect(url)
+    response['Cache-Control'] = f'private, max-age={THUMBNAIL_CACHE_SECONDS}'
+    return response
+
+
 @login_required
 @require_POST
 def attachment_delete(request: AuthenticatedHttpRequest, attachment_id: str) -> HttpResponse:

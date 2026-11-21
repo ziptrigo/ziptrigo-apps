@@ -44,6 +44,8 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
   list as a spreadsheet, free) -- the dialog, the zip's folders and the workbook, the export's pages, refunds and
   paused storage -- and the same exports through the JWT API (`/api/todo/exports`, `/api/todo/export.xlsx`; TODO-74,
   TODO-75) and the `inv todo` commands (`export-files` and companions; TODO-76, TODO-77);
+- **Thumbnails** (issue #344, TODO-80): a small preview of an attached image under its row, on the task and on a comment,
+  none for other files, while storage is paused or for another user's file;
 - credits: the first 10 tasks of a calendar month are free, then 10 credits each; subtasks and occurrences count;
 - access control: logged-out visitors, another user's task numbers, attachments and filters.
 
@@ -628,7 +630,7 @@ image or a PDF, whatever its name or declared type.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Click **Add files**. | The browser's file chooser opens (cancel it). The button is reachable with Tab and has a visible focus ring. |
-| 2 | `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`. | A row appears in the drop zone's list with the name, the size "1 KB", a progress bar (named "Upload progress of photo.png") and a cancel x ("Cancel upload of photo.png"); the status moves through "Preparing…", "Uploading…", "Finishing…" (may be too quick to see). In the network log: `POST .../attachments/start/` (201), a `PUT` to `localhost:4566` (200), `POST .../attachments/<id>/complete/` (200). The row then goes and the list below shows `photo.png`, "280 bytes", an image icon, **Download**, **Open** and **Remove**. No console errors. |
+| 2 | `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`. | A row appears in the drop zone's list with the name, the size "1 KB", a progress bar (named "Upload progress of photo.png") and a cancel x ("Cancel upload of photo.png"); the status moves through "Preparing…", "Uploading…", "Finishing…" (may be too quick to see). In the network log: `POST .../attachments/start/` (201), a `PUT` to `localhost:4566` (200), `POST .../attachments/<id>/complete/` (200). The row then goes and the list below shows `photo.png`, "280 bytes", an image icon, **Download**, **Open** and **Remove**, with a small preview of the image under the row (TODO-80). No console errors. |
 | 3 | `todoPick([{ name: 'scan.pdf', type: 'application/pdf', base64: PDF_A }, { name: 'notes.txt', type: 'text/plain', text: 'hello world\n' }, { name: 'fake.png', type: 'image/png', text: 'this is no png\n' }])`. | Three rows upload in parallel; the list then holds four files, oldest first (the three new ones in the order their uploads started, normally as picked): `photo.png`, `scan.pdf` (PDF icon, "588 bytes", **Open**), `notes.txt` ("12 bytes", a plain file icon, **no Open**), `fake.png` ("15 bytes", a plain file icon, **no Open**: its bytes are not a PNG, so the name and the declared type don't count). |
 | 4 | Click **Open** on `photo.png`. | A new tab shows the light-gray image itself (not a download prompt). Close it. **Open** on `scan.pdf`: the PDF shows in the browser's viewer ("STAPLES 42.10"). |
 | 5 | Click **Download** on `notes.txt`, then on `fake.png`. | Each downloads (no new page) under its own name, `notes.txt` with the 12 bytes `hello world`, `fake.png` with the 15 bytes of text. `photo.png`'s **Download** also downloads (does not open). |
@@ -1514,6 +1516,23 @@ user `G` with a token `TG`. The server runs tasks inline, so an export is `ready
 | 7 | Edit the comment that has a file. | Each file of the comment shows its name in a box (without the extension, which is shown beside it) next to its Remove box. Change it to `Signed copy` and **Save**. The comment shows `Signed copy.<ext>`; the comment is not marked "(edited)" when its text did not change. |
 | 8 | Add a comment and paste an image into its box. | The finished file appears as a chip whose name is an editable box (`2026-...` without `.webp`); type `Sketch` and post the comment: its file is `Sketch.webp`, and **History** has one entry, "File attached to a comment: Sketch.webp" (no rename entry). Emptying a chip's box to spaces and posting refuses with `File name: Give 2026-....webp a name.` under that box. |
 | 9 | `inv todo get local <n>` to read an attachment id, then `inv todo rename-file local <id> Board photo`. | `Renamed to Board photo.webp.`; the task page lists the new name after a reload. |
+
+### TODO-80 Thumbnails of attached images
+
+**Purpose:** an attached image shows a small preview under its row, on the task and under a comment; only a file whose
+bytes are an image gets one; nothing shows while storage is paused or for someone else's file.
+**Preconditions:** TODO-28 and TODO-30 done as `T2` (the task `T2_TASK` has `photo.png`, `scan.pdf`, `notes.txt` and a comment
+with a `photo.png` file); paste the file helper (Test data > Files).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/todo/<T2_TASK>/` and look at the Attachments list. | Under the `photo.png` row (name, size, **Download**, **Open**, **Remove**) a small preview of the light-gray image, about 5 rem high, with a thin border. `scan.pdf` and `notes.txt` have **no** preview, and neither has `fake.png` if it is still there (its bytes are not an image, whatever its name). |
+| 2 | Scroll to the comment with `photo.png`. | The same small preview under the file's row. In the network log each preview is a `GET /todo/attachments/<id>/thumbnail/` answered 302 to `localhost:4566` with `disposition=inline`, and the image loads (no broken-image icon). |
+| 3 | Click the preview. Then Tab to it and press Enter. | Each opens the image itself in a new tab (like **Open**); the preview has a visible keyboard focus ring and its accessible name is "Preview of photo.png". |
+| 4 | Reload the page twice quickly, then `todoPick` another PNG into the drop zone. | The list refreshes by itself when the file lands and the new file has its preview too. No error text or message appears anywhere. |
+| 5 | Switch to dark mode and to a phone width (375 px). | The preview's border and background follow the theme and it never makes the row wider than the screen (it sits on its own line below the name and links). |
+| 6 | (Shell step) freeze the account's storage: `tests_e2e/ai/manage.py shell -c "from django.utils import timezone; from apps.todo.models import TodoAccount; TodoAccount.objects.update(frozen_at=timezone.now())"`, then reload. | The "Storage is paused" banner shows and **no** file has a preview. Open `/todo/attachments/<id of photo.png>/thumbnail/` directly: a plain 404 page and, after going to the task page, **no** red "Storage is paused" flash message came from it. Clear `frozen_at` again. |
+| 7 | Sign in as `qa.broke@example.com` (another context) and open `/todo/attachments/<id of photo.png>/thumbnail/`. | A 404 page: another user's file never gets a preview. A request for `scan.pdf`'s or `notes.txt`'s `.../thumbnail/` as `T2` is a 404 too. |
 
 ## Out of scope
 

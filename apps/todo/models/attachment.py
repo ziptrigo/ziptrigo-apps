@@ -11,6 +11,10 @@ from apps.accounts.models import User
 from .comment import Comment
 from .task import Task
 
+# The sniffed types a thumbnail is shown for: the images a browser can draw in an `<img>` (a PDF is
+# inline-safe too, but has no thumbnail). Never decided by the declared type or the file name.
+THUMBNAIL_TYPES = frozenset({'image/jpeg', 'image/png', 'image/gif', 'image/webp'})
+
 
 class Attachment(models.Model):
     """A file attached to a task (issue #184), uploaded straight to S3 with a presigned PUT.
@@ -95,3 +99,9 @@ class Attachment(models.Model):
     def is_inline(self) -> bool:
         """Whether "Open" (shown in the browser) is offered: a sniffed inline-safe type."""
         return bool(self.inline_type)
+
+    @property
+    def is_image(self) -> bool:
+        """Whether a thumbnail is shown: the bytes were sniffed as a browser-drawable image and
+        the upload completed."""
+        return self.uploaded and self.inline_type in THUMBNAIL_TYPES

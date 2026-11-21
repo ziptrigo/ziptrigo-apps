@@ -1,7 +1,8 @@
 {% load filenames %}
 {% comment %} The files attached to `task`: name, size, and Download / Open / Rename / Remove. Rename edits the name in place
    (the extension is shown beside the box and kept); it posts to `todo:attachment-rename`, which answers this list again, a
-   refusal going to #attachment-msg. After a save `tasks.js` puts the focus back on the row's Rename button. {% endcomment %}
+   refusal going to #attachment-msg. After a save `tasks.js` puts the focus back on the row's Rename button. An image
+   (sniffed `inline_type`) also gets a thumbnail under its row (`attachment_thumbnail.html`, issue #344). {% endcomment %}
 {% if attachments %}
 <ul class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800 shadow-sm sm:rounded-xl border border-gray-200 dark:border-gray-700">
     {% for attachment in attachments %}
@@ -48,6 +49,7 @@
                     aria-label="Remove {{ attachment.filename }}"
                     class="text-red-600 dark:text-red-400 hover:underline">Remove</button>
         </span>
+        {% include 'todo/partials/attachment_thumbnail.html' with file=attachment frozen=attachments_frozen %}
     </li>
     {% endfor %}
 </ul>

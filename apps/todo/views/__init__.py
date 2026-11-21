@@ -8,6 +8,7 @@ from .attachments import (
     attachment_list,
     attachment_rename,
     attachment_start,
+    attachment_thumbnail,
 )
 from .blockers import blocker_add, blocker_remove, blocker_suggest, open_blockers
 from .comments import (
@@ -96,6 +97,7 @@ __all__ = [
     'attachment_list',
     'attachment_rename',
     'attachment_start',
+    'attachment_thumbnail',
     'all_page',
     'blocker_add',
     'blocker_remove',

@@ -116,3 +116,46 @@ def test_the_tasks_own_attachments_still_upload_through_the_shared_script(
 
     expect(page.locator('#attachment-list')).to_contain_text('task-file.png')
     expect(page.locator('#attachment-uploads li')).to_have_count(0)
+
+
+def test_an_image_shows_a_thumbnail_on_the_task_and_on_its_comment(
+    page: Page, receipts_server: ReceiptsServer
+):
+    _open_new_task(page, receipts_server, 'Thumbnail task')
+
+    # The task's own file: a thumbnail under its row that really loads (the endpoint redirects to
+    # the bucket), and the text file beside it has none.
+    page.locator('#attachment-file-input').set_input_files(
+        [
+            {'name': 'task-photo.png', 'mimeType': 'image/png', 'buffer': PNG},
+            {'name': 'notes.txt', 'mimeType': 'text/plain', 'buffer': b'just text'},
+        ]
+    )
+    expect(page.locator('#attachment-list')).to_contain_text('notes.txt')
+    thumb = page.locator('#attachment-list [data-attachment-thumbnail] img')
+    expect(thumb).to_have_count(1)
+    expect(thumb).to_have_attribute('alt', 'Preview of task-photo.png')
+    page.wait_for_function(
+        "() => { const i = document.querySelector('#attachment-list img'); return i && i.complete && i.naturalWidth > 0; }"
+    )
+    expect(page.locator('#attachment-list [data-attachment-thumbnail]')).to_have_attribute(
+        'href', re.compile(r'\?inline=1$')
+    )
+
+    # A comment's file the same.
+    form = page.locator('#task-comments form[action*="/comments/"]').last
+    box = form.locator('[data-comment-files]')
+    expect(box).to_have_attribute('data-files-ready', '1')
+    box.locator('[data-files-input]').set_input_files(
+        {'name': 'comment-photo.png', 'mimeType': 'image/png', 'buffer': PNG}
+    )
+    expect(box.locator('[data-files-attached] li')).to_contain_text('comment-photo.png')
+    form.locator('textarea[name="body"]').fill('With a picture')
+    form.locator('button[type="submit"]').click()
+
+    comment_thumb = page.locator('#task-comments [data-attachment-thumbnail] img')
+    expect(comment_thumb).to_have_count(1)
+    expect(comment_thumb).to_have_attribute('alt', 'Preview of comment-photo.png')
+    page.wait_for_function(
+        '() => { const i = document.querySelector(\'#task-comments img[alt^="Preview"]\'); return i && i.complete && i.naturalWidth > 0; }'
+    )
