@@ -24,6 +24,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.billing.services import InsufficientCreditsError, get_balance
+from apps.core.services.filenames import EMPTY_NAME_MESSAGE, renamed
 
 from ..models import (
     EXTRACTED_FIELDS,
@@ -337,6 +338,33 @@ def reprocess(receipt: Receipt) -> Receipt:
         )
         enqueue_processing(locked.pk)
         return locked
+
+
+FILENAME_MAX = 255
+
+
+def rename_file(receipt: Receipt, name: str) -> Receipt:
+    """Rename the receipt's file, keeping its extension: `name` is the new name without it
+    (`apps.core.services.filenames`; `Lunch with Sam` for `IMG_4410.jpg` makes `Lunch with
+    Sam.jpg`). The name is what the page shows when there's no vendor, the download name and the
+    name in an export; the object's key is the receipt's id, so only the row changes. Refused for a
+    receipt in the Trash and for one with no file name (an email body). The same name changes
+    nothing."""
+    if not receipt.original_filename:
+        raise ValidationError('This receipt has no file name to change.')
+    new_name = renamed(receipt.original_filename, name, max_length=FILENAME_MAX)
+    if not new_name:
+        raise ValidationError({'original_filename': EMPTY_NAME_MESSAGE})
+    if new_name != receipt.original_filename:
+        changed = Receipt.objects.filter(pk=receipt.pk, deleted_at__isnull=True).update(
+            original_filename=new_name, updated_at=timezone.now()
+        )
+        if not changed:
+            raise ValidationError('Restore the receipt before changing it.')
+    elif receipt.deleted_at is not None:
+        raise ValidationError('Restore the receipt before changing it.')
+    receipt.refresh_from_db()
+    return receipt
 
 
 def trash(receipt: Receipt) -> Receipt:

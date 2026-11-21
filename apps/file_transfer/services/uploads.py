@@ -15,6 +15,8 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from apps.core.services.filenames import EMPTY_NAME_MESSAGE, renamed
+
 from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
 from . import anon_limits, limits, preview, renditions
 from .storage import (
@@ -357,6 +359,38 @@ def remove_file(file: TransferFile, *, storage: S3Storage | None = None) -> None
         storage.delete_object(file.storage_key)
         renditions.delete_renditions(file, storage=storage)
     file.delete()
+
+
+def rename_file(file: TransferFile, name: str) -> TransferFile:
+    """Rename a finished file of a draft before it is sent, keeping its extension: `name` is the
+    new name without it (`apps.core.services.filenames`). Only an uploaded file of a draft (or of
+    an anonymous draft): a paused upload keeps its name, since resuming matches the re-selected
+    file by name and size. The object's key is the file's id, so only the row changes. Raises
+    `ValidationError` for an empty name, a file still uploading, or a transfer no longer a draft.
+    The same name changes nothing."""
+    with transaction.atomic():
+        current = (
+            TransferFile.objects.select_for_update()
+            .select_related('transfer')
+            .filter(pk=file.pk)
+            .first()
+        )
+        if current is None:
+            raise ValidationError('This file is no longer in the transfer.')
+        if current.transfer.status != TransferStatus.DRAFT:
+            raise ValidationError('This transfer has already been sent.')
+        if not current.uploaded:
+            raise ValidationError('Wait for the file to finish uploading before renaming it.')
+        new_name = renamed(current.name, name)
+        if not new_name:
+            raise ValidationError(EMPTY_NAME_MESSAGE)
+        new_name = limits.validate_filename(new_name)
+        if new_name != current.name:
+            current.name = new_name
+            current.save(update_fields=['name'])
+    touch_draft(current.transfer_id)
+    file.name = current.name
+    return current
 
 
 def abort_draft(

@@ -61,6 +61,7 @@ from django.db.models import Count, OuterRef, QuerySet, Subquery
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from apps.core.services.filenames import EMPTY_NAME_MESSAGE, renamed
 from apps.core.services.sniff import SNIFF_BYTES, sniff_inline_type
 
 from ..models import Attachment, Comment, EventKind, Task, TodoSettings
@@ -400,6 +401,75 @@ def delete_attachment(attachment: Attachment) -> None:
                         )
                     ]
                 )
+
+
+TRASHED_TASK_MESSAGE = 'Restore the task before changing it.'
+
+
+def check_rename(attachment: Attachment, name: str) -> str:
+    """The name `rename_attachment` would give `attachment` (its extension kept, see
+    `apps.core.services.filenames`), told without locking or writing, so a view refuses before it
+    spends a rate limit. Raises `ValidationError` keyed `filename` for an empty name, and a plain
+    one for a file still uploading or a task in the Trash."""
+    if not attachment.uploaded:
+        raise ValidationError('This file is still uploading.')
+    if attachment.task.is_trashed:
+        raise ValidationError(TRASHED_TASK_MESSAGE)
+    new_name = renamed(attachment.filename, name, max_length=FILENAME_MAX)
+    if not new_name:
+        raise ValidationError({'filename': EMPTY_NAME_MESSAGE})
+    return clean_filename(new_name)
+
+
+def rename_attachment(attachment: Attachment, name: str) -> Attachment:
+    """Give a file a new name, keeping its extension: `name` is the name without it
+    (`Whiteboard` for `2026-11-21-10-45-30.webp` makes `Whiteboard.webp`). Works for a task's file
+    and a comment's, on an open or completed task; refused for a task in the Trash and for an upload
+    that hasn't finished. The same name changes nothing; a real change is logged (`attachment_renamed`)
+    unless the file is a comment draft, which isn't logged until its comment is saved. Only the row
+    changes: the object's key is the attachment's id, and the download name is read from the row.
+    Returns the row as it is now."""
+    check_rename(attachment, name)
+    with transaction.atomic():
+        current = (
+            Attachment.objects.select_for_update()
+            .select_related('task')
+            .filter(pk=attachment.pk)
+            .first()
+        )
+        if current is None:
+            raise ValidationError('This file no longer exists.')
+        new_name = check_rename(current, name)
+        old_name = current.filename
+        if new_name != old_name:
+            current.filename = new_name
+            current.save(update_fields=['filename'])
+            if not current.for_comment or current.comment_id is not None:
+                events.record(
+                    current.task,
+                    EventKind.ATTACHMENT_RENAMED,
+                    {'from': old_name, 'to': new_name, 'comment': current.for_comment},
+                )
+    attachment.filename = current.filename
+    return current
+
+
+def rename_comment_files(comment: Comment, names: dict[str, str]) -> None:
+    """Rename files of `comment` (`{attachment id: new name without the extension}`); ids that are
+    not its files, and anything that is not an id, are ignored. The caller holds the comment's lock
+    inside a transaction, after linking the drafts it adds, so a just-attached file can be renamed in
+    the same save. Raises `ValidationError` keyed `filename` for an empty name."""
+    wanted: dict[str, str] = {}
+    for key, value in names.items():
+        try:
+            wanted[str(UUID(str(key)))] = value
+        except ValueError:
+            continue
+    if not wanted:
+        return
+    rows = Attachment.objects.filter(pk__in=list(wanted), comment=comment).select_related('task')
+    for row in rows:
+        rename_attachment(row, wanted[str(row.pk)])
 
 
 def delete_for_tasks(task_ids: Iterable[UUID]) -> int:

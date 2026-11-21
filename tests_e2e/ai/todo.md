@@ -1479,6 +1479,23 @@ user `G` with a token `TG`. The server runs tasks inline, so an export is `ready
 | 3 | `inv todo export-xlsx local --out tasks.xlsx`, then again, then again with `--force`. | `Wrote tasks.xlsx (<n> bytes).` and the workbook opens as in TODO-72 step 2; the second exits 1 `tasks.xlsx already exists. Use --force to replace it.` **before** any request (the website's budget is untouched); `--force` replaces it. No credits are charged and no `.tasks.xlsx.part` is left behind. |
 | 4 | `inv todo export-xlsx local --out ./exports --range last-15-days` (an existing folder), then `--from 2001-01-01 --to 2001-12-31 --out old.xlsx`, then `--out ./nope/t.xlsx`. | The first writes `./exports/tasks-<today>.xlsx`; the second a workbook with only the header rows; the last exits 1 `Not a folder: nope` before any request. |
 
+### TODO-78 Renaming attachments: a task's file and a comment's files
+
+**Purpose:** a file's name can be changed after it is attached (a pasted image is named after the time); the extension is kept.
+**Preconditions:** an open task with an attached image pasted from the clipboard (TODO-62), named like `2026-11-21-10-45-30.webp`, and a comment with one file.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In **Attachments**, click **Rename** on the pasted image's row. | The name becomes a box holding `2026-11-21-10-45-30` (selected, focused) with `.webp` beside it, a check (Save) and a cross (Cancel); Download, Open, Rename and Remove are hidden meanwhile. |
+| 2 | Press Escape. | The row shows the old name again, unchanged. |
+| 3 | Rename again, clear the box, type `Whiteboard after the meeting` and press Enter. | The row reads `Whiteboard after the meeting.webp`; Download saves it under that name; **History** shows "File renamed from 2026-11-21-10-45-30.webp to Whiteboard after the meeting.webp". |
+| 4 | Rename, type `Plan.webp` and save; then rename, type `a/b` and save. | `Plan.webp` (not `Plan.webp.webp`); then `a_b.webp`. |
+| 5 | Rename, empty the box (spaces only) and save. | Nothing changes; under the list in red: `File name: Give the file a name.` A later successful rename clears it. |
+| 6 | Move the task to the Trash and open it. | The rows have no Rename (Download and Remove stay). Restore it. |
+| 7 | Edit the comment that has a file. | Each file of the comment shows its name in a box (without the extension, which is shown beside it) next to its Remove box. Change it to `Signed copy` and **Save**. The comment shows `Signed copy.<ext>`; the comment is not marked "(edited)" when its text did not change. |
+| 8 | Add a comment and paste an image into its box. | The finished file appears as a chip whose name is an editable box (`2026-...` without `.webp`); type `Sketch` and post the comment: its file is `Sketch.webp`. |
+| 9 | `inv todo get local <n>` to read an attachment id, then `inv todo rename-file local <id> Board photo`. | `Renamed to Board photo.webp.`; the task page lists the new name after a reload. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it

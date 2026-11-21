@@ -53,6 +53,7 @@ FIELD_LABELS = {
     'blocked_by': 'Blocked by',
     'project': 'Project',
     'section': 'Section',
+    'filename': 'File name',
 }
 
 

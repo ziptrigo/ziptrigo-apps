@@ -1938,6 +1938,24 @@ def todo_download(
     _say(f'Wrote {target} ({size:,} bytes).')
 
 
+@app.command(name='rename-file')
+def todo_rename_file(
+    environment: EnvironmentAnnotation,
+    attachment_id: str = typer.Argument(..., help='The attachment id (shown by `get`).'),
+    name: list[str] = typer.Argument(..., help='The new name, without the extension.'),
+):
+    """
+    Rename an attachment (a task's file or a comment's). Give the name without the extension,
+    which the file keeps: renaming 2026-11-21-10-45-30.webp to Whiteboard makes Whiteboard.webp.
+
+    Example:
+        todo rename-file local 1b6e2f4a-... Whiteboard after the meeting
+    """
+    select_environment(environment)
+    attachment = _call('patch', f'/attachments/{attachment_id}', json={'filename': ' '.join(name)})
+    _say(f'Renamed to {attachment["filename"]}.')
+
+
 # -- Commands: saved filters ---------------------------------------------------------------------
 
 

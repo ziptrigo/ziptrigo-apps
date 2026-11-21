@@ -46,6 +46,7 @@ from ..services import (
     get_account,
     get_body_bytes,
     preview_url,
+    rename_file,
     reprocess,
     trash,
     update_receipt,
@@ -174,11 +175,12 @@ def _fail(
     lines: list[str] | str,
     *,
     top_up: bool = False,
+    slot: str = '#receipt-form-msg',
 ) -> HttpResponse:
     """A refused action: the message slot for htmx (422), a flash message and a redirect back
     otherwise."""
     if is_htmx(request):
-        return message_response(request, lines, retarget='#receipt-form-msg', top_up=top_up)
+        return message_response(request, lines, retarget=slot, top_up=top_up)
     for line in [lines] if isinstance(lines, str) else lines:
         messages.error(request, line)
     return redirect('receipts:detail', receipt_id=receipt.pk)
@@ -229,6 +231,20 @@ def reprocess_receipt(request: AuthenticatedHttpRequest, receipt_id: str) -> Htt
     except ValidationError as exc:
         return _fail(request, receipt, exc.messages)
     messages.success(request, 'Reading the receipt again. This usually takes a few seconds.')
+    return hx_redirect(request, reverse('receipts:detail', args=[receipt.pk]))
+
+
+@login_required
+@require_POST
+def rename_receipt_file(request: AuthenticatedHttpRequest, receipt_id: str) -> HttpResponse:
+    """Rename the receipt's file (`filename`: the new name without the extension, which is kept).
+    Success redirects back with a flash message; a refusal goes to the slot under the name."""
+    receipt = owned_receipt(request, receipt_id)
+    try:
+        receipt = rename_file(receipt, request.POST.get('filename', ''))
+    except ValidationError as exc:
+        return _fail(request, receipt, exc.messages, slot='#receipt-file-msg')
+    messages.success(request, f'Renamed to {receipt.original_filename}.')
     return hx_redirect(request, reverse('receipts:detail', args=[receipt.pk]))
 
 

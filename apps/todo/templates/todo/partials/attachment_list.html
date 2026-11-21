@@ -1,17 +1,44 @@
-{% comment %} The files attached to `task`: name, size, and Download / Open / Remove. {% endcomment %}
+{% load filenames %}
+{% comment %} The files attached to `task`: name, size, and Download / Open / Rename / Remove. Rename edits the name in place
+   (the extension is shown beside the box and kept); it posts to `todo:attachment-rename`, which answers this list again, a
+   refusal going to #attachment-msg. {% endcomment %}
 {% if attachments %}
 <ul class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800 shadow-sm sm:rounded-xl border border-gray-200 dark:border-gray-700">
     {% for attachment in attachments %}
-    <li class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+    <li x-data="{ renaming: false }" class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
         <i class="fas {% if attachment.inline_type == 'application/pdf' %}fa-file-pdf{% elif attachment.inline_type %}fa-file-image{% else %}fa-file{% endif %} w-4 text-center text-sage-400" aria-hidden="true"></i>
-        <span class="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-gray-100">{{ attachment.filename }}</span>
-        <span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ attachment.size_bytes|filesizeformat }}</span>
-        <span class="flex items-center gap-3 text-sm">
+        <span x-show="!renaming" class="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-gray-100">{{ attachment.filename }}</span>
+        {% if attachments_can_rename %}
+        <form x-show="renaming" style="display: none" method="post" action="{% url 'todo:attachment-rename' attachment.pk %}"
+              hx-post="{% url 'todo:attachment-rename' attachment.pk %}" hx-target="#attachment-list" hx-swap="innerHTML"
+              hx-disabled-elt="find button[type='submit']"
+              @keydown.escape="renaming = false; todoCancelEdit($el, '#attachment-msg')"
+              class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            {% csrf_token %}
+            <label for="attachment-name-{{ attachment.pk }}" class="sr-only">New name for {{ attachment.filename }}</label>
+            <span class="flex min-w-[12rem] flex-1 items-center gap-1">
+                <input id="attachment-name-{{ attachment.pk }}" name="filename" type="text" value="{{ attachment.filename|file_stem }}" maxlength="255" required
+                       autocomplete="off" x-effect="if (renaming) $nextTick(() => { $el.focus(); $el.select(); })"
+                       class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
+                {% if attachment.filename|file_extension %}<span class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap" data-file-extension>{{ attachment.filename|file_extension }}</span>{% endif %}
+            </span>
+            <button type="submit" aria-label="Save the new name" title="Save"
+                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            <button type="button" @click="renaming = false; todoCancelEdit($el.form, '#attachment-msg')" aria-label="Cancel renaming" title="Cancel"
+                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+        </form>
+        {% endif %}
+        <span x-show="!renaming" class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ attachment.size_bytes|filesizeformat }}</span>
+        <span x-show="!renaming" class="flex items-center gap-3 text-sm">
             <a href="{% url 'todo:attachment-download' attachment.pk %}"
                class="text-sage-600 dark:text-sage-300 hover:underline">Download</a>
             {% if attachment.inline_type %}
             <a href="{% url 'todo:attachment-download' attachment.pk %}?inline=1" target="_blank" rel="noopener noreferrer"
                class="text-sage-600 dark:text-sage-300 hover:underline">Open</a>
+            {% endif %}
+            {% if attachments_can_rename %}
+            <button type="button" @click="renaming = true" aria-label="Rename {{ attachment.filename }}"
+                    class="text-sage-600 dark:text-sage-300 hover:underline">Rename</button>
             {% endif %}
             <button type="button" @click="show($el)"
                     data-url="{% url 'todo:attachment-delete' attachment.pk %}"
@@ -27,3 +54,4 @@
 {% else %}
 <p class="text-sm text-gray-500 dark:text-gray-400">No files attached.</p>
 {% endif %}
+{% if attachments_clear_msg %}<div id="attachment-msg" hx-swap-oob="true" class="mt-2 text-sm empty:hidden" aria-live="polite"></div>{% endif %}

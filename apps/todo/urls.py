@@ -61,6 +61,11 @@ urlpatterns = [
         views.attachment_delete,
         name='attachment-delete',
     ),
+    path(
+        'attachments/<uuid:attachment_id>/rename/',
+        views.attachment_rename,
+        name='attachment-rename',
+    ),
     # Exports (issue #326): the quick XLSX, the "Download files" dialog (GET) and its confirmation
     # (POST), the list, one export, its status panel, and the actions on it.
     path('export.xlsx', views.export_xlsx, name='export-xlsx'),

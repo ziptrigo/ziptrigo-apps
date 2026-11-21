@@ -35,7 +35,9 @@ apps/core/            Site shell: base.html, landing page, the Privacy Policy an
                       `notificationBell`; `core/js/fragment_modal.js`: `fragmentModal`),
                       and the export engine Receipts and To-do share (issue #326:
                       `core/models/exports.py`, `core/services/exports.py`,
-                      `export_names.py`, `export_errors.py`, `core/date_ranges.py`).
+                      `export_names.py`, `export_errors.py`, `core/date_ranges.py`),
+                      and renaming a stored file while keeping its extension
+                      (`apps.core.services.filenames`, `{% load filenames %}`; see "Renaming files").
 apps/accounts/        User model, auth pages + API, JWT auth classes, the memory of confirmed
                       addresses (`KnownEmail`, issue #160), sign-in by emailed code or link (#295).
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
@@ -167,6 +169,7 @@ inv todo list local --project Website [--project none --include-archived --sort 
 inv todo remind local 1234 60 [--channel in_app|email|both] | unremind local 1234 <reminder-id>
 inv todo upload local 1234 contract.pdf photo.jpg   # SHA-256, presigned PUT, complete; exit 1 if any failed
 inv todo download local <attachment-id> [--out contract.pdf --force]   # streams to .part, then renames
+inv todo rename-file local <attachment-id> Whiteboard notes   # the new name without the extension, which is kept
 inv todo export-files local --out ./zips [--range this-year|last-30-days|... --from 2026-01-01 --to 2026-12-31 --yes --force --wait 30]   # the files of the tasks created in the range as zip files: quotes, asks to confirm the cost, waits, downloads (issue #326)
 inv todo exports local | export-get local <id> | export-download local <id> --out ./zips [--force] | export-delete local <id> [--yes]
 inv todo export-xlsx local --out tasks.xlsx [--range ... --from ... --to ... --force]   # the free quick workbook of the tasks (a Tasks and a Comments sheet)
@@ -1253,6 +1256,53 @@ Receipts call sites always had; Receipts' `inbound.py` is untouched).
   test that stayed: `test_inbound.py` patches `MAX_EML_BYTES` on the core module now, and
   `test_admin.py` looks its permissions up by app label too (To-do has an `InboundMessage` model).
 
+### Renaming files
+
+A file's name can be changed after it is added, wherever a user adds files and the name matters:
+To-do's task attachments and comment files, the file transfer send pages (before **Send**) and a
+receipt's file. **The name is edited without its extension, which is kept**
+(`apps.core.services.filenames`): `split_extension` (a final `.` and 1 to 10 ASCII letters or
+digits after at least one other character, so `.env`, `README` and `Report v1.2 final` have none),
+`clean_stem` (control and format characters dropped, `/` and `\` to `_`, white space collapsed)
+and `renamed(current, typed, max_length=255)` (`Whiteboard` for `2026-11-21-10-45-30.webp` is
+`Whiteboard.webp`; a typed name already ending in the same extension isn't given it twice; any
+other ending is part of the name; the name, never the extension, is cut to fit; `''` when nothing is
+left, which each product refuses with `EMPTY_NAME_MESSAGE`, "Give the file a name."). The template
+filters `{{ name|file_stem }}` / `{{ name|file_extension }}` (`{% load filenames %}`) fill a rename
+box and the extension shown beside it. Only rows change: every product keys its objects by id.
+
+- *To-do.* `services.attachments.check_rename` (no lock, no write: an empty name, an upload in
+  flight, a task in the Trash) and `rename_attachment` (row lock; the same name is a no-op; a change
+  is logged, `EventKind.ATTACHMENT_RENAMED`, `{from, to, comment}`, migration `0020`, except for a
+  comment draft, logged when its comment is saved). A task file's row has **Rename** (an inline
+  Alpine form, `POST /todo/attachments/<id>/rename/`, `todo:attachment-rename`, `TODO_EDIT_USER`
+  after the check, answers the list with `#attachment-msg` cleared out of band; a refusal is a 422
+  into `#attachment-msg`; not on a trashed task; a comment's file is a 404 there). A comment's files
+  are renamed from its forms: each saved file of the edit form, and each freshly attached chip
+  (`comment_files.js`), has a box `file_name_<id>`, which `add_comment` / `edit_comment(...,
+  file_names=)` apply after linking (`rename_comment_files`; a file the same edit removes isn't
+  renamed first; a files-only change is still not an edit of the text). The API's `PATCH
+  /api/todo/attachments/{id}` (`AttachmentRenameSchema`, `extra='forbid'`) renames either kind, 400
+  for an empty name before the budget is spent, 404 for another user's file or one still uploading;
+  CLI `inv todo rename-file`.
+- *File transfer.* `services.uploads.rename_file(file, name)`: an **uploaded** file of a **draft**
+  only (a paused upload keeps its name: resuming matches the re-picked file by name and size), then
+  `limits.validate_filename`. `POST /transfer/send/<draft>/files/<id>/rename/` (`send-rename-file`,
+  `FT_UPLOAD_USER`) and its anonymous twin (`anon-send-rename-file`, `FT_ANON_UPLOAD_IP`), JSON
+  `{name}` -> `{ok, name}`, an empty name a 422 before the rate limit. `resumable_upload.js` shows a
+  pencil on a finished row when the page passes `canRename: true` (the two send pages; **not** a
+  file request's upload page); the box has no `name` and Enter is caught, since the row sits inside
+  the send form. Not after sending, and not in the JWT API.
+- *Receipts.* `services.actions.rename_file(receipt, name)` (refused in the Trash and for a receipt
+  with no file name, an email body; conditional on `deleted_at IS NULL`, `updated_at` set by hand).
+  The receipt page shows `File: <name>` with **Rename** (`POST /receipts/<id>/rename/`,
+  `receipts:rename-file`, no rate limit like the form's save; success a flash and `HX-Redirect`, a
+  refusal a 422 into `#receipt-file-msg`). The new name is the download name and the one exports
+  use. Not in the JWT API.
+- *Tests:* `apps/core/tests/test_filenames.py`, `apps/todo/tests/test_attachment_rename.py`,
+  `apps/file_transfer/tests/test_rename_files.py`, `apps/receipts/tests/test_rename_file.py`,
+  `admin/tests/test_todo.py`; AI cases TODO-78, FT-72, RCPT-73.
+
 ### Notifications
 
 `apps.core` has a site-wide **in-app notification system** (issue #169): a bell in the header of
@@ -2077,7 +2127,7 @@ a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tas
 .../history`), reminders (`POST /tasks/{number}/reminders`, `PATCH|DELETE .../reminders/{id}`,
 `GET /reminders/history`, optionally `?task=<number>` for one task's deliveries), attachments (`POST /tasks/{number}/attachments`, `POST
 .../attachments/{id}/complete`, `POST /attachments/{id}/cancel`, `POST /attachments/{id}/discard`, `GET /attachments/{id}/url`,
-`DELETE /attachments/{id}`), saved
+`PATCH /attachments/{id}` (rename, `{filename}` without the extension; OpenAPI 2.18.0), `DELETE /attachments/{id}`), saved
 filters (`GET|POST /filters`, `GET /filters/counts`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
 /filters/{id}/tasks`), `GET|PATCH /settings`, `GET /inbox`, `POST /inbox/regenerate` and `POST
 /parse`. Status codes (`api/common.py`): **400** a service `ValidationError` (`field: message`, a

@@ -21,6 +21,12 @@
  * whether to go on; replaces the "paused files" prompt), `confirmRemove(name)` (a promise of
  * whether to remove a file) and `extraAddBody()` (fields added to the add-file JSON body, such as
  * the uploader's typed name). `submitBtn` may be null (nothing to enable).
+ *
+ * Renaming: with `canRename` (the two send pages, not a file request), a finished row has a Rename
+ * button that turns its name into a box holding the name *without* the extension (which is kept,
+ * shown beside the box: `apps.core.services.filenames`), saved with `.../files/<id>/rename/`. The
+ * box has no `name` and Enter is caught, so it is never sent with the send form it sits in. A paused
+ * upload can't be renamed: resuming matches the re-picked file by name and size.
  */
 function getCookie(name) {
     const value = `; ${document.cookie}`;
@@ -160,6 +166,11 @@ function initFileTransferUpload(options) {
             ? 'Select the same file again to resume uploading it.'
             : '';
 
+        if (entry.renaming) {
+            renderRenameRow(li, fileId, entry);
+            return;
+        }
+
         const nameSpan = document.createElement('span');
         nameSpan.className = 'truncate flex-1';
         nameSpan.textContent = entry.name + ' (' + formatSize(entry.size) + ')';
@@ -187,7 +198,18 @@ function initFileTransferUpload(options) {
         removeBtn.setAttribute('aria-label', 'Remove ' + entry.name);
         removeBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
 
-        li.append(nameSpan, barOuter, statusSpan, removeBtn);
+        li.append(nameSpan, barOuter, statusSpan);
+        if (options.canRename && entry.uploaded) {
+            const renameBtn = document.createElement('button');
+            renameBtn.type = 'button';
+            renameBtn.setAttribute('data-rename', fileId);
+            renameBtn.className = 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200';
+            renameBtn.title = 'Rename';
+            renameBtn.setAttribute('aria-label', 'Rename ' + entry.name);
+            renameBtn.innerHTML = '<i class="fa-solid fa-pen" aria-hidden="true"></i>';
+            li.appendChild(renameBtn);
+        }
+        li.appendChild(removeBtn);
 
         if (entry.error && !entry.uploaded) {
             const message = document.createElement('p');
@@ -216,6 +238,85 @@ function initFileTransferUpload(options) {
             }
             li.appendChild(message);
         }
+    }
+
+    // `apps.core.services.filenames.split_extension`: a final `.` and 1 to 10 letters or digits,
+    // after at least one other character.
+    function splitExtension(name) {
+        const match = /\.[A-Za-z0-9]{1,10}$/.exec(name);
+        if (!match || match.index === 0) return [name, ''];
+        return [name.slice(0, match.index), match[0]];
+    }
+
+    // The row while it is being renamed: a box with the name (no extension), the extension, Save
+    // and Cancel. Not a <form>: the row sits inside the send form.
+    function renderRenameRow(li, fileId, entry) {
+        const parts = splitExtension(entry.name);
+        const box = document.createElement('input');
+        box.type = 'text';
+        box.value = parts[0];
+        box.maxLength = 255;
+        box.autocomplete = 'off';
+        box.setAttribute('aria-label', 'New name for ' + entry.name);
+        box.className = 'min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm';
+        const wrap = document.createElement('span');
+        wrap.className = 'flex min-w-0 flex-1 items-center gap-1';
+        wrap.appendChild(box);
+        if (parts[1]) {
+            const ext = document.createElement('span');
+            ext.className = 'text-gray-500 dark:text-gray-400 whitespace-nowrap';
+            ext.textContent = parts[1];
+            wrap.appendChild(ext);
+        }
+        const save = document.createElement('button');
+        save.type = 'button';
+        save.className = 'text-sage-600 dark:text-sage-300 hover:underline font-medium';
+        save.textContent = 'Save';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'text-gray-500 dark:text-gray-400 hover:underline';
+        cancel.textContent = 'Cancel';
+
+        function close() {
+            entry.renaming = false;
+            renderRow(fileId, entry);
+            const again = li.querySelector('button[data-rename]');
+            if (again) again.focus();
+        }
+        async function submit() {
+            save.disabled = true;
+            const response = await fetch(base + '/files/' + fileId + '/rename/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                body: JSON.stringify({ name: box.value }),
+            }).catch(function () { return null; });
+            const data = response ? await response.json().catch(function () { return {}; }) : {};
+            if (response && response.ok) {
+                entry.name = data.name || entry.name;
+                close();
+                return;
+            }
+            save.disabled = false;
+            error.textContent = (data && data.error)
+                || (response && response.status === 429 ? 'Too many requests. Try again in a moment.' : 'Could not rename the file. Try again.');
+            error.hidden = false;
+            box.focus();
+        }
+        box.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            if (e.key === 'Escape') { e.preventDefault(); close(); }
+        });
+        save.addEventListener('click', submit);
+        cancel.addEventListener('click', close);
+
+        const error = document.createElement('p');
+        error.setAttribute('role', 'alert');
+        error.className = 'basis-full text-xs text-red-600 dark:text-red-400';
+        error.hidden = true;
+
+        li.append(wrap, save, cancel, error);
+        box.focus();
+        box.select();
     }
 
     function findResumeMatch(file) {
@@ -476,6 +577,16 @@ function initFileTransferUpload(options) {
         }
     });
     updateSubmitState();
+
+    fileListEl.addEventListener('click', function (e) {
+        const btn = e.target.closest('button[data-rename]');
+        if (!btn) return;
+        const fileId = btn.getAttribute('data-rename');
+        const entry = files.get(fileId);
+        if (!entry || !entry.uploaded) return;
+        entry.renaming = true;
+        renderRow(fileId, entry);
+    });
 
     fileListEl.addEventListener('click', async function (e) {
         const btn = e.target.closest('button[data-remove]');

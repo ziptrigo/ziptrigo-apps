@@ -54,6 +54,7 @@ urlpatterns = [
     path('<uuid:receipt_id>/body/', views.body_view, name='body'),
     path('<uuid:receipt_id>/download/', views.download, name='download'),
     path('<uuid:receipt_id>/reprocess/', views.reprocess_receipt, name='reprocess'),
+    path('<uuid:receipt_id>/rename/', views.rename_receipt_file, name='rename-file'),
     path('<uuid:receipt_id>/trash/', views.trash_receipt, name='trash-receipt'),
     path('<uuid:receipt_id>/restore/', views.restore_receipt, name='restore'),
     path('<uuid:receipt_id>/delete/', views.delete_receipt_forever, name='delete'),

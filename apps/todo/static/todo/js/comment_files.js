@@ -2,7 +2,8 @@
  * Files on a comment (the comment forms of the task page, `comment_files_field.html`). The upload
  * engine is `todo/js/uploader.js`, loaded before this; each file is uploaded as soon as it is picked,
  * as a draft for a comment (`for_comment`), and a finished one becomes a chip holding a hidden
- * `attachment_ids` input, so submitting the form saves it with the comment. Removing a chip asks the
+ * `attachment_ids` input and a box with its name (`file_name_<id>`, without the extension), so
+ * submitting the form saves it with the comment, renamed if the box was changed. Removing a chip asks the
  * server to delete the draft (`discard`; one that is never saved is also swept after a day). The
  * form's submit button is disabled while a file is still uploading, and a submit that gets through
  * anyway (Ctrl+Enter) is stopped. An image pasted from the clipboard while the focus is in the form is
@@ -16,11 +17,35 @@
 
     const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
+    // `apps.core.services.filenames.split_extension`: a final `.` and 1 to 10 letters or digits,
+    // after at least one other character.
+    function splitExtension(name) {
+        const match = /\.[A-Za-z0-9]{1,10}$/.exec(name);
+        if (!match || match.index === 0) return [name, ''];
+        return [name.slice(0, match.index), match[0]];
+    }
+
+    // A finished file: its name in a box (`file_name_<id>`, the name without the extension, which
+    // the server keeps), so it can be renamed before the comment is saved.
     function chip(file, hiddenValue, onRemove) {
         const li = TodoUploader.el('li', 'flex items-center gap-2 text-sm');
         const icon = TodoUploader.el('i', 'fas fa-paperclip w-4 text-center text-sage-400');
         icon.setAttribute('aria-hidden', 'true');
-        const name = TodoUploader.el('span', 'min-w-0 flex-1 truncate text-gray-900 dark:text-gray-100', file.filename);
+        const parts = splitExtension(file.filename);
+        const name = TodoUploader.el('span', 'flex min-w-0 flex-1 items-center gap-1');
+        const box = document.createElement('input');
+        box.type = 'text';
+        box.name = 'file_name_' + hiddenValue;
+        box.value = parts[0];
+        box.maxLength = 255;
+        box.required = true;
+        box.autocomplete = 'off';
+        box.setAttribute('aria-label', 'Name of ' + file.filename);
+        box.className = 'min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-0.5 text-sm text-gray-900 dark:text-gray-100';
+        name.appendChild(box);
+        if (parts[1]) {
+            name.appendChild(TodoUploader.el('span', 'text-gray-500 dark:text-gray-400 whitespace-nowrap', parts[1]));
+        }
         const size = TodoUploader.el('span', 'text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap', TodoUploader.formatSize(file.size_bytes));
         const remove = TodoUploader.el('button', 'text-xs text-red-600 dark:text-red-400 hover:underline rounded-md', 'Remove');
         remove.type = 'button';

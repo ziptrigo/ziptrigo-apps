@@ -1371,6 +1371,21 @@ Some **bold** text, a [link](https://example.com) and <script>document.title='PW
 | 10 | Anonymous sending (`/transfer/send/anon/`, if enabled in FT-31): the form has **Title (optional)** after Recipients; a title typed there shows on the anonymous sent page and the download page after confirmation. | As the logged-in send; the confirmation email subject has no title. |
 | 11 | (API / CLI, shell) With a token from `inv filetransfer login`, `inv filetransfer send local <file> --title "CLI title"` then `inv filetransfer list local`; `inv filetransfer request-create local --signed-in`; `inv filetransfer requests local`. | The send is listed as `CLI title`; the request is created with no title and listed as `(untitled)`. |
 
+### FT-72 Renaming a file before sending
+
+**Purpose:** on the send pages a finished file can be renamed before **Send**, so recipients see the new name; the extension is kept (a pasted image is named after the time).
+**Preconditions:** signed in as `qa.user@example.com` with credits on `/transfer/send/` with a fresh draft.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Paste an image (FT-70) and wait for the green check. | The row has a pencil (**Rename**) before the bin. A row still uploading or **Paused** has no pencil. |
+| 2 | Click the pencil. | The name becomes a box holding `2026-...-..` (without `.webp`, which is shown beside it), with **Save** and **Cancel**; the box is focused. |
+| 3 | Type `Diagram` and press Enter. | The row reads `Diagram.webp (<size>)` with the check; the send form was **not** submitted. |
+| 4 | Rename it again with only spaces and press **Save**; then press Escape. | A red line `Give the file a name.` under the row; Escape puts the row back as `Diagram.webp`. |
+| 5 | Reload the page (the URL has `?resume=`). | The row is still `Diagram.webp`. |
+| 6 | Add a recipient and **Send**; open the link in the Visitor window. | The file is listed and downloads as `Diagram.webp`; the recipient's email names `Diagram.webp`. |
+| 7 | Do steps 1 to 3 on the anonymous send page (`/transfer/send/anon/`, if enabled). | The same. A file request's upload page (FT-54) has **no** pencil. |
+
 ## Out of scope
 
 - **Rate limits** (`FT_UPLOAD_USER`, `FT_DOWNLOAD_IP`, `FT_PREVIEW_IP`, `FT_UNLOCK_*`, `FT_REPORT_*`,

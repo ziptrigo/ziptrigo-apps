@@ -16,6 +16,7 @@ from django.views.decorators.http import require_POST
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core import ratelimit
 from apps.core.json_numbers import whole_number
+from apps.core.services.filenames import EMPTY_NAME_MESSAGE, clean_stem
 
 from .. import services
 from ..models import Transfer, TransferFile, TransferStatus
@@ -183,3 +184,23 @@ def resume_file(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) 
             ],
         }
     )
+
+
+@login_required
+@require_POST
+def rename_file(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) -> HttpResponse:
+    """Rename a finished file before sending: `{"name": ...}` is the new name without the
+    extension, which is kept (`services.uploads.rename_file`). Answers `{"name": <the new name>}`;
+    a refusal is a 422 `{"error"}`, checked before `FT_UPLOAD_USER` is spent."""
+    file = _file(request, draft_id, file_id)
+    name = str(_json_body(request).get('name', ''))
+    if not clean_stem(name):  # an empty name is refused before the rate limit is spent
+        return JsonResponse({'error': EMPTY_NAME_MESSAGE}, status=422)
+    limited = ratelimit.hit_user(request.user, 'FT_UPLOAD_USER')
+    if not limited.allowed:
+        return ratelimit.json_response(limited)
+    try:
+        file = services.rename_file(file, name)
+    except ValidationError as exc:
+        return JsonResponse({'error': exc.messages[0]}, status=422)
+    return JsonResponse({'ok': True, 'name': file.name})
