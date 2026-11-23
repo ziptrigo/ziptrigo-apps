@@ -26,7 +26,13 @@ TAGS = [
         'name': 'Account',
         'description': 'The signed-in user: name, email, time zone, date and time format.',
     },
-    {'name': 'Credits', 'description': "Staff only: a user's credit balance and adjustments."},
+    {
+        'name': 'Credits',
+        'description': (
+            "A user's own credit usage per app and period, and (staff only) a user's credit "
+            'balance and adjustments.'
+        ),
+    },
     {
         'name': 'QR Codes',
         'description': 'QR codes, tracked or not: create, edit, preview, images, share links.',
