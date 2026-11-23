@@ -99,7 +99,8 @@ def test_create_upload_remove_done_notice_and_download(
 
         # The page switches to the download view and says the owner was told.
         expect(visitor.get_by_text('has been told.')).to_be_visible()
-        expect(visitor.get_by_text('second.txt')).to_be_visible()
+        # The file name is also in the (hidden) preview dialog's title (#311): match the row's button.
+        expect(visitor.get_by_role('button', name='second.txt', exact=True)).to_be_visible()
         expect(visitor.get_by_text('Mark as done')).to_have_count(0)
         # Nothing more can be added.
         assert visitor.request.post(
