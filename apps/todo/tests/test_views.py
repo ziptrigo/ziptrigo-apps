@@ -9,7 +9,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from apps.billing.services import add_credits, get_balance
+from apps.billing.services import add_credits, credits_url, get_balance
 
 from ..models import Label, Task, TodoAccount
 from ..services import complete_task, create_task, dates, get_account, reorder, trash_task
@@ -172,7 +172,7 @@ class TestPages:
         body = text(client.get(reverse('todo:today')))
 
         assert 'Tasks are blocked.' in body
-        assert reverse('billing:credits-history') in body
+        assert credits_url('history') in body
 
     def test_the_free_tasks_line_on_the_settings_page(self, funded_user):
         create_task(funded_user, title='One')
@@ -436,7 +436,7 @@ class TestQuickAdd:
         assert response.status_code == 422
         assert response['HX-Retarget'] == '#quick-add-msg'
         assert 'Top up your credits' in text(response)
-        assert reverse('billing:credits-history') in text(response)
+        assert credits_url('history') in text(response)
         assert Task.objects.count() == 2
 
     def test_a_blocked_account_says_so(self, user, config):

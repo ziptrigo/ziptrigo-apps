@@ -3,10 +3,9 @@
 import re
 
 import pytest
-from django.urls import reverse
 
 from apps.accounts.services.display_formats import set_display_formats
-from apps.billing.services import add_credits
+from apps.billing.services import add_credits, credits_url
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -25,7 +24,7 @@ def test_the_history_time_follows_the_clock_and_keeps_an_iso_date(
     set_display_formats(user, time_format=time_format)
     client.force_login(user)
 
-    body = client.get(reverse('billing:credits-history')).content.decode()
+    body = client.get(credits_url('history')).content.decode()
 
     assert re.search(pattern, body), body
     assert f'data-time-format="{time_format}"' in body

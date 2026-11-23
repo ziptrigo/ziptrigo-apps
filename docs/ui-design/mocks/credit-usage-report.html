@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Credits - ZipTrigo (mock)</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="../reference/assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../../../apps/core/static/core/css/site.css">
+</head>
+<!--
+  MOCK for review (issue #347, credit usage reports), not wired to anything. The data is made up
+  in the script at the bottom. Three screens, switched with the amber bar:
+    1. Usage tab of /billing/credits/ (the new report; the page opens here);
+    2. History tab (today's transaction list, plus an App column);
+    3. Usage tab with nothing spent in the interval (empty state).
+  In the real page the filters are a GET form that htmx re-fetches (HX-Push-Url keeps the address),
+  and the chart is server-rendered SVG like Short URLs' stats; here a script draws it.
+-->
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 font-sans">
+
+    <!-- Mock switcher (not part of the design) -->
+    <div class="bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100 text-sm">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-3">
+            <span class="font-semibold"><i class="fas fa-flask mr-1"></i>Mock</span>
+            <button type="button" data-screen="usage" class="underline">1. Usage tab</button>
+            <button type="button" data-screen="history" class="underline">2. History tab</button>
+            <button type="button" data-screen="empty" class="underline">3. Usage, nothing spent</button>
+            <button type="button" id="mock-theme" class="ml-auto underline">Toggle dark</button>
+        </div>
+    </div>
+
+    <header class="bg-gray-100 dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex flex-wrap gap-x-6 gap-y-2">
+                <a href="#" class="text-lg font-semibold hover:text-sage-300">
+                    <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+                </a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-receipt mr-1"></i>Receipts</a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-list-check mr-1"></i>To-do</a>
+            </div>
+            <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-user-circle mr-1"></i>Account</a>
+        </nav>
+    </header>
+
+    <main class="flex-grow">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+      <div class="w-full bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6">
+
+        <!-- Page heading: as today, title changed from "Credits History" to "Credits" -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div class="flex items-center gap-3">
+            <i class="fas fa-coins text-2xl text-sage-300"></i>
+            <div>
+              <h1 class="text-2xl font-semibold">Credits</h1>
+              <p class="text-sm text-gray-600 dark:text-gray-300">Current balance: <span class="font-medium">1,284</span> credits</p>
+            </div>
+          </div>
+          <a href="#" class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1"></i>Back to Account</a>
+        </div>
+
+        <!-- Tabs -->
+        <nav data-tabs class="mb-6 flex gap-1 border-b border-gray-200 dark:border-gray-700" aria-label="Credits">
+          <a href="#usage" data-screen="usage" data-tab="usage" class="border-b-2 px-3 py-2 text-sm font-medium">Usage</a>
+          <a href="#history" data-screen="history" data-tab="history" class="border-b-2 px-3 py-2 text-sm font-medium">History</a>
+        </nav>
+
+        <!-- ============================ USAGE ============================ -->
+        <section id="screen-usage" class="screen">
+
+          <!-- Filters (a GET form: ?range=&from=&to=&group=&app=) -->
+          <form class="mb-5 flex flex-wrap items-end gap-x-5 gap-y-3" onsubmit="return false">
+            <div>
+              <label for="range" class="block text-sm font-medium mb-1">Period</label>
+              <select id="range" class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="this_month">This month</option>
+                <option value="last_month">Last month</option>
+                <option value="this_quarter">This quarter</option>
+                <option value="this_year">This year</option>
+                <option value="365">Last 12 months</option>
+                <option value="all">All time</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div id="custom-dates" class="hidden flex items-end gap-2">
+              <div>
+                <label for="from" class="block text-sm font-medium mb-1">From</label>
+                <input id="from" type="text" value="09/01/2026" placeholder="mm/dd/yyyy" class="w-32 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+              </div>
+              <div>
+                <label for="to" class="block text-sm font-medium mb-1">To</label>
+                <input id="to" type="text" value="11/23/2026" placeholder="mm/dd/yyyy" class="w-32 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+              </div>
+              <span class="pb-2 text-xs text-gray-500 dark:text-gray-400">(core date picker in the real page)</span>
+            </div>
+            <div>
+              <span id="group-label" class="block text-sm font-medium mb-1">Group by</span>
+              <div class="segmented inline-flex rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5" role="group" aria-labelledby="group-label">
+                <button type="button" data-group="day" class="btn rounded-md px-3 py-1.5 text-sm font-medium">Day</button>
+                <button type="button" data-group="week" class="btn rounded-md px-3 py-1.5 text-sm font-medium">Week</button>
+                <button type="button" data-group="month" class="btn rounded-md px-3 py-1.5 text-sm font-medium">Month</button>
+                <button type="button" data-group="quarter" class="btn rounded-md px-3 py-1.5 text-sm font-medium">Quarter</button>
+                <button type="button" data-group="year" class="btn rounded-md px-3 py-1.5 text-sm font-medium">Year</button>
+              </div>
+            </div>
+          </form>
+          <p id="range-words" class="mb-4 text-sm text-gray-600 dark:text-gray-300"></p>
+          <p id="too-many" role="alert" class="hidden mb-4 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-100 px-3 py-2 text-sm"></p>
+
+          <!-- Summary tiles -->
+          <dl class="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <dt class="text-sm text-gray-600 dark:text-gray-300">Credits used</dt>
+              <dd class="mt-1 text-2xl font-semibold tabular-nums" id="tile-used">0</dd>
+              <dd class="text-xs text-gray-500 dark:text-gray-400" id="tile-used-note"></dd>
+            </div>
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <dt class="text-sm text-gray-600 dark:text-gray-300">Credits added</dt>
+              <dd class="mt-1 text-2xl font-semibold tabular-nums text-green-700 dark:text-green-400" id="tile-added">0</dd>
+              <dd class="text-xs text-gray-500 dark:text-gray-400" id="tile-added-note"></dd>
+            </div>
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <dt class="text-sm text-gray-600 dark:text-gray-300">Average per <span id="tile-unit">day</span></dt>
+              <dd class="mt-1 text-2xl font-semibold tabular-nums" id="tile-avg">0</dd>
+              <dd class="text-xs text-gray-500 dark:text-gray-400" id="tile-avg-note"></dd>
+            </div>
+          </dl>
+
+          <!-- Chart -->
+          <section class="mb-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4" aria-labelledby="chart-heading">
+            <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 id="chart-heading" class="text-lg font-semibold">Credits used per <span id="chart-unit">day</span></h2>
+              <p class="text-xs text-gray-500 dark:text-gray-400" id="chart-peak"></p>
+            </div>
+
+            <!-- Legend = the per-app filter (toggle buttons; in the real page each is an ?app= checkbox) -->
+            <div id="legend" class="mb-3 flex flex-wrap gap-2" role="group" aria-label="Apps shown"></div>
+
+            <div class="flex gap-2">
+              <div id="y-axis" class="flex h-48 flex-col justify-between text-right text-xs tabular-nums text-gray-500 dark:text-gray-400" aria-hidden="true"></div>
+              <div class="min-w-0 flex-1">
+                <svg id="chart" viewBox="0 0 600 192" preserveAspectRatio="none" class="h-48 w-full overflow-visible" role="img"></svg>
+                <div class="mt-1 flex justify-between text-xs text-gray-500 dark:text-gray-400" aria-hidden="true">
+                  <span id="x-first"></span><span id="x-mid"></span><span id="x-last"></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Table -->
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <caption class="sr-only">Credits used per period and app</caption>
+              <thead id="table-head"></thead>
+              <tbody id="table-body"></tbody>
+              <tfoot id="table-foot"></tfoot>
+            </table>
+          </div>
+          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            Refunds are subtracted in the period they were made, so a period can show a negative number.
+            Days are in your time zone (America/Los_Angeles). Weeks start on Monday.
+          </p>
+        </section>
+
+        <!-- ============================ EMPTY ============================ -->
+        <section id="screen-empty" class="screen hidden">
+          <div class="mb-5 flex flex-wrap items-end gap-x-5 gap-y-3 opacity-90">
+            <div>
+              <span class="block text-sm font-medium mb-1">Period</span>
+              <span class="inline-block rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm">Last 7 days <i class="fas fa-chevron-down ml-2 text-xs"></i></span>
+            </div>
+            <div>
+              <span class="block text-sm font-medium mb-1">Group by</span>
+              <span class="inline-block rounded-lg bg-gray-100 dark:bg-gray-800 px-3 py-2 text-sm">Day · Week · Month · Quarter · Year</span>
+            </div>
+          </div>
+          <dl class="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4"><dt class="text-sm text-gray-600 dark:text-gray-300">Credits used</dt><dd class="mt-1 text-2xl font-semibold">0</dd></div>
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4"><dt class="text-sm text-gray-600 dark:text-gray-300">Credits added</dt><dd class="mt-1 text-2xl font-semibold text-green-700 dark:text-green-400">+1,000</dd><dd class="text-xs text-gray-500 dark:text-gray-400">Welcome credits 1,000</dd></div>
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4"><dt class="text-sm text-gray-600 dark:text-gray-300">Average per day</dt><dd class="mt-1 text-2xl font-semibold">0</dd></div>
+          </dl>
+          <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 px-6 py-10 text-center">
+            <i class="fas fa-chart-column text-3xl text-sage-300" aria-hidden="true"></i>
+            <p class="mt-3 font-medium">No credits used from 11/17/2026 to 11/23/2026</p>
+            <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">Choose a longer period, or see what each app charges on the <a href="#" class="text-sage-600 dark:text-sage-300 hover:underline">Costs</a> page.</p>
+          </div>
+        </section>
+
+        <!-- ============================ HISTORY ============================ -->
+        <section id="screen-history" class="screen hidden">
+          <div class="mb-6 max-w-md rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <label for="promo" class="block text-sm font-medium mb-1">Have a promo code?</label>
+            <div class="flex gap-2">
+              <input id="promo" type="text" class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-mono uppercase">
+              <button type="button" class="btn rounded-lg bg-brand-primary px-4 py-2 text-sm font-medium text-gray-900 hover:bg-sage-400">Redeem</button>
+            </div>
+          </div>
+          <table class="block sm:table min-w-full text-sm">
+            <thead class="hidden sm:table-header-group">
+              <tr class="text-left border-b border-gray-200 dark:border-gray-700">
+                <th class="py-2 pr-4">Date</th><th class="py-2 pr-4">Change</th><th class="py-2 pr-4">App <span class="font-normal text-xs text-amber-700 dark:text-amber-300">(new)</span></th><th class="py-2">Description</th>
+              </tr>
+            </thead>
+            <tbody id="history-body" class="block sm:table-row-group"></tbody>
+          </table>
+          <div class="mt-6 flex items-center justify-between text-sm">
+            <div class="text-gray-600 dark:text-gray-300">Page 1 of 14</div>
+            <a class="text-sage-600 dark:text-sage-300 hover:underline" href="#">Next</a>
+          </div>
+        </section>
+
+      </div>
+    </div>
+    </main>
+
+    <footer class="text-center text-sm text-gray-500 dark:text-gray-400 py-6">© 2026 ZipTrigo</footer>
+
+    <style>
+        /* Chart palette: one fixed colour per app, the same in every colour scheme. In the real page
+           these are CSS variables in site.css (a light and a dark value each), not hex in templates. */
+        :root { --app-file_transfer:#2f6fb5; --app-receipts:#c77a1a; --app-short_url:#7a52b3; --app-todo:#1f8a70; --app-notes:#c2457a; --app-other:#7b8783; --grid:#dfe4e2; }
+        .dark { --app-file_transfer:#6aa6e6; --app-receipts:#e6a04a; --app-short_url:#ad8be0; --app-todo:#4fc3a1; --app-notes:#ea7fae; --app-other:#98a39f; --grid:#3c4441; }
+        [data-tab][aria-current] { border-color: rgb(var(--c-brand-300)); }
+        [data-tab]:not([aria-current]) { border-color: transparent; opacity: .65; }
+        .legend-btn[aria-pressed="false"] { opacity: .45; text-decoration: line-through; }
+        .segmented [aria-pressed="true"] { background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+        .dark .segmented [aria-pressed="true"] { background: rgb(var(--c-gray-700)); }
+    </style>
+    <script>
+    (function () {
+        var APPS = [
+            ['file_transfer', 'File Transfer', 'fa-paper-plane'], ['receipts', 'Receipts', 'fa-receipt'],
+            ['short_url', 'Short URLs', 'fa-link'], ['todo', 'To-do', 'fa-list-check'],
+            ['notes', 'Notes', 'fa-note-sticky'], ['other', 'Other', 'fa-circle-question'],
+        ];
+        var TODAY = new Date(2026, 10, 23), FIRST = new Date(2025, 8, 14);   // account opened 09/14/2025
+        var DAY = 86400000;
+        var seed = 7; function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+        // Made-up daily ledger: {date, app: net credits}
+        var days = [];
+        for (var d = new Date(FIRST); d <= TODAY; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+            var age = (d - FIRST) / DAY, row = { date: new Date(d) };
+            row.file_transfer = age > 40 ? Math.round(2 + rnd() * 5 + (d.getDay() === 2 ? 6 : 0)) : 0;
+            row.receipts = rnd() < 0.35 ? Math.round(rnd() * 14) : (age > 100 ? 1 : 0);
+            row.short_url = rnd() < 0.08 ? 1 + Math.round(rnd() * 2) : 0;
+            row.todo = age > 200 ? (rnd() < 0.3 ? 10 : 0) + 1 : 0;
+            row.notes = rnd() < 0.03 ? 5 : 0;
+            row.other = 0;
+            if (rnd() < 0.012) row.receipts -= 9;                       // a refund
+            days.push(row);
+        }
+        days[days.length - 40].other = 25;                               // an admin adjustment
+
+        var state = { range: '30', group: null, off: {} };
+        function fmt(d) { return ('0' + (d.getMonth() + 1)).slice(-2) + '/' + ('0' + d.getDate()).slice(-2) + '/' + d.getFullYear(); }
+        function n(x) { return x.toLocaleString('en-US'); }
+        function interval() {
+            var y = TODAY.getFullYear(), m = TODAY.getMonth(), r = state.range;
+            if (/^\d+$/.test(r)) return [new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() - (r - 1)), TODAY];
+            if (r === 'this_month') return [new Date(y, m, 1), TODAY];
+            if (r === 'last_month') return [new Date(y, m - 1, 1), new Date(y, m, 0)];
+            if (r === 'this_quarter') return [new Date(y, Math.floor(m / 3) * 3, 1), TODAY];
+            if (r === 'this_year') return [new Date(y, 0, 1), TODAY];
+            if (r === 'custom') return [new Date(2026, 8, 1), TODAY];
+            return [FIRST, TODAY];
+        }
+        function autoGroup(a, b) { var len = (b - a) / DAY + 1; return len <= 31 ? 'day' : len <= 190 ? 'week' : len <= 1100 ? 'month' : 'year'; }
+        function bucketOf(d, g) {
+            if (g === 'day') return [d.getTime(), fmt(d).slice(0, 5)];
+            if (g === 'week') { var mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - (d.getDay() + 6) % 7); return [mon.getTime(), 'Week of ' + fmt(mon)]; }
+            if (g === 'month') return [new Date(d.getFullYear(), d.getMonth(), 1).getTime(), d.toLocaleString('en-US', { month: 'short' }) + ' ' + d.getFullYear()];
+            if (g === 'quarter') { var q = Math.floor(d.getMonth() / 3); return [new Date(d.getFullYear(), q * 3, 1).getTime(), 'Q' + (q + 1) + ' ' + d.getFullYear()]; }
+            return [new Date(d.getFullYear(), 0, 1).getTime(), '' + d.getFullYear()];
+        }
+        function render() {
+            var iv = interval(), g = state.group || autoGroup(iv[0], iv[1]);
+            document.getElementById('custom-dates').classList.toggle('hidden', state.range !== 'custom');
+            document.querySelectorAll('[data-group]').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.group === g); });
+            var buckets = [], byKey = {};
+            days.forEach(function (row) {
+                if (row.date < iv[0] || row.date > iv[1]) return;
+                var k = bucketOf(row.date, g);
+                if (!byKey[k[0]]) { byKey[k[0]] = { label: k[1] }; APPS.forEach(function (a) { byKey[k[0]][a[0]] = 0; }); buckets.push(byKey[k[0]]); }
+                APPS.forEach(function (a) { byKey[k[0]][a[0]] += row[a[0]]; });
+            });
+            var warn = document.getElementById('too-many');
+            if (buckets.length > 120) {
+                warn.textContent = 'That is ' + buckets.length + ' ' + g + 's, too many to show. Choose a shorter period or group by a longer unit.';
+                warn.classList.remove('hidden'); state.group = null; return render();
+            }
+            var used = APPS.filter(function (a) { return buckets.some(function (b) { return b[a[0]] !== 0; }); });
+            var shown = used.filter(function (a) { return !state.off[a[0]]; });
+            var totals = {}; used.forEach(function (a) { totals[a[0]] = buckets.reduce(function (s, b) { return s + b[a[0]]; }, 0); });
+            var grand = shown.reduce(function (s, a) { return s + totals[a[0]]; }, 0);
+
+            document.getElementById('range-words').innerHTML = 'From <strong>' + fmt(iv[0]) + '</strong> to <strong>' + fmt(iv[1]) + '</strong>' +
+                (shown.length < used.length ? ' · showing ' + shown.length + ' of ' + used.length + ' apps' : '');
+            document.getElementById('tile-used').textContent = n(grand);
+            var top = shown.slice().sort(function (x, y) { return totals[y[0]] - totals[x[0]]; })[0];
+            document.getElementById('tile-used-note').textContent = top && grand ? 'Most: ' + top[1] + ' (' + n(totals[top[0]]) + ') · 18 refunded, already subtracted' : '';
+            document.getElementById('tile-added').textContent = state.range === '7' ? '0' : '+500';
+            document.getElementById('tile-added-note').textContent = state.range === '7' ? '' : 'Promo code 500';
+            document.getElementById('tile-unit').textContent = g; document.getElementById('chart-unit').textContent = g;
+            document.getElementById('tile-avg').textContent = buckets.length ? (grand / buckets.length).toFixed(1) : '0';
+            document.getElementById('tile-avg-note').textContent = 'over ' + buckets.length + ' ' + g + (buckets.length === 1 ? '' : 's');
+
+            // Legend / app filter
+            document.getElementById('legend').innerHTML = used.map(function (a) {
+                return '<button type="button" class="legend-btn btn inline-flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 text-sm" data-app="' + a[0] +
+                    '" aria-pressed="' + !state.off[a[0]] + '"><span class="inline-block h-3 w-3 rounded-sm" style="background:var(--app-' + a[0] + ')"></span>' +
+                    '<i class="fas ' + a[2] + ' text-xs opacity-70" aria-hidden="true"></i>' + a[1] + ' <span class="tabular-nums text-gray-500 dark:text-gray-400">' + n(totals[a[0]]) + '</span></button>';
+            }).join('');
+
+            // Chart
+            var peak = Math.max.apply(null, buckets.map(function (b) { return shown.reduce(function (s, a) { return s + Math.max(0, b[a[0]]); }, 0); }).concat([1]));
+            var step = Math.pow(10, Math.floor(Math.log10(peak))); var top2 = Math.ceil(peak / step) * step; if (top2 / step > 5) { step *= 2; top2 = Math.ceil(peak / step) * step; }
+            var W = 600, H = 192, bw = W / buckets.length, svg = '';
+            for (var t = 0; t <= top2; t += step) svg += '<line x1="0" x2="' + W + '" y1="' + (H - t / top2 * H) + '" y2="' + (H - t / top2 * H) + '" stroke="var(--grid)" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+            buckets.forEach(function (b, i) {
+                var y = H, tip = b.label + ': ';
+                shown.forEach(function (a) {
+                    var v = Math.max(0, b[a[0]]), h = v / top2 * H; y -= h;
+                    if (v) svg += '<rect x="' + (i * bw + bw * 0.12) + '" y="' + y + '" width="' + (bw * 0.76) + '" height="' + Math.max(0, h - 0.6) + '" fill="var(--app-' + a[0] + ')"><title>' + b.label + ' · ' + a[1] + ': ' + v + '</title></rect>';
+                });
+            });
+            var c = document.getElementById('chart'); c.innerHTML = svg;
+            c.setAttribute('aria-label', 'Credits used per ' + g + ' from ' + fmt(iv[0]) + ' to ' + fmt(iv[1]) + ': ' + grand + ' in total, at most ' + peak + ' in a ' + g + '. The table below has every number.');
+            var ya = ''; for (var t2 = top2; t2 >= 0; t2 -= step) ya += '<span>' + n(t2) + '</span>'; document.getElementById('y-axis').innerHTML = ya;
+            document.getElementById('chart-peak').textContent = 'Highest ' + g + ': ' + n(peak) + ' credits';
+            document.getElementById('x-first').textContent = buckets.length ? buckets[0].label : '';
+            document.getElementById('x-mid').textContent = buckets.length > 2 ? buckets[Math.floor(buckets.length / 2)].label : '';
+            document.getElementById('x-last').textContent = buckets.length > 1 ? buckets[buckets.length - 1].label : '';
+
+            // Table (newest first)
+            var th = 'py-2 px-3 text-right font-medium whitespace-nowrap', td = 'py-2 px-3 text-right tabular-nums';
+            document.getElementById('table-head').innerHTML = '<tr class="border-b border-gray-200 dark:border-gray-700"><th scope="col" class="py-2 pr-3 text-left font-medium">' + g.charAt(0).toUpperCase() + g.slice(1) + '</th>' +
+                shown.map(function (a) { return '<th scope="col" class="' + th + '"><span class="mr-1 inline-block h-2.5 w-2.5 rounded-sm" style="background:var(--app-' + a[0] + ')"></span>' + a[1] + '</th>'; }).join('') + '<th scope="col" class="' + th + '">Total</th></tr>';
+            document.getElementById('table-body').innerHTML = buckets.slice().reverse().map(function (b) {
+                var sum = shown.reduce(function (s, a) { return s + b[a[0]]; }, 0);
+                return '<tr class="border-b border-gray-100 dark:border-gray-700/60"><th scope="row" class="py-2 pr-3 text-left font-normal whitespace-nowrap">' + (g === 'day' ? b.label + '/' + new Date(+Object.keys(byKey).find(function (k) { return byKey[k] === b; })).getFullYear() : b.label) + '</th>' +
+                    shown.map(function (a) { var v = b[a[0]]; return '<td class="' + td + (v ? '' : ' text-gray-400 dark:text-gray-500') + (v < 0 ? ' text-green-700 dark:text-green-400' : '') + '">' + (v ? n(v) : '–') + '</td>'; }).join('') +
+                    '<td class="' + td + ' font-semibold">' + n(sum) + '</td></tr>';
+            }).join('');
+            document.getElementById('table-foot').innerHTML = '<tr class="border-t-2 border-gray-300 dark:border-gray-600 font-semibold"><th scope="row" class="py-2 pr-3 text-left">Total</th>' +
+                shown.map(function (a) { return '<td class="' + td + '">' + n(totals[a[0]]) + '</td>'; }).join('') + '<td class="' + td + '">' + n(grand) + '</td></tr>';
+        }
+        document.getElementById('range').addEventListener('change', function (e) { state.range = e.target.value; state.group = null; document.getElementById('too-many').classList.add('hidden'); render(); });
+        document.querySelectorAll('[data-group]').forEach(function (b) { b.addEventListener('click', function () { state.group = b.dataset.group; document.getElementById('too-many').classList.add('hidden'); render(); }); });
+        document.getElementById('legend').addEventListener('click', function (e) { var b = e.target.closest('[data-app]'); if (!b) return; state.off[b.dataset.app] = !state.off[b.dataset.app]; render(); });
+        render();
+
+        // History rows
+        var H = [
+            ['2026-11-23 9:02 AM', -4, 'Spend', 'File Transfer', 'Transfer "Q3 report.pdf", day 12'],
+            ['2026-11-23 9:02 AM', -1, 'Spend', 'Receipts', 'Receipts storage, day 214'],
+            ['2026-11-22 6:40 PM', -10, 'Spend', 'To-do', 'To-do: task #1412'],
+            ['2026-11-21 2:15 PM', 9, 'Refund', 'Receipts', 'Receipts export: 3 file(s) no longer there'],
+            ['2026-11-20 11:30 AM', -1, 'Spend', 'Short URLs', 'Short URL: custom alias for /s/spring-sale'],
+            ['2026-11-18 8:00 AM', 500, 'Promo code', '', 'Promo code LAUNCH2026 (Launch)'],
+            ['2026-11-14 3:12 PM', -5, 'Spend', 'Notes', 'Notes renewal: "Weekly plan"'],
+            ['2026-10-14 10:05 AM', -25, 'Adjustment', '', 'Manual correction'],
+        ];
+        document.getElementById('history-body').innerHTML = H.map(function (r) {
+            return '<tr class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 py-2 border-b border-gray-100 dark:border-gray-700/60 sm:table-row">' +
+                '<td class="order-2 block text-right text-xs text-gray-600 dark:text-gray-300 sm:table-cell sm:py-2 sm:pr-4 sm:text-left sm:text-sm sm:whitespace-nowrap">' + r[0] + '</td>' +
+                '<td class="order-1 block sm:table-cell sm:py-2 sm:pr-4 sm:whitespace-nowrap"><span class="font-medium ' + (r[1] >= 0 ? 'text-green-700 dark:text-green-400">+' : 'text-red-700 dark:text-red-400">') + r[1] + '</span> <span class="ml-1 rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs">' + r[2] + '</span></td>' +
+                '<td class="order-3 block text-sm sm:table-cell sm:py-2 sm:pr-4 sm:whitespace-nowrap">' + (r[3] || '<span class="text-gray-400">–</span>') + '</td>' +
+                '<td class="order-4 col-span-2 block break-words sm:table-cell sm:py-2">' + r[4] + '</td></tr>';
+        }).join('');
+
+        // Screens
+        function show(name) {
+            document.querySelectorAll('.screen').forEach(function (el) { el.classList.add('hidden'); });
+            document.getElementById('screen-' + name).classList.remove('hidden');
+            document.querySelectorAll('[data-tab]').forEach(function (t) { if (t.dataset.tab === (name === 'history' ? 'history' : 'usage')) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current'); });
+        }
+        document.querySelectorAll('[data-screen]').forEach(function (el) { el.addEventListener('click', function (e) { e.preventDefault(); show(el.dataset.screen); }); });
+        document.getElementById('mock-theme').addEventListener('click', function () { document.documentElement.classList.toggle('dark'); });
+        show('usage');
+    })();
+    </script>
+</body>
+</html>

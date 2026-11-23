@@ -10,12 +10,12 @@ from collections.abc import Mapping
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import SafeString
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.billing.services import credits_url as billing_credits_url
 from apps.core.field_errors import ErrorLines, form_lines
 from apps.core.field_errors import validation_lines as core_validation_lines
 
@@ -90,7 +90,7 @@ def credits_text(count: int) -> str:
 
 def credits_url() -> str:
     """Where "Top up" goes: the credits page (there is no purchase page yet)."""
-    return reverse('billing:credits-history')
+    return billing_credits_url('history')
 
 
 def out_of_credits_message(text: str) -> SafeString:

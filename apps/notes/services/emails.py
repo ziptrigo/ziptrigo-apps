@@ -21,7 +21,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.billing.services import get_balance
+from apps.billing.services import credits_url, get_balance
 from apps.core.datetime_format import utc_date_time
 from apps.core.services.email import send_email
 
@@ -93,7 +93,7 @@ def send_notes_locked_email(user_id: str, note_ids: list[str]) -> None:
         'more': max(len(locked) - MAX_LISTED, 0),
         'renewal_price': price,
         'missing': missing,
-        'top_up_url': _absolute('billing:credits-history'),
+        'top_up_url': credits_url('history', absolute=True),
         'notes_url': _absolute('notes:list'),
     }
     send_email(
@@ -124,7 +124,7 @@ def send_renewal_warning_email(
         'first_due': utc_date_time(first)[0] if first else '',
         'overdue': bool(first and first <= timezone.now()),
         'missing': max(credits - balance, 0),
-        'top_up_url': _absolute('billing:credits-history'),
+        'top_up_url': credits_url('history', absolute=True),
         'notes_url': _absolute('notes:list'),
     }
     send_email(

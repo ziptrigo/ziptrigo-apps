@@ -1,3 +1,4 @@
+{% load billing_ui %}
 {% comment %} The task page's "Attachments" block (issue #184): a drop zone and "Add files" for an open task, the rows of the
    uploads in flight (built by static/todo/js/attachments.js into #attachment-uploads), and the list of the files
    already attached (#attachment-list, re-fetched by the script when a file lands). Needs `task` and what
@@ -25,7 +26,7 @@
         {% include 'core/partials/paste_hint.html' with id='attachment-paste-hint' %}
         <p class="text-xs text-gray-500 dark:text-gray-400">Up to {{ attachments_max_bytes|filesizeformat }} each, {{ attachments_max_files }} per task. Stored files are billed by size, daily.</p>
         {% if attachments_frozen %}
-        <p class="text-sm text-amber-700 dark:text-amber-400">Uploads are paused until you add credits. <a href="{% url 'billing:credits-history' %}" class="underline">Top up</a></p>
+        <p class="text-sm text-amber-700 dark:text-amber-400">Uploads are paused until you add credits. <a href="{% credits_url 'history' %}" class="underline">Top up</a></p>
         {% endif %}
     </div>
     <ul id="attachment-uploads" class="mt-4 space-y-3 empty:mt-0" aria-live="polite"></ul>

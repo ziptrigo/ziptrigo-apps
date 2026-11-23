@@ -11,6 +11,7 @@ from django.db import transaction
 from django.urls import reverse
 
 from apps.accounts.models import User
+from apps.billing.services import credits_url
 from apps.core.services import notifications
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,7 @@ def notify_warning(user: User, *, count: int, credits: int, balance: int, days: 
                     f'{count} {notes} in the next {days} days for {credits} credits '
                     f'and your balance is {balance}.'
                 ),
-                url=reverse('billing:credits-history'),
+                url=credits_url('history'),
                 key=WARNING_KEY,
             )
     except Exception:

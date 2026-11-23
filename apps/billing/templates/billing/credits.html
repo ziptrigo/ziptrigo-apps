@@ -1,0 +1,36 @@
+{% extends "core/base.html" %}
+{% load billing_ui %}
+
+{% block title %}Credits - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-4xl">
+  <div class="w-full bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6">
+    <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+      <div class="flex items-center gap-3">
+        <i class="fas fa-coins text-2xl text-sage-300" aria-hidden="true"></i>
+        <div>
+          <h1 class="text-2xl font-semibold">Credits</h1>
+          <p class="text-sm text-gray-600 dark:text-gray-300">
+            Current balance: <span class="font-medium">{{ credits_balance }}</span> credit{% if credits_balance != 1 %}s{% endif %}{% comment %}`pluralize` can't read the context processor's lazy value, hence the comparison.{% endcomment %}
+          </p>
+        </div>
+      </div>
+      <a href="{% url 'accounts:account' %}" class="text-sm text-sage-600 dark:text-sage-300 hover:underline">
+        <i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Back to Account
+      </a>
+    </div>
+
+    <nav data-tabs aria-label="Credits" class="mb-6 flex gap-1 border-b border-gray-200 dark:border-gray-700">
+      {% credits_url 'usage' as usage_url %}
+      {% credits_url 'history' as history_url %}
+      <a href="{{ usage_url }}" {% if tab == 'usage' %}aria-current="page"{% endif %}
+         class="inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium {% if tab == 'usage' %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">Usage</a>
+      <a href="{{ history_url }}" {% if tab == 'history' %}aria-current="page"{% endif %}
+         class="inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium {% if tab == 'history' %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">History</a>
+    </nav>
+
+    {% block credits_tab %}{% endblock %}
+  </div>
+</div>
+{% endblock %}

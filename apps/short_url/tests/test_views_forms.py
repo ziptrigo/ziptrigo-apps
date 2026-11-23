@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
+from apps.billing.services import credits_url
 
 from ..models import LinkStatus, ShortLink
 from .conftest import balance
@@ -275,13 +276,13 @@ class TestCostConfirmation:
         assert response['HX-Retarget'] == '#link-form-msg'
         content = response.content.decode()
         assert 'have enough credits' in content
-        assert reverse('billing:credits-history') in content
+        assert credits_url('history') in content
         assert not ShortLink.objects.exists()
 
     def test_the_panel_offers_top_up_when_the_balance_is_short(self, client, user, prices):
         client.force_login(user)
         content = post_create(client, alias='Sale').content.decode()
-        assert reverse('billing:credits-history') in content
+        assert credits_url('history') in content
 
     def test_an_alias_taken_in_the_meantime_charges_nothing(self, web, funded_user, other_user):
         create_link(other_user, code='sale')
@@ -533,7 +534,7 @@ class TestPasswordOnTheForm:
         client.force_login(user)
         response = post_create(client, password='hunter2', confirm_cost='1')
         assert response.status_code == 422
-        assert reverse('billing:credits-history') in response.content.decode()
+        assert credits_url('history') in response.content.decode()
         assert not ShortLink.objects.exists()
 
 
@@ -647,7 +648,7 @@ class TestEditPassword:
         link = create_link(user, destination='https://example.com/old')
         response = post_edit(client, link, password='hunter2', title='Changed', confirm_cost='1')
         assert response.status_code == 422
-        assert reverse('billing:credits-history') in response.content.decode()
+        assert credits_url('history') in response.content.decode()
         link.refresh_from_db()
         assert not link.password_hash and link.title != 'Changed'
 

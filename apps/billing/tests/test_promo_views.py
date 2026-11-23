@@ -10,13 +10,13 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.accounts.tests.factories import UserFactory
 from apps.billing.models import PromoCode
-from apps.billing.services import get_balance
+from apps.billing.services import credits_url, get_balance
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 HTMX = {'HTTP_HX_REQUEST': 'true'}
 REDEEM = reverse('billing:redeem')
-HISTORY = reverse('billing:credits-history')
+HISTORY = credits_url('history')
 
 
 @pytest.fixture

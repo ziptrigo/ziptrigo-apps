@@ -30,7 +30,6 @@ from datetime import datetime, timedelta
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Q
-from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -45,6 +44,7 @@ from ..models import (
 )
 from ..models.promo import CODE_MAX_LENGTH, CODE_PATTERN
 from .credits import add_credits
+from .links import credits_url
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +313,7 @@ def _notify_granted(user: User, code: PromoCode) -> None:
                 source=SOURCE,
                 title=f'Your promo code added {code.credits} credits',
                 body=f'Promo code {code.code} was applied to your account.',
-                url=reverse('billing:credits-history'),
+                url=credits_url('history'),
                 key=f'promo_granted:{code.pk}',
             )
     except Exception:

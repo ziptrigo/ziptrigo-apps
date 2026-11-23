@@ -1,20 +1,19 @@
 from uuid import UUID
 
-from ninja import Router
 from ninja.errors import HttpError
 
 from apps.accounts.auth import AdminAuth
 from apps.accounts.models import User
 
-from .models import CreditTransactionType
-from .schemas import (
+from ..models import CreditTransactionType
+from ..schemas import (
     CreditTransactionRequest,
     CreditTransactionResponse,
     UserCreditsResponse,
 )
-from .services import InsufficientCreditsError, apply_credits, get_balance
+from ..services import InsufficientCreditsError, apply_credits, get_balance
+from .router import router
 
-router = Router(tags=['Credits'])
 admin_auth = AdminAuth()
 
 

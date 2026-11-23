@@ -1,0 +1,15 @@
+{% comment %}
+"Group by": one radio per grouping, styled as the segmented control (the selected one is `aria-current`,
+which `.segmented` in site.css draws). Part of the filters form; the htmx answer sends it again out of
+band (`oob`), since the period decides which grouping is suggested.
+{% endcomment %}
+<div id="usage-group"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <span id="usage-group-label" class="block text-sm font-medium mb-1">Group by</span>
+  <div class="segmented inline-flex rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5" role="radiogroup" aria-labelledby="usage-group-label">
+    {% for key, label, selected in groups %}
+    <label class="btn cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium" {% if selected %}aria-current="true"{% endif %}>
+      <input type="radio" name="group" value="{{ key }}" class="sr-only" {% if selected %}checked{% endif %}>{{ label }}
+    </label>
+    {% endfor %}
+  </div>
+</div>

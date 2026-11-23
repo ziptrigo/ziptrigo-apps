@@ -31,7 +31,6 @@ from datetime import UTC, datetime
 from django.db import transaction
 from django.tasks import task
 from django.template.loader import render_to_string
-from django.urls import reverse
 
 from apps.accounts.models import User
 from apps.accounts.services import known_emails
@@ -47,6 +46,7 @@ from ..models import (
     WelcomeRefusal,
 )
 from .credits import add_credits
+from .links import credits_url
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ def _notify_granted(user: User, amount: int) -> None:
                 source=SOURCE,
                 title=f'Welcome! We added {amount} credits to your account',
                 body='Use them in any ZipTrigo app. Your credits history shows where they go.',
-                url=reverse('billing:credits-history'),
+                url=credits_url('history'),
                 key='welcome_credits',
             )
     except Exception:
@@ -177,10 +177,9 @@ def send_welcome_refused_email(user_id: str) -> None:
 
 def render_welcome_refused_email(user: User) -> tuple[str, str, str]:
     """The subject, text and HTML bodies of the "no welcome credits" email."""
-    from django.conf import settings
 
     greeting = f'Hi {user.name},' if user.name else 'Hi there,'
-    credits_url = settings.BASE_URL.rstrip('/') + reverse('billing:credits-history')
+    top_up_url = credits_url('history', absolute=True)
     text_body = (
         f'{greeting}\n\n'
         'Welcome to ZipTrigo! New accounts get free welcome credits, but yours did not get them: '
@@ -188,13 +187,13 @@ def render_welcome_refused_email(user: User) -> tuple[str, str, str]:
         'for Gmail, different dots), was already used for a ZipTrigo account before, and the '
         'welcome credits are only for addresses that are new to us.\n\n'
         'Nothing else is affected. Your account works normally, and you can add credits or '
-        f'redeem a promo code any time: {credits_url}\n\n'
+        f'redeem a promo code any time: {top_up_url}\n\n'
         '--\n'
         'The ZipTrigo Team\n'
     )
     html_body = render_to_string(
         'billing/emails/welcome_refused.html',
-        {'greeting': greeting, 'credits_url': credits_url},
+        {'greeting': greeting, 'credits_url': top_up_url},
     )
     return REFUSED_SUBJECT, text_body, html_body
 

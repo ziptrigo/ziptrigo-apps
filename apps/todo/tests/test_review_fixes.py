@@ -10,7 +10,7 @@ from django.db.models import QuerySet
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.billing.services import add_credits
+from apps.billing.services import add_credits, credits_url
 
 from ..forms import TaskForm
 from ..models import Task, TaskReference, TodoAccount
@@ -265,7 +265,7 @@ class TestUnpaidTasksAreNotDeletedForever:
 
         assert htmx.status_code == 422 and htmx['HX-Retarget'] == '#todo-msg'
         body = text(htmx)
-        assert 'not been paid for' in body and reverse('billing:credits-history') in body
+        assert 'not been paid for' in body and credits_url('history') in body
         plain = web.post(reverse('todo:delete', args=[task.number]), follow=True)
         assert 'not been paid for' in text(plain)
         assert Task.objects.filter(pk=task.pk).exists()
