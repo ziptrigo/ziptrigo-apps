@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
+from apps.billing.services import credits_url
 
 from ..models import LinkStatus, ShortLink
 from ..services import billing
@@ -223,7 +224,7 @@ class TestEnablingAnalytics:
         link = create_link(user)
         response = client.post(enable_url(link), {'confirm_cost': '1'})
         assert 'have enough credits' in ' '.join(flashes(response))
-        assert reverse('billing:credits-history') in ' '.join(flashes(response))
+        assert credits_url('history') in ' '.join(flashes(response))
         link.refresh_from_db()
         assert link.analytics_paid_at is None
 

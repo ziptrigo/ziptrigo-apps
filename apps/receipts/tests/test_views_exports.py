@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
-from apps.billing.services import get_balance, spend_credits
+from apps.billing.services import credits_url, get_balance, spend_credits
 from apps.core.services import exports as engine
 
 from ..models import ExportStatus, ReceiptExport, ReceiptStatus
@@ -201,7 +201,7 @@ class TestDialog:
     def test_too_few_credits_offers_a_top_up(self, web, funded_user, three):
         spend_credits(funded_user, 95, description='x', source='test')
         content = web.get(reverse(NEW), **HTMX).content.decode()
-        assert 'Your balance is 5' in content and reverse('billing:credits-history') in content
+        assert 'Your balance is 5' in content and credits_url('history') in content
 
     def test_nothing_to_download(self, web):
         content = web.get(reverse(NEW), **HTMX).content.decode()
@@ -302,7 +302,7 @@ class TestConfirm:
         assert (
             'You don&#x27;t have enough credits for this.' in content or 'enough credits' in content
         )
-        assert reverse('billing:credits-history') in content
+        assert credits_url('history') in content
         assert get_balance(funded_user) == 5 and not ReceiptExport.objects.exists()
 
     def test_a_frozen_account(self, web, funded_user, three, freeze):

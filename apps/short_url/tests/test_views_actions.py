@@ -2,6 +2,8 @@ import pytest
 from django.contrib.messages import get_messages
 from django.urls import reverse
 
+from apps.billing.services import credits_url
+
 from ..models import LinkStatus, ShortLink
 from .conftest import balance
 from .factories import create_link
@@ -149,7 +151,7 @@ class TestEnableCosts:
         link = create_link(user, status=LinkStatus.DISABLED)
         response = client.post(url('enable', link), {'confirm_cost': '1'})
         assert 'have enough credits' in flashes(response)[0]
-        assert reverse('billing:credits-history') in flashes(response)[0]
+        assert credits_url('history') in flashes(response)[0]
         assert status_of(link) == LinkStatus.DISABLED
 
     def test_a_cost_that_appeared_after_the_quote_is_not_charged(

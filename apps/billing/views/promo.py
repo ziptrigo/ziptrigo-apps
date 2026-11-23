@@ -30,7 +30,7 @@ from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import RedeemForm
 from ..models.promo import CODE_MAX_LENGTH
-from ..services import promo
+from ..services import credits_url, promo
 
 PARTIAL = 'billing/partials/redeem_form.html'
 
@@ -40,7 +40,7 @@ def _next_url(request: HttpRequest, candidate: str | None) -> str:
         candidate, allowed_hosts={request.get_host()}, require_https=request.is_secure()
     ):
         return candidate
-    return reverse('billing:credits-history')
+    return credits_url('history')
 
 
 @require_GET
@@ -52,7 +52,7 @@ def redeem_page(request: MaybeAuthenticatedHttpRequest, code: str) -> HttpRespon
         return redirect(f'{reverse("accounts:login")}?{query}')
     context = {
         'promo_code': code.upper(),
-        'promo_next': reverse('billing:credits-history'),
+        'promo_next': credits_url('history'),
     }
     return render(request, 'billing/redeem.html', context)
 

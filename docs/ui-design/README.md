@@ -146,6 +146,34 @@ is `-700` on light, because `-600` on white is only 3.3:1 (green) and 3.2:1 (amb
 needed for small text (`blue-600` is 5.2:1, `red-600` 4.8:1). On dark, `green-400`, `amber-400` and
 `blue-400` are 7.9, 8.3 and 5.4:1 on `gray-800`.
 
+### Chart palette
+
+A chart with several series (first used by the credit usage report, issue #347, mock
+`mocks/credit-usage-report.html`) takes its colours from `--c-chart-1` to `--c-chart-8` and `--c-chart-other` in
+`core/css/site.css`, each with a light and a dark value. They are categorical, so unlike the brand and neutral scales
+they are **the same in every colour scheme**: a series keeps its colour wherever it appears (an app takes the slot of its
+place in the product registry). Every value is at least 3:1 against the card (`bg-white`, including light high contrast,
+and `gray-800`), the WCAG minimum for graphical objects; `apps/core/tests/test_chart_palette.py` checks it for every
+scheme. `other` is the neutral for "everything else".
+
+| Slot | Light | Dark |
+|---|---|---|
+| 1 blue | `#2f6fb5` | `#6aa6e6` |
+| 2 orange | `#b8680e` | `#e6a04a` |
+| 3 purple | `#7a52b3` | `#ad8be0` |
+| 4 teal | `#1f8a70` | `#4fc3a1` |
+| 5 pink | `#c2457a` | `#ea7fae` |
+| 6 olive | `#8a7a12` | `#cfc04a` |
+| 7 red | `#b5442f` | `#ef8a76` |
+| 8 green | `#5b7f2a` | `#9bc95a` |
+| other | `#7b8783` | `#98a39f` |
+
+Never write the hex in a template: set `style="--chart: var(--c-chart-3)"` on the element and use `.chart-fill` (SVG) or
+`.chart-swatch` (a legend square). Colour is never the only carrier of meaning: a legend with names and totals, a
+`<title>` per segment, a sentence on the `role="img"` SVG and a table with every number come with the chart. The **stacked
+bar chart** is server-rendered SVG (no library): bars scaled to a round axis top, gridlines (`stroke-gray-200` /
+`dark:stroke-gray-700`) with the y labels beside it, and the legend chips are checkboxes that filter the series.
+
 ### Contrast rules
 
 WCAG 2.x ratios for the pairs that come up:

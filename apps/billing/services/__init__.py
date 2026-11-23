@@ -5,6 +5,7 @@ from .credits import (
     get_balance,
     spend_credits,
 )
+from .links import credits_url
 from .promo import (
     EmailNotConfirmed,
     InvalidPromoCode,
@@ -36,6 +37,7 @@ __all__ = [
     'PromoCodeNotStarted',
     'add_credits',
     'apply_credits',
+    'credits_url',
     'generate_code',
     'get_balance',
     'get_storage_price_per_gb_per_day',

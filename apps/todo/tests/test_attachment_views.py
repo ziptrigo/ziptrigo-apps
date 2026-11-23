@@ -12,6 +12,8 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.billing.services import credits_url
+
 from ..models import Attachment, TodoAccount, TodoSettings
 from ..services import attachments, delete_forever, get_account, trash_task
 from ..services.storage import attachment_key
@@ -148,7 +150,7 @@ class TestStart:
         assert response.status_code == 422
         body = response.json()
         assert body['frozen'] is True
-        assert body['top_up_url'] == reverse('billing:credits-history')
+        assert body['top_up_url'] == credits_url('history')
         assert 'Storage is paused' in body['error']
         assert not Attachment.objects.exists()
 
@@ -685,7 +687,7 @@ class TestFrozenBanner:
         content = web.get(reverse(name)).content.decode()
 
         assert 'Storage is paused.' in content
-        assert reverse('billing:credits-history') in content
+        assert credits_url('history') in content
 
     @pytest.mark.parametrize('name', PAGES)
     def test_no_banner_while_not_frozen(self, web, funded_user, name):

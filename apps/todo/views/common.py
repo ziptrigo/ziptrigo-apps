@@ -16,6 +16,7 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.billing.services import credits_url as billing_credits_url
 from apps.core import ratelimit
 from apps.core.field_errors import ErrorLines, form_lines
 from apps.core.field_errors import validation_lines as core_validation_lines
@@ -170,7 +171,7 @@ def owned_task(
 
 def credits_url() -> str:
     """Where "Top up" goes: the credits page (there is no purchase page yet)."""
-    return reverse('billing:credits-history')
+    return billing_credits_url('history')
 
 
 def validation_lines(exc: ValidationError, names: Mapping[str, str] | None = None) -> ErrorLines:

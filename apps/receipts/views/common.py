@@ -9,9 +9,9 @@ import json
 
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
-from django.urls import reverse
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.billing.services import credits_url as billing_credits_url
 from apps.core.field_errors import ErrorLines, form_lines
 
 from ..models import Receipt
@@ -84,7 +84,7 @@ def form_error_lines(form) -> ErrorLines:
 
 def credits_url() -> str:
     """Where "Top up" goes: the credits page (there is no purchase page yet)."""
-    return reverse('billing:credits-history')
+    return billing_credits_url('history')
 
 
 def json_body(request: HttpRequest) -> dict:

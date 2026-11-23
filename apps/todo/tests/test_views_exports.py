@@ -14,7 +14,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from apps.billing.models import CreditTransaction
-from apps.billing.services import get_balance, spend_credits
+from apps.billing.services import credits_url, get_balance, spend_credits
 from apps.core.services import exports as engine
 
 from ..models import ExportStatus, Project, TodoAccount, TodoExport
@@ -210,7 +210,7 @@ class TestDialog:
     def test_too_few_credits_offers_a_top_up(self, web, funded_user, three):
         spend_credits(funded_user, 95, description='x', source='test')
         content = web.get(reverse(NEW), **HTMX).content.decode()
-        assert 'Your balance is 5' in content and reverse('billing:credits-history') in content
+        assert 'Your balance is 5' in content and credits_url('history') in content
 
     def test_nothing_to_download_points_at_the_xlsx(self, web):
         content = web.get(reverse(NEW), **HTMX).content.decode()
@@ -329,14 +329,14 @@ class TestConfirm:
         content = response.content.decode()
         assert response.status_code == 422
         assert 'enough credits' in content
-        assert reverse('billing:credits-history') in content
+        assert credits_url('history') in content
         assert get_balance(funded_user) == 5 and not TodoExport.objects.exists()
 
     def test_a_frozen_account(self, web, funded_user, three, freeze):
         response = post_new(web)
         assert response.status_code == 422
         assert 'paused' in response.content.decode() and not TodoExport.objects.exists()
-        assert reverse('billing:credits-history') in response.content.decode()
+        assert credits_url('history') in response.content.decode()
 
     def test_one_at_a_time(self, web, three):
         assert post_new(web).status_code == 200

@@ -7,7 +7,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from apps.billing.services import get_balance
+from apps.billing.services import credits_url, get_balance
 
 from ..models import Receipt, ReceiptsSettings, ReceiptStatus
 from . import samples
@@ -188,7 +188,7 @@ class TestStart:
         assert response.status_code == 402
         body = response.json()
         assert body['frozen'] is True
-        assert body['top_up_url'] == reverse('billing:credits-history')
+        assert body['top_up_url'] == credits_url('history')
         assert 'paused' in body['error']
         assert not Receipt.objects.exists()
 

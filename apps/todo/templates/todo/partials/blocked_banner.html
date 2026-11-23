@@ -1,3 +1,4 @@
+{% load billing_ui %}
 {% comment %} The "Tasks are blocked" banner: a repeating task is waiting to be paid. `#todo-blocked` is always on the page
    (empty when nothing is blocked), so completing a task that creates an owed occurrence can fill it right away, out of band
    (`views.tasks.blocked_banner`). {% endcomment %}
@@ -10,7 +11,7 @@
         <span class="font-medium text-gray-900 dark:text-gray-100">Tasks are blocked.</span>
         A repeating task is waiting to be paid. Adding tasks resumes when you add credits.
     </p>
-    <a href="{% url 'billing:credits-history' %}"
+    <a href="{% credits_url 'history' %}"
        class="btn inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
         Top up
     </a>

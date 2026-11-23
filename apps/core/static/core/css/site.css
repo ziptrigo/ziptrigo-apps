@@ -46,6 +46,38 @@
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
 }
 
+/* ---------- Chart palette ----------
+ * One colour per series of a chart (issue #347: the credit usage report; docs/ui-design/README.md, "Chart palette").
+ * Categorical, so unlike the brand and neutral scales it is the same in every colour scheme: an app keeps its
+ * colour wherever it appears. Each has a light and a dark value, at least 3:1 against the card (`bg-white`,
+ * including the light high-contrast surface, and `gray-800`), the WCAG minimum for graphical objects
+ * (apps/core/tests/test_chart_palette.py checks it for every scheme). `other` is the neutral for "everything else". */
+:root {
+  --c-chart-1: #2f6fb5;
+  --c-chart-2: #b8680e;
+  --c-chart-3: #7a52b3;
+  --c-chart-4: #1f8a70;
+  --c-chart-5: #c2457a;
+  --c-chart-6: #8a7a12;
+  --c-chart-7: #b5442f;
+  --c-chart-8: #5b7f2a;
+  --c-chart-other: #7b8783;
+}
+.dark {
+  --c-chart-1: #6aa6e6;
+  --c-chart-2: #e6a04a;
+  --c-chart-3: #ad8be0;
+  --c-chart-4: #4fc3a1;
+  --c-chart-5: #ea7fae;
+  --c-chart-6: #cfc04a;
+  --c-chart-7: #ef8a76;
+  --c-chart-8: #9bc95a;
+  --c-chart-other: #98a39f;
+}
+/* A series' colour is set on the element as `style="--chart: var(--c-chart-3)"`; these paint with it. */
+.chart-fill { fill: var(--chart); }
+.chart-swatch { background-color: var(--chart); }
+
 html {
   -webkit-text-size-adjust: 100%;
   text-rendering: optimizeLegibility;
@@ -95,6 +127,13 @@ h1, h2, h3 { text-wrap: balance; }
   box-shadow: 0 0 0 2px var(--ring-offset, #fff), 0 0 0 4px rgb(var(--c-brand-300));
 }
 .dark :is(button, a, summary, [tabindex]):focus-visible { --ring-offset: rgb(var(--c-gray-900)); }
+/* A toggle chip or a segmented option whose real control is a visually hidden checkbox or radio: the keyboard ring goes on what is seen. */
+.chip-toggle input:focus-visible + span,
+.segmented > label:has(input:focus-visible) {
+  box-shadow: 0 0 0 2px var(--ring-offset, #fff), 0 0 0 4px rgb(var(--c-brand-300));
+}
+.dark .chip-toggle input:focus-visible + span,
+.dark .segmented > label:has(input:focus-visible) { --ring-offset: rgb(var(--c-gray-900)); }
 /* The skip link moves focus to <main> (tabindex=-1); a ring around the whole page would only distract. */
 main[tabindex='-1']:focus-visible { box-shadow: none; }
 

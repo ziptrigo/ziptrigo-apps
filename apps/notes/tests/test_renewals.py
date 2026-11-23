@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
-from apps.billing.services import add_credits, get_balance, spend_credits
+from apps.billing.services import add_credits, credits_url, get_balance, spend_credits
 from apps.core.models import Notification
 from apps.core.scheduler import get_jobs
 
@@ -345,7 +345,7 @@ class TestALockedNote:
         Note.objects.filter(pk=note.pk).update(user=funded_user)
         page = web.get(reverse('notes:note', args=[note.pk])).content.decode()
         assert 'This note is locked until its renewal is paid.' in page
-        assert reverse('billing:credits-history') in page
+        assert credits_url('history') in page
         assert reverse('notes:edit', args=[note.pk]) not in page
         assert 'Renewal unpaid since' in page
 
@@ -529,7 +529,7 @@ class TestWarnUpcoming:
         assert (
             notice.body == '2 notes renew in the next 7 days for 10 credits and your balance is 5.'
         )
-        assert notice.url == reverse('billing:credits-history')
+        assert notice.url == credits_url('history')
         [mail] = sent_emails
         assert mail['subject'] == 'Your notes renew soon'
         assert mail['to'] == poor_user.email

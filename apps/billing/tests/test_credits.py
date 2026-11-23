@@ -88,7 +88,7 @@ def test_credits_history_page_shows_only_current_user_and_orders_most_recent_fir
     client = Client()
     client.force_login(user)
 
-    response = client.get('/billing/credits/')
+    response = client.get('/billing/credits/?tab=history')
     assert response.status_code == 200
 
     body = response.content.decode('utf-8')

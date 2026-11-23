@@ -17,12 +17,12 @@ from apps.billing.models import (
     WelcomeCredit,
     WelcomeCreditStatus,
 )
-from apps.billing.services import add_credits, get_balance, welcome
+from apps.billing.services import add_credits, credits_url, get_balance, welcome
 from apps.core.models import Notification
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
-HISTORY = reverse('billing:credits-history')
+HISTORY = credits_url('history')
 
 
 def test_credits_history_has_no_clipped_table_on_a_phone(client, user):

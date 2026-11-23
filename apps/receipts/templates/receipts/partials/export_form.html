@@ -1,3 +1,4 @@
+{% load billing_ui %}
 {% comment %} The form of the "Download files" dialog. It carries the receipt-date range chosen on the account
    page as hidden fields, so what is exported is what the dialog described, and the total it states as
    `confirm_cost`: the server refuses (nothing charged) and shows this again when that is no longer the cost.
@@ -12,7 +13,7 @@
     {% if quote.frozen %}
     <p class="rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
         <i class="fas fa-triangle-exclamation mr-1 text-amber-600 dark:text-amber-400" aria-hidden="true"></i>Storage is paused, so files can't be downloaded until you add credits.
-        <a href="{% url 'billing:credits-history' %}" class="underline">Top up your credits</a>
+        <a href="{% credits_url 'history' %}" class="underline">Top up your credits</a>
     </p>
     {% elif not quote.file_count %}
     <p class="text-sm text-gray-700 dark:text-gray-300">There are no receipt files to download with the chosen filters.</p>
@@ -55,7 +56,7 @@
 
     <div id="export-msg" class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">
         {% for line in errors %}{{ line }}<br>{% endfor %}
-        {% if top_up and not quote.frozen %}<a href="{% url 'billing:credits-history' %}" class="underline">Top up your credits</a>{% endif %}
+        {% if top_up and not quote.frozen %}<a href="{% credits_url 'history' %}" class="underline">Top up your credits</a>{% endif %}
     </div>
 
     <div class="mt-6 flex flex-wrap justify-end gap-3">

@@ -10,6 +10,7 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.billing.services import credits_url
 from apps.core.datetime_format import DisplayFormats, format_date
 
 from ..forms.filters import resolve_date_range
@@ -596,7 +597,7 @@ class TestFrozenAccount:
         content = web.get(reverse(f'receipts:{name}')).content.decode()
 
         assert 'Storage is paused' in content
-        assert f'href="{reverse("billing:credits-history")}"' in content
+        assert f'href="{credits_url("history")}"' in content
         assert 'Top up' in content
 
     def test_a_working_account_has_no_banner(self, web):

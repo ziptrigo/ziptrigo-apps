@@ -86,12 +86,11 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Q
 from django.tasks import task
-from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today, user_tz
-from apps.billing.services import InsufficientCreditsError
+from apps.billing.services import InsufficientCreditsError, credits_url
 from apps.core import ratelimit
 from apps.core.datetime_format import formats_for
 from apps.core.services import notifications
@@ -910,7 +909,7 @@ def _notify_not_created(user: User, email: InboundEmail) -> None:
                 title='Emailed tasks were not created: not enough credits',
                 body="Tasks sent to your To-do address couldn't be created because you don't have "
                 'enough credits. Top up, then send them again.',
-                url=reverse('billing:credits-history'),
+                url=credits_url('history'),
                 key=CREDITS_NOTICE_KEY,
             )
     except Exception:

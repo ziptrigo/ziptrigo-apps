@@ -1855,7 +1855,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   a known code still redirects, only the scan-count write is skipped, protecting
   `QRCode.scan_count`'s accuracy under a shared-IP/NAT burst rather than shedding load, and an
   unknown one is still a 404, never a 429, since a real visitor must never see an error just
-  because someone else scanned the same code), `QR_SHARE_VIEW_IP`, `QR_SHARE_IMAGE_IP`, `QR_SHARE_USER`, `QR_SHARE_EMAIL_USER`, `QR_SHARE_REPORT_IP` and `QR_SHARE_REPORT_CODE` (sharing a QR
+  because someone else scanned the same code), `BILLING_USAGE_USER` (the credit usage report, 60/min per user, see "Credit usage report"), `QR_SHARE_VIEW_IP`, `QR_SHARE_IMAGE_IP`, `QR_SHARE_USER`, `QR_SHARE_EMAIL_USER`, `QR_SHARE_REPORT_IP` and `QR_SHARE_REPORT_CODE` (sharing a QR
   code, issue #5: the public `/q/<code>` page and, on its own looser rule, its image and download, per IP, charged before the lookup like `/go/`'s, but
   over them a plain 429 page; the owner's share dialog per user, creating and editing only, validated first and charged after, **revoking is never rate limited**; and `QR_SHARE_EMAIL_USER`, 30 an hour per user, **one hit per email queued**, the same shape as
   `FT_RECIPIENT_EMAIL_USER`; the report form of the public page, `QR_SHARE_REPORT_IP` (5 an hour per IP, every submission, charged first) and the looser
@@ -1936,7 +1936,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
 ### API
 
 `config/api.py` builds one `NinjaAPI`; each app exposes a `router` from its `api` module/package
-and is mounted under its prefix (`/api/` for accounts, `/api/billing/`, `/api/qr/`, `/api/ft/` for
+and is mounted under its prefix (`/api/` for accounts, `/api/billing/` (also `GET /api/billing/usage`, see "Credit usage report"), `/api/qr/`, `/api/ft/` for
 file_transfer, `/api/receipts/` for receipts, `/api/s/` for short_url, described under "Short URLs"
 above, including how it handles credits for a client with no one to confirm with, `/api/todo/`
 for the To-do app, described just below and under "To-do" > "API and CLI", `/api/time/` for World Time,
@@ -3510,6 +3510,58 @@ was ever used.
 - **Tests.** `apps/billing/tests/test_welcome_credits.py` (marked `welcome_credits`: the root
   `conftest.py` has an autouse fixture that patches `welcome.configured_credits` to 0 for every other
   test, so no test creates rows or credits by accident) and `apps/accounts/tests/test_known_emails.py`.
+
+### Credit usage report
+
+Issue #347 (`billing/services/usage.py`, `usage_ranges.py`, `links.py`, `forms/usage.py`, `views/credits.py`, `views/usage.py`,
+`api/usage.py`, `templatetags/billing_ui.py`, `static/billing/js/usage_filters.js`; no migration, no new table). The Credits page,
+`/billing/credits/` (`billing:credits-history`, name unchanged), has two tabs: **Usage** (the default) and **History**
+(`?tab=history`, the ledger, now with an **App** column, plus the promo code form). An unknown `tab` is Usage. The mock is
+`docs/ui-design/mocks/credit-usage-report.html`.
+
+- **Credits used** = what the ledger took out per app (`CreditTransaction.source`): spends **minus refunds** (a refund is
+  subtracted in the period it was made, so a period can be negative in the table; the chart draws it as 0) plus negative
+  adjustments. Credits added (purchase, promo, welcome, positive adjustment) are only a summary tile, by type. A source that is
+  no registered product (`apps.core.products`), or blank, is `other`. Apps come in registry order; an app with no usage in the
+  interval is not listed. Days are the account's (`user_tz`); a period is a whole day, week (Monday), month, quarter or year even
+  where the interval cuts it short.
+- **Periods** (`usage_ranges.RANGES`): last 7/30 (default)/90 days, this month, last month, this quarter, this year, last 12
+  months, all time (from the first transaction), custom (`date_from`/`date_to`, put right when swapped, a future end cut to
+  today, nothing before 2000). **Grouping** is `auto_group`: up to 31 days day, 190 week, 1,100 month, else year; more than
+  `MAX_PERIODS` (120) periods is a `PeriodLimitError`, raised from the dates alone before any query.
+- **`build_report(user, first=, last=, group=, apps=, lenient=)`** is two queries (a grouped aggregate with `Trunc*` in the
+  account's zone, and the credits added by type); empty periods are filled in Python. `apps` limits the tiles, chart and table
+  to those labels; every app with usage stays in the report with `shown` set, so a chip can be turned back on. A filter naming
+  no app with usage shows nothing (the API) or, `lenient` (the web), everything.
+- **Web.** The filters are a GET form (`#usage-filters`): Period is the themed select, Custom shows two core date pickers, Group
+  by is radios styled as the segmented control (`aria-current`), the legend chips are `app` checkboxes. htmx refreshes
+  `#usage-report` from `GET /billing/credits/usage/` on `change` (the Group by control comes out of band, since the period
+  decides the suggestion) and the answer carries `HX-Push-Url` with the page's canonical address (defaults left out; `group`
+  only when it differs from the suggestion; `app` only for a partial selection); opened without htmx the fragment redirects to the page;
+  without JavaScript an Apply button submits the form. `usage_filters.js` forgets the chosen grouping, and an app filter
+  naming every app, when the period or dates change. Parsing is lenient (`forms/usage.py`); the one refusal shown is the 120-period
+  line (amber, `role="alert"`) with the suggested grouping applied. The fragment spends `BILLING_USAGE_USER` (60/minute per user,
+  after the request parsed; a direct visit that redirects spends nothing). The chart is server-rendered SVG like Short URLs' stats
+  (no library): stacked bars, gridlines, a y axis, `role="img"` with a sentence, a `<title>` per segment, and the table has every
+  number. Colours are the chart palette (below). An empty interval shows `core/partials/empty_state.html` and the tiles.
+- **Chart palette** (`core/css/site.css`, `--c-chart-1` to `--c-chart-8` and `--c-chart-other`, light and dark values, the
+  same in every colour scheme; docs/ui-design/README.md "Chart palette"): an app takes the slot of its place in the product
+  registry (`UsageApp.slot`, `.color`), so it keeps its colour everywhere. Each is at least 3:1 against the card in every scheme
+  and mode (`apps/core/tests/test_chart_palette.py`). Templates paint with `style="--chart: var(--c-chart-3)"` and the
+  `.chart-fill` / `.chart-swatch` classes: no hex in a template.
+- **"Top up" links.** Every link, email and notification that sends a user to add credits opens **History**, where the promo form
+  is, and is built in one place: `apps.billing.services.credits_url(tab, absolute=False)` in Python and `{% load billing_ui %}{%
+  credits_url 'history' %}` in a template (the products' `views/common.py` `credits_url()` helpers wrap it). A link about
+  *usage* (the account page's **Credits** button, the Costs page heading, Receipts' "Balance" link) opens Usage.
+  `apps/billing/tests/test_credits_url_guard.py` fails on any non-test file that still names `credits-history`.
+- **API.** `GET /api/billing/usage` (`JWTAuth`, tag `Credits`; the caller's own usage; OpenAPI 2.20.0): `range`, `date_from`,
+  `date_to`, `group`, `app` (comma-separated labels); answers `{date_from, date_to, group, timezone, balance, used, refunded,
+  added: [{type, credits}], apps: [{app, name, used}], periods: [{start, label, total, apps}]}`, schemas `BillingUsage...`, period
+  labels in the public wording. Strict, unlike the web: an unknown range, group or app, a malformed date, dates with a preset and
+  more than 120 periods are a 400 with a `detail`; `BILLING_USAGE_USER` is charged after validation.
+- **Tests**: `apps/billing/tests/test_usage_ranges.py`, `test_usage_service.py`, `test_usage_views.py`, `test_usage_api.py`,
+  `test_credits_url_guard.py`, `apps/core/tests/test_chart_palette.py`, Playwright `tests_e2e/test_credit_usage.py`; AI cases
+  BILL-40 to BILL-45. Not done: CSV download, a CLI command, a category per charge, opening a period's transactions from the chart.
 
 ### Costs page
 

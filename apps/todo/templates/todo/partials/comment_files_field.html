@@ -1,3 +1,4 @@
+{% load billing_ui %}
 {% load filenames %}
 {% comment %} The file control of a comment form (add or edit): "Attach files", the rows of the uploads in flight and the files that will be
    saved with the comment. `static/todo/js/comment_files.js` runs it: each file is uploaded as soon as it is picked (the same calls as the
@@ -41,6 +42,6 @@
     <span class="ml-2 text-xs text-gray-500 dark:text-gray-400">Up to {{ comment_files_max_bytes|filesizeformat }} each; they count toward the task's {{ comment_files_max_files }} files and are billed by size, daily.</span>
     {% include 'core/partials/paste_hint.html' with text='Paste an image here to attach it:' class='mt-1' %}
     {% if comment_files_frozen %}
-    <p class="mt-1 text-sm text-amber-700 dark:text-amber-400">Uploads are paused until you add credits. <a href="{% url 'billing:credits-history' %}" class="underline">Top up</a></p>
+    <p class="mt-1 text-sm text-amber-700 dark:text-amber-400">Uploads are paused until you add credits. <a href="{% credits_url 'history' %}" class="underline">Top up</a></p>
     {% endif %}
 </div>

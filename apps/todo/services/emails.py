@@ -23,6 +23,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 
 from apps.accounts.models import User
+from apps.billing.services import credits_url
 from apps.core.datetime_format import format_utc
 from apps.core.services.email import send_email
 
@@ -53,7 +54,7 @@ def send_storage_paused_email(user_id: str) -> None:
     context = {
         'stored': filesizeformat(stored),
         'daily_cost': daily_storage_cost(stored),
-        'top_up_url': _absolute('billing:credits-history'),
+        'top_up_url': credits_url('history', absolute=True),
         'todo_url': _absolute('todo:settings'),
     }
     send_email(

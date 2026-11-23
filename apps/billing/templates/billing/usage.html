@@ -1,0 +1,43 @@
+{% extends "billing/credits.html" %}
+
+{% load static %}
+{% block extra_js %}<script src="{% static 'billing/js/usage_filters.js' %}"></script>{% endblock %}
+
+{% block credits_tab %}
+{% comment %}
+The filters are a GET form: htmx re-fetches `#usage-report` (and the Group by control, sent out of band
+because the period changes which grouping is suggested) when anything in it changes, and the server
+answers `HX-Push-Url`, so the address bar always holds the full page's URL. Without JavaScript the
+Apply button submits it. Changing the period or the dates forgets the chosen grouping (and an app filter that
+names every app), so the new period gets its own suggestion: billing/js/usage_filters.js.
+{% endcomment %}
+<form id="usage-filters" method="get" action="{{ form_action }}"
+      hx-get="{{ fragment_url }}" hx-target="#usage-report" hx-swap="innerHTML"
+      hx-sync="this:replace" hx-trigger="change delay:50ms, submit"
+      x-data="usageFilters('{{ range }}')" @change="onChange($event)">
+  <div class="mb-5 flex flex-wrap items-end gap-x-5 gap-y-3">
+    <div>
+      <label for="usage-range" class="block text-sm font-medium mb-1">Period</label>
+      {% include 'core/components/select.html' with name='range' id='usage-range' options=ranges value=range root_class='w-48' compact=True %}
+    </div>
+    <div x-show="range === 'custom'" {% if range != 'custom' %}style="display: none"{% endif %} class="flex items-end gap-2">
+      <div>
+        <label for="usage-from" class="block text-sm font-medium mb-1">From</label>
+        {% include 'core/components/date_picker.html' with name='date_from' id='usage-from' hidden_id='usage-from-value' value=date_from aria_label='From date' disabled_expr="range !== 'custom'" root_class='w-36' compact=True disabled=dates_disabled %}
+      </div>
+      <div>
+        <label for="usage-to" class="block text-sm font-medium mb-1">To</label>
+        {% include 'core/components/date_picker.html' with name='date_to' id='usage-to' hidden_id='usage-to-value' value=date_to aria_label='To date' disabled_expr="range !== 'custom'" root_class='w-36' compact=True disabled=dates_disabled %}
+      </div>
+    </div>
+    {% include 'billing/partials/usage_group.html' %}
+    <noscript><button type="submit" class="btn rounded-lg bg-brand-primary px-4 py-2 text-sm font-medium text-gray-900 hover:bg-sage-400">Apply</button></noscript>
+  </div>
+
+  <div id="usage-msg" role="status" aria-live="polite" class="mb-3 text-sm text-gray-600 dark:text-gray-300"></div>
+
+  <div id="usage-report">
+    {% include 'billing/partials/usage_report.html' %}
+  </div>
+</form>
+{% endblock %}

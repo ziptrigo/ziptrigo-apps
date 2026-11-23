@@ -260,7 +260,7 @@ def test_reserve_then_grant_on_confirmation(django_capture_on_commit_callbacks):
     assert notice.source == 'billing'
     assert notice.title == 'Your promo code added 500 credits'
     assert 'LAUNCH2026' in notice.body
-    assert notice.url == '/billing/credits/'
+    assert notice.url == '/billing/credits/?tab=history'
     # Idempotent.
     assert promo.grant_reservations(user) == []
     assert get_balance(user) == 500

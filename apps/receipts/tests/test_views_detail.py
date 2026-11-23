@@ -9,7 +9,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.billing.services import get_balance, spend_credits
+from apps.billing.services import credits_url, get_balance, spend_credits
 
 from ..models import Receipt, ReceiptsSettings, ReceiptStatus
 from ..services.accounts import get_account
@@ -360,7 +360,7 @@ class TestStates:
         content = web.get(url('detail', receipt)).content.decode()
 
         assert 'Waiting for credits' in content and 'every 3s' not in content
-        assert reverse('billing:credits-history') in content
+        assert credits_url('history') in content
 
     def test_a_possible_duplicate_banner_links_to_the_original(self, web, processed, make_receipt):
         dup = make_receipt(
@@ -557,7 +557,7 @@ class TestActions:
         assert response.status_code == 422
         assert response['HX-Retarget'] == '#receipt-form-msg'
         body = response.content.decode()
-        assert 'enough credits' in body and reverse('billing:credits-history') in body
+        assert 'enough credits' in body and credits_url('history') in body
         receipt.refresh_from_db()
         assert receipt.status == ReceiptStatus.FAILED
 

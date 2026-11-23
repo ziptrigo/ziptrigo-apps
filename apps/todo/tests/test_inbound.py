@@ -11,10 +11,9 @@ from typing import Any
 
 import pytest
 from botocore.exceptions import ClientError
-from django.urls import reverse
 from django.utils import timezone
 
-from apps.billing.services import add_credits, get_balance
+from apps.billing.services import add_credits, credits_url, get_balance
 from apps.core.models import Notification
 from apps.receipts.tests.emails import (
     HTML_RECEIPT,
@@ -860,7 +859,7 @@ class TestCredits:
         assert get_account(broke).stored_bytes == 0
         [note] = list(Notification.objects.filter(user=broke))
         assert note.title == 'Emailed tasks were not created: not enough credits'
-        assert note.url == reverse('billing:credits-history')
+        assert note.url == credits_url('history')
         assert note.source == 'todo' and note.key == inbound.CREDITS_NOTICE_KEY
 
     def test_the_balance_is_untouched(self, deliver, broke):

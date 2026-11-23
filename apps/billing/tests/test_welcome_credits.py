@@ -25,7 +25,7 @@ from apps.billing.models import (
     WelcomeCreditStatus,
     WelcomeRefusal,
 )
-from apps.billing.services import get_balance, welcome
+from apps.billing.services import credits_url, get_balance, welcome
 from apps.core.models import Notification
 
 pytestmark = [
@@ -114,7 +114,7 @@ def test_the_user_is_told_in_the_app(run):
     assert notice.source == 'billing'
     assert '1000' in notice.title
     assert notice.key == 'welcome_credits'
-    assert notice.url == reverse('billing:credits-history')
+    assert notice.url == credits_url('history')
 
 
 def test_nothing_is_granted_before_the_email_is_confirmed(run):

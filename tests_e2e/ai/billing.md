@@ -33,6 +33,11 @@ pages themselves (list columns, filters, bulk tool, CSV, read-only rules) are te
   it seeds them. **An account registered during the run gets 1,000 welcome credits** the moment
   its email is confirmed (one ledger row, see BILL-12), so a case that needs an account with 0
   credits must use `qa.broke`.
+- **The Credits page has two tabs (issue #347).** `/billing/credits/` opens the **Usage** tab (the
+  report, BILL-40 to BILL-45); the ledger and the promo code form are on the **History** tab,
+  `/billing/credits/?tab=history`, which is where every "Top up" / "Buy credits" link goes. Every
+  older case below that says "open `/billing/credits/`" to read the ledger or redeem a code means
+  the History tab, and a "Top up" link there points at `/billing/credits/?tab=history`.
 - Log in on `/account/login/` (**Email**, **Password**, **Sign in**); log out from the account menu
   (person icon, top right) > **Logout**. A superuser logged in on the site can open `/admin/`
   directly (same session).
@@ -99,8 +104,8 @@ Create these local files before starting (the fake AI reads any real image as a 
 | 3 | Look at the rows. | Exactly one row (a transaction whose description only repeats its type label shows an empty Description cell, not the label twice): Date = today's date and a time in the browser's time zone (`YYYY-MM-DD h:mm AM/PM`, close to when the server was started; hover/inspect: the `<time>` element's `datetime` attribute is the UTC instant); Change = **+100** in green followed by a small grey pill `Purchase`; Description = `e2e seed`. |
 | 4 | Look below the table. | No pagination bar ("Page 1 of 1" is **not** shown when there is only one page). |
 | 5 | Note the transaction type label. | A grey pill with the display label, `Purchase`. |
-| 6 | Click **Back to Account**. | Goes to `/account/`: section **Credits**, "Current balance" **100 credits**, and two buttons: an outlined **Costs** (tag icon) and **Usage History**. |
-| 7 | Click **Usage History**. | Back on `/billing/credits/`. |
+| 6 | Click **Back to Account**. | Goes to `/account/`: section **Credits**, "Current balance" **100 credits**, and two buttons: an outlined **Costs** (tag icon) and **Credits**. |
+| 7 | Click **Credits**. | Back on `/billing/credits/`, the Usage tab. |
 
 ### BILL-03 Empty state for a user with no transactions
 
@@ -113,7 +118,7 @@ everywhere.
 | 1 | Go to `/billing/credits/`. | "Current balance: **0** credits". The table has its three column headings and one full-width row reading "No credit transactions yet." (grey, centred). No pagination bar. |
 | 2 | Go to `/account/`. | **Credits** section shows **0 credits**. |
 | 3 | Go to `/transfer/send/`. | "Your balance: 0 credits. Sending needs at least 1." followed by a **Buy credits** link. |
-| 4 | Click **Buy credits**. | Goes to `/billing/credits/`. Observation to record: the page offers no way to buy credits (only the history), so the link's wording promises something the destination doesn't offer. |
+| 4 | Click **Buy credits**. | Goes to `/billing/credits/?tab=history` (the promo code form is there). Observation to record: the page offers no way to buy credits (only the history), so the link's wording promises something the destination doesn't offer. |
 | 5 | Go to `/receipts/upload/`. | Top right: "Balance: **0 credits**" linking to `/billing/credits/`; the drop zone says "1 credit each". |
 
 ### BILL-04 Other users' transactions are never shown
@@ -176,7 +181,7 @@ and the ledger shows the top-up and the charge.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | On `/receipts/upload/`, choose `receipt-2.png`. | "✓ Uploaded. View receipt" (the upload is allowed with 0 credits). |
-| 2 | Click **View receipt**. | A panel **Waiting for credits**: "We'll read this receipt as soon as you add credits." with a **Top up** link pointing to `/billing/credits/`; no extracted fields yet. |
+| 2 | Click **View receipt**. | A panel **Waiting for credits**: "We'll read this receipt as soon as you add credits." with a **Top up** link pointing to `/billing/credits/?tab=history`; no extracted fields yet. |
 | 3 | Go to `/billing/credits/`. | Still "Current balance: **0** credits" and "No credit transactions yet." (nothing was charged). |
 | 4 | Log out, log in as `qa.admin@example.com`, and on `/admin/billing/credittransaction/adjust/` add `2` credits to `qa.broke@example.com` with description `top-up test`. | "Adjusted credits for qa.broke@example.com. New balance: 2." (the message is computed right after the add; the charge may already have happened, so `1` is also acceptable here). |
 | 5 | Log out, log in as `qa.broke@example.com`, go to `/billing/credits/`. | "Current balance: **1** credit" (singular). Newest first: **-1** red `Spend` pill "Receipt processing: receipt-2.png", then **+2** green `Adjustment` pill "top-up test". |
@@ -669,6 +674,78 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 | 4 | Put the price back to `3` and the retention to `30`. Make an export of N files (TODO-71) and open `/billing/credits/`. | One Spend row "To-do export: N files" for exactly `3N` credits, source To-do; no other charge. After TODO-73 step 2 a Refund row of 3 per vanished file. **Export XLSX** (TODO-72) adds no row. |
 | 5 | The Credits history descriptions. | The Spend is `To-do export: N files`; a Refund is `To-do export: M file(s) no longer there`, or `To-do export could not be prepared` for a failed build. |
 
+### BILL-40 The Credits page: tabs and what each shows
+
+**Purpose:** `/billing/credits/` has a **Usage** tab (default) and a **History** tab; the address says which; an unknown tab is Usage.
+**Preconditions:** `qa.user@example.com`, signed in, with a few Receipts uploads behind it (BILL-05) so there is usage.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/billing/credits/`. | Heading **Credits** with "Current balance: N credits" and **Back to Account**. Two underline tabs, **Usage** (current, `aria-current="page"`) and **History**. Filters, three tiles, a chart, a table. No "Have a promo code?" form. Page is wider than before (`max-w-4xl`). |
+| 2 | Click **History**. | The address becomes `/billing/credits/?tab=history`; the promo code form and the ledger table with columns **Date**, **Change**, **App**, **Description** (a Receipts spend shows `Receipts` in App; a promo or manual adjustment shows a dash). |
+| 3 | Open `/billing/credits/?tab=nope`. | The Usage tab. |
+| 4 | On History with more than 25 rows, click **Next**. | `?tab=history&page=2`; still History. |
+| 5 | From `/account/` click **Credits**. | Opens the Usage tab. From the Costs page the link in the heading ("Credits") opens Usage too. |
+| 6 | Redeem a promo code on the History tab. | Flash "Added N credits...", back on `/billing/credits/?tab=history`. |
+
+### BILL-41 The Usage report: period, grouping and the numbers
+
+**Purpose:** the tiles, chart and table agree, and follow the period and grouping.
+**Preconditions:** BILL-40; spends on at least two apps over more than a week (shell: create `CreditTransaction` rows with `created_at` set back), plus one refund and one promo credit.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/billing/credits/`. | Period **Last 30 days**, **Group by** Day selected; "From mm/dd/yyyy to mm/dd/yyyy" (today last). Tile **Credits used** = sum of spends minus refunds, its note "Most: <app> (n) · n refunded, already subtracted"; **Credits added** with the promo ("Promo code 500"); **Average per day** "over 30 days". |
+| 2 | Compare the chart, the table and the tiles. | The table's **Total** footer equals Credits used; each app column total equals the number beside its legend chip; periods newest first; a zero shows a dash; a period where a refund exceeded the spends shows a negative number in green and no bar. |
+| 3 | Choose **Last 90 days**. | The report refreshes without a page reload; address `?range=last_90_days`; Group by moves to **Week**; heading "Credits used per week"; rows read "Week of <date>". |
+| 4 | Click **Month**, then **Quarter**, **Year**. | Heading and table follow ("Nov 2026", "Q4 2026", "2026"); address gains `group=month` etc. |
+| 5 | With Month chosen, choose **Last 7 days**. | The chosen grouping is forgotten: Group by is **Day** again, address `?range=last_7_days`. |
+| 6 | Choose **This month**, **Last month**, **This quarter**, **This year**, **Last 12 months**, **All time**. | "From ... to ..." matches each (this month from the 1st to today; last month the whole previous month; all time from the first ledger row's date). |
+| 7 | Choose **Custom**. | Two date fields appear (From, To), in the account's date format. Pick a range; the report follows; address has `range=custom&date_from=...&date_to=...`. Type the ends the wrong way round: the report puts them right. Type a future end: cut to today. |
+| 8 | Reload a filtered address. | The same report, filters restored. Opening `/billing/credits/usage/?range=last_7_days` directly redirects to the page. |
+| 9 | Hand-edit the address to `?range=bogus&group=decade&date_from=x`. | The default report, no error page. |
+
+### BILL-42 Too many periods
+
+**Purpose:** a grouping that would make more than 120 periods is refused with the suggested one shown.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/billing/credits/?range=this_year&group=day` (or Custom from 01/01/2000 grouped by Day). | An amber line (an alert) "That is N days, too many to show. Choose a shorter period or group by a longer unit."; the report is shown grouped by the suggested unit (Month / Year) and that option is selected; the address no longer has `group=day`. |
+
+### BILL-43 The app filter and "Other"
+
+**Purpose:** the legend chips filter tiles, chart and table; unregistered sources are "Other".
+**Preconditions:** BILL-41; add a spend with an empty source and a negative admin adjustment (BILL-08).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Look at the legend under the chart. | One chip per app with usage (colour square, icon, name, total), registry order, **Other** last (neutral grey) holding the sourceless spend and the negative adjustment. An app with no usage in the period has no chip. |
+| 2 | Click the **Receipts** chip. | The chip dims and is struck through; the line says "showing N of M apps"; tiles, chart and table drop Receipts; the Total column shows only the others; address gains `app=<label>` for each app still on. |
+| 3 | Click it again. | Everything back, "showing" gone, `app` gone from the address. |
+| 4 | Filter to one app, then change the period. | A partial selection is kept; with every app on, the filter resets so an app new to the period is shown. |
+| 5 | Tab to a chip and press Space. | It toggles; the keyboard focus ring is on the chip. |
+
+### BILL-44 Empty state, time zone, formats
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | As `qa.broke@example.com` open `/billing/credits/?range=last_7_days`. | Tiles show 0; instead of the chart a dashed card: "No credits used from <date> to <date>" with a button **See the Costs page** (opens `/billing/costs/`). No table. |
+| 2 | Spend at 23:30 local on the last day of a month as an account whose zone is not UTC (account page > Time zone), group by Month. | The spend is counted in that month in the account's zone, not UTC's; the footnote says "Days are in your time zone (<zone>). Weeks start on Monday." |
+| 3 | Switch the account to dd/mm/yyyy and 24-hour. | The Usage tab dates follow (`23/11/2026`); month labels stay words; the date fields show dd/mm/yyyy. |
+| 4 | Dark theme, and a phone width. | Chart colours are readable on both (each app keeps its colour); the table scrolls sideways on a phone; the tabs and filters wrap. |
+
+### BILL-45 The usage API
+
+**Purpose:** `GET /api/billing/usage` returns the same numbers as the page.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Without a token. | 401. |
+| 2 | With a token, `?range=last_30_days`. | JSON with `date_from`, `date_to`, `group`, `timezone`, `balance`, `used`, `refunded`, `added`, `apps`, `periods` (oldest first, empty ones included, `label` in the public wording "Nov 2026"); `used` equals the page's Credits used. |
+| 3 | `?range=forever`, `?group=decade`, `?app=nope`, `?date_from=11/20/2026&range=custom`, `?range=last_7_days&date_from=2026-11-20`, `?range=this_year&group=day`. | Each is a 400 with a `detail` sentence. |
+| 4 | 61 calls in a minute. | The 61st is a 429 with `Retry-After`. |
+
 ## Out of scope
 
 - The redeem form without JavaScript (a refusal then becomes an error flash on the page the form
@@ -679,4 +756,4 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
   staff accounts (`admin.md`).
 - The daily `billing.settle_welcome_credits` safety net and the 30-day wait before a reservation is
   released (BILL-26 runs the release by hand); both are unit-tested.
-- The JWT `/api/billing/` endpoints (unit-tested).
+- The staff-only `/api/billing/users/{id}/credits` endpoints (unit-tested).

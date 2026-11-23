@@ -26,6 +26,7 @@ from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 
 from apps.accounts.models import User
+from apps.billing.services import credits_url
 from apps.core.datetime_format import format_utc
 from apps.core.services.email import send_email
 from apps.core.services.queue import enqueue_after_commit
@@ -170,7 +171,7 @@ def send_storage_paused_email(user_id: str) -> None:
         return
     if not user.email or not user.email_confirmed:
         return
-    top_up = f'{settings.BASE_URL}{reverse("billing:credits-history")}'
+    top_up = credits_url('history', absolute=True)
     lines = [
         "Your credit balance couldn't cover the storage for your receipts.",
         'Your receipts are safe, nothing was deleted. Until you add credits, previews, '
