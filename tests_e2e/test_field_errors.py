@@ -94,6 +94,8 @@ def test_a_label_wrapped_field_keeps_its_name_and_the_message_sits_below_the_lab
     page.fill('input[name="email"]', 'field.errors@example.com')
     password = page.locator('input[name="password"]')
     password.fill('abcdefgh')  # long enough for the browser, but with no digit
+    # Required (#96): unticked, the browser blocks the post.
+    page.check('input[name="accept_terms"]')
     page.click('button[type="submit"]')
 
     message = page.locator('#register-form-password-error')

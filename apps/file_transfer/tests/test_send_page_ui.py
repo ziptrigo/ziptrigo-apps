@@ -50,5 +50,6 @@ def test_upload_script_reports_problems_inline_not_with_alert():
         / 'apps/file_transfer/static/file_transfer/js/resumable_upload.js'
     ).read_text()
     assert not re.search(r'(?<![\w.])alert\(', script)
-    assert script.count("setAttribute('role', 'alert')") == 2  # the row line and the page region
+    # the row line, the page region and the rename box's error
+    assert script.count("setAttribute('role', 'alert')") == 3
     assert "'Upload interrupted by a network error." in script
