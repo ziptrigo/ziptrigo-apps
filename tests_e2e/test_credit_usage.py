@@ -108,6 +108,12 @@ def test_the_report_refreshes_in_place_and_the_address_follows(
     expect(
         report.locator('label.chip-toggle', has_text='Receipts').locator('input')
     ).not_to_be_checked()
+    # The last ticked chip cannot be unticked (nothing ticked would mean every app).
+    page.locator('label.chip-toggle', has_text='File Transfer').click()
+    expect(
+        report.locator('label.chip-toggle', has_text='File Transfer').locator('input')
+    ).to_be_checked()
+    expect(page.locator('#usage-hint')).to_have_text('At least one app stays shown.')
     page.locator('label.chip-toggle', has_text='Receipts').click()
     expect(report).not_to_contain_text('showing')
     expect(report.locator('dl > div', has_text='Credits used')).to_contain_text('10')

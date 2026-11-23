@@ -725,6 +725,8 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 | 3 | Click it again. | Everything back, "showing" gone, `app` gone from the address. |
 | 4 | Filter to one app, then change the period. | A partial selection is kept; with every app on, the filter resets so an app new to the period is shown. |
 | 5 | Tab to a chip and press Space. | It toggles; the keyboard focus ring is on the chip. |
+| 6 | With one app left ticked, untick it. | It stays ticked and the line "At least one app stays shown." appears (announced politely); the report is unchanged. |
+| 7 | With two apps in the chart, give one app a spend and another a refund in the same day (BILL-08 style). | That day's bar is as high as the day's table **Total** (the refund taken off the larger segment, whose tooltip ends "(after refunds)"); the "Highest day" line and the y axis top agree with the highest total. |
 
 ### BILL-44 Empty state, time zone, formats
 
@@ -744,7 +746,8 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 | 1 | Without a token. | 401. |
 | 2 | With a token, `?range=last_30_days`. | JSON with `date_from`, `date_to`, `group`, `timezone`, `balance`, `used`, `refunded`, `added`, `apps`, `periods` (oldest first, empty ones included, `label` in the public wording "Nov 2026"); `used` equals the page's Credits used. |
 | 3 | `?range=forever`, `?group=decade`, `?app=nope`, `?date_from=11/20/2026&range=custom`, `?range=last_7_days&date_from=2026-11-20`, `?range=this_year&group=day`. | Each is a 400 with a `detail` sentence. |
-| 4 | 61 calls in a minute. | The 61st is a 429 with `Retry-After`. |
+| 4 | 61 calls in a minute (or page loads of `/billing/credits/` and refreshes mixed: one budget). | The 61st is a 429 with `Retry-After`; on the page it shows the filters, the line "Too many requests..." in the message slot and no report; the History tab is never limited. |
+| 5 | `?app=receipts&app=todo` and `?app=receipts,todo`. | The same answer. |
 
 ## Out of scope
 

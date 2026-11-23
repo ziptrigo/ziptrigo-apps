@@ -34,10 +34,12 @@ names every app), so the new period gets its own suggestion: billing/js/usage_fi
     <noscript><button type="submit" class="btn rounded-lg bg-brand-primary px-4 py-2 text-sm font-medium text-gray-900 hover:bg-sage-400">Apply</button></noscript>
   </div>
 
-  <div id="usage-msg" role="status" aria-live="polite" class="mb-3 text-sm text-gray-600 dark:text-gray-300"></div>
+  <div id="usage-msg" role="status" aria-live="polite" class="mb-3 text-sm text-gray-600 dark:text-gray-300">{% if limited %}{{ limited }}{% endif %}</div>
+  {% comment %}Filled by usage_filters.js when the last app chip is unticked (it stays on); outside `#usage-report`, so a refresh does not clear it.{% endcomment %}
+  <div id="usage-hint" role="status" aria-live="polite" class="mb-3 text-sm text-gray-600 dark:text-gray-300"></div>
 
   <div id="usage-report">
-    {% include 'billing/partials/usage_report.html' %}
+    {% if not limited %}{% include 'billing/partials/usage_report.html' %}{% endif %}
   </div>
 </form>
 {% endblock %}

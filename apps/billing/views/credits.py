@@ -1,7 +1,7 @@
 """The Credits page: Usage and History tabs at `/billing/credits/` (issue #347).
 
 `?tab=usage` (the default) is the usage report (`views.usage`), `?tab=history` the ledger with the
-promo code form. An unknown tab is Usage. Every "Top up" link on the site opens History
+promo code form. An unknown tab is Usage. The Usage tab spends `BILLING_USAGE_USER`. Every "Top up" link on the site opens History
 (`apps.billing.services.credits_url`).
 """
 
@@ -11,12 +11,14 @@ from django.http import HttpResponse
 from django.shortcuts import render
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.core import ratelimit
+from apps.core.ratelimit.responses import DEFAULT_MESSAGE
 
 from ..forms import parse_params
 from ..models import CreditTransaction
 from ..services import get_balance
 from ..services.links import DEFAULT_TAB, HISTORY, USAGE
-from .usage import usage_context
+from .usage import limited_context, usage_context
 
 #: Ledger rows per page of the History tab.
 PAGE_SIZE = 25
@@ -29,7 +31,17 @@ def credits_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     tab = HISTORY if request.GET.get('tab') == HISTORY else DEFAULT_TAB
     context: dict = {'tab': tab, 'credits_balance': get_balance(user)}
     if tab == USAGE:
-        context.update(usage_context(request, user, parse_params(request.GET)))
+        params = parse_params(request.GET)
+        # The report runs a grouped query over the ledger: the page spends the same budget as the
+        # htmx refresh and the API, or a script could loop on the page instead. Over it, the
+        # filters and the message come back and no query runs. The History tab is not charged.
+        result = ratelimit.hit_user(user, 'BILLING_USAGE_USER')
+        if not result.allowed:
+            context.update(limited_context(params, DEFAULT_MESSAGE))
+            response = render(request, 'billing/usage.html', context, status=429)
+            response['Retry-After'] = str(result.retry_after)
+            return response
+        context.update(usage_context(request, user, params))
         return render(request, 'billing/usage.html', context)
 
     queryset = CreditTransaction.objects.filter(user=user).order_by('-created_at', '-id')

@@ -40,16 +40,16 @@
   <fieldset class="mb-3">
     <legend class="sr-only">Apps shown</legend>
     <div class="flex flex-wrap gap-2">
-      {% for app in report.apps %}
+      {% for chip in chips %}{% with app=chip.app %}
       <label class="chip-toggle cursor-pointer">
         <input type="checkbox" name="app" value="{{ app.label }}" class="peer sr-only" {% if app.shown %}checked{% endif %}>
         <span class="inline-flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 text-sm opacity-60 line-through peer-checked:opacity-100 peer-checked:no-underline">
           <span class="inline-block h-3 w-3 rounded-sm chart-swatch" style="--chart: {{ app.color }}" aria-hidden="true"></span>
           <i class="{{ app.icon }} text-xs opacity-70" aria-hidden="true"></i>{{ app.name }}
-          <span class="tabular-nums text-gray-500 dark:text-gray-400">{{ app.used|floatformat:"0g" }}</span>
+          <span class="tabular-nums text-gray-500 dark:text-gray-400">{{ chip.used_text }}</span>
         </span>
       </label>
-      {% endfor %}
+      {% endwith %}{% endfor %}
     </div>
   </fieldset>
 

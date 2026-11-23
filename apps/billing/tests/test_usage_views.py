@@ -162,6 +162,40 @@ def test_a_refund_makes_a_negative_period_that_the_chart_draws_as_nothing(signed
     assert 'Credits used -4' in _text(response)
 
 
+def test_a_refund_for_one_app_is_taken_off_the_spend_of_another_in_the_chart(signed_in, user):
+    spend(user, 10, 'receipts', utc(2026, 11, 20))
+    refund(user, 4, 'todo', utc(2026, 11, 20))
+    spend(user, 3, 'receipts', utc(2026, 11, 21))
+
+    response = signed_in.get(PAGE, {'group': 'day'})
+    body = response.content.decode()
+    chart = response.context['chart']
+
+    # The period's total is 6, so the bar is 6 high, and so are the line, the sentence and the scale.
+    assert '<title>11/20/2026 · Receipts: 6 (after refunds)</title>' in body
+    assert '<title>11/21/2026 · Receipts: 3</title>' in body
+    assert 'To-do: 4' not in body and 'To-do: 0' not in body
+    assert 'Highest day: 6 credits' in _text(response)
+    assert 'at most 6 in a day' in body
+    assert chart['y_labels'][0] == '6'  # the scale tops out at the highest total, not at 10
+
+
+def test_refunds_are_taken_off_the_largest_segments_first():
+    from apps.billing.views.usage import period_stack
+
+    class App:
+        def __init__(self, label):
+            self.label = label
+
+    a, b, c = App('a'), App('b'), App('c')
+    report = mock.Mock(shown_apps=(a, b, c))
+
+    stack = period_stack(report, {'a': 3, 'b': 8, 'c': -9})  # total 2: b gives up 8, a gives up 1
+    assert [(app.label, value) for app, value, _cut in stack] == [('a', 2), ('b', 0), ('c', 0)]
+    below_zero = period_stack(report, {'a': 3, 'b': 0, 'c': -9})
+    assert sum(value for _app, value, _cut in below_zero) == 0
+
+
 def test_the_table_is_newest_first_with_a_total_row_and_dashes(signed_in, user):
     spend(user, 4, 'file_transfer', utc(2026, 11, 20))
     spend(user, 6, 'receipts', utc(2026, 11, 21))
@@ -422,6 +456,51 @@ def test_a_redirected_direct_visit_spends_no_budget(signed_in, settings, ratelim
         assert signed_in.get(FRAGMENT).status_code == 302
 
     assert signed_in.get(FRAGMENT, **HTMX).status_code == 200
+
+
+def test_a_successful_refresh_clears_an_earlier_message(signed_in):
+    body = signed_in.get(FRAGMENT, **HTMX).content.decode()
+
+    assert re.search(r'<div id="usage-msg" hx-swap-oob="true"[^>]*></div>', body)
+
+
+def test_the_usage_tab_shares_the_budget_with_the_fragment(
+    signed_in, user, settings, ratelimit_clock
+):
+    spend(user, 4, 'receipts', utc(2026, 11, 20))
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'BILLING_USAGE_USER': (2, 60)}
+    assert signed_in.get(PAGE).status_code == 200
+    assert signed_in.get(FRAGMENT, **HTMX).status_code == 200
+
+    with mock.patch('apps.billing.views.credits.usage_context') as report:
+        response = signed_in.get(PAGE, {'range': 'custom', 'date_from': '2026-09-01'})
+
+    report.assert_not_called()  # no report query
+    body = response.content.decode()
+    assert response.status_code == 429
+    assert 'Retry-After' in response
+    assert re.search(r'<div id="usage-msg"[^>]*>Too many requests\.', body)
+    assert 'Credits used' not in body and '<svg' not in body
+    assert 'id="usage-filters"' in body  # the filters are still there
+    assert 'name="date_from" value="2026-09-01"' in body
+
+
+def test_the_history_tab_is_not_charged(signed_in, settings, ratelimit_clock):
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'BILLING_USAGE_USER': (1, 60)}
+    for _ in range(3):
+        assert signed_in.get(PAGE, {'tab': 'history'}).status_code == 200
+
+    assert signed_in.get(PAGE).status_code == 200
+
+
+def test_the_chips_show_their_totals_in_the_sites_number_format(signed_in, user):
+    spend(user, 1284, 'receipts', utc(2026, 11, 20))
+
+    body = signed_in.get(PAGE).content.decode()
+
+    assert re.search(r'tabular-nums[^>]*>1,284</span>\s*</span>\s*</label>', body)
 
 
 # -- the "Top up" links --

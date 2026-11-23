@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.20.0
+  version: 2.20.1
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -360,13 +360,19 @@ paths:
 
         `last_month`, `this_quarter`, `this_year`, `last_12_months`, `all_time`) or `custom` with
 
-        `date_from` and `date_to` (`YYYY-MM-DD`); the ends of a custom range default to the first transaction and
+        `date_from` and `date_to` (`YYYY-MM-DD`); the ends of a custom range default to the first
 
-        today, a future end is cut to today and ends given the wrong way round are put right. The
+        transaction and today, a future end is cut to today and ends given the wrong way round are put
 
-        answer says the dates it used. **400** for an unknown `range`, `group` or app, a malformed
+        right. The answer says the dates it used. `app` limits the answer to some apps (their labels,
 
-        date, dates sent with a preset, and a grouping that would make more than 120 periods.'
+        or `other`): repeat the parameter (`app=receipts&app=todo`) or separate them with commas
+
+        (`app=receipts,todo`); without it every app is counted. **400** for an unknown `range`,
+
+        `group` or app, a malformed date, dates sent with a preset, and a grouping that would make
+
+        more than 120 periods.'
       tags:
       - Credits
       security:

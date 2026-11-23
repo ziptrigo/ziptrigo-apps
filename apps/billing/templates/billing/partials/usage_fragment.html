@@ -1,3 +1,5 @@
 {# What the filters re-fetch: the report, and the Group by control out of band. #}
 {% include 'billing/partials/usage_report.html' %}
 {% include 'billing/partials/usage_group.html' with oob=True %}
+{% comment %}A refresh that worked clears an earlier "Too many requests" line (the clear-on-success pattern).{% endcomment %}
+<div id="usage-msg" hx-swap-oob="true" role="status" aria-live="polite" class="mb-3 text-sm text-gray-600 dark:text-gray-300"></div>

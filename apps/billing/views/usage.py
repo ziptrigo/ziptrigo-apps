@@ -68,15 +68,40 @@ class Segment:
     title: str
 
 
+def period_stack(report: usage.UsageReport, amounts: dict[str, int]) -> list[tuple]:
+    """`[(app, drawn, reduced)]` for one period: the heights its segments are drawn to.
+
+    A bar is drawn to `max(0, period.total)`, the figure the table, "Highest" line and the
+    chart's sentence give. A refund for one app and a spend for another in the same period would
+    otherwise stack to more than that total, so the negative amounts are taken off the positive
+    segments, largest first, until the visible segments sum to the total (a period below zero has
+    no bar). `reduced` says a segment was cut that way.
+    """
+    positive = [(app, max(0, amounts.get(app.label, 0))) for app in report.shown_apps]
+    owed = sum(value for _app, value in positive) - max(
+        0, sum(amounts.get(app.label, 0) for app in report.shown_apps)
+    )
+    drawn = {app.label: value for app, value in positive}
+    cut: set[str] = set()
+    for app, value in sorted(positive, key=lambda item: -item[1]):
+        if owed <= 0:
+            break
+        take = min(value, owed)
+        if take:
+            drawn[app.label] = value - take
+            cut.add(app.label)
+            owed -= take
+    return [(app, drawn[app.label], app.label in cut) for app, _value in positive]
+
+
 def chart_context(report: usage.UsageReport) -> dict:
     """The stacked bars of `report` for the SVG: one bar per period, one segment per shown app
-    with something above zero (a refund can take a period below zero; it is drawn as 0)."""
-    shown = report.shown_apps
-    stacks = [
-        [(app, max(0, period.amounts.get(app.label, 0))) for app in shown]
-        for period in report.periods
-    ]
-    step, top = nice_scale(max([0, *(sum(value for _app, value in stack) for stack in stacks)]))
+    with something left to draw (see `period_stack`: a bar's height is the period's total, never
+    below zero), and a y scale made from the same totals as `report.peak`."""
+    stacks = [period_stack(report, period.amounts) for period in report.periods]
+    step, top = nice_scale(
+        max([0, *(sum(value for _app, value, _cut in stack) for stack in stacks)])
+    )
     count = max(len(report.periods), 1)
     slot_width = CHART_WIDTH / count
     bar_width = slot_width * BAR_FILL
@@ -85,11 +110,12 @@ def chart_context(report: usage.UsageReport) -> dict:
     for index, (period, stack) in enumerate(zip(report.periods, stacks)):
         label = usage.period_label(period.start, report.group)
         bottom = float(CHART_HEIGHT)
-        for app, value in stack:
+        for app, value, reduced in stack:
             if not value:
                 continue
             height = value / top * CHART_HEIGHT
             bottom -= height
+            note = ' (after refunds)' if reduced else ''
             segments.append(
                 Segment(
                     x=round(index * slot_width + (slot_width - bar_width) / 2, 2),
@@ -97,7 +123,7 @@ def chart_context(report: usage.UsageReport) -> dict:
                     width=round(bar_width, 2),
                     height=round(max(0.0, height - 0.6), 2),
                     color=app.color,
-                    title=f'{label} · {app.name}: {number(value)}',
+                    title=f'{label} · {app.name}: {number(value)}{note}',
                 )
             )
     gridlines = [
@@ -218,6 +244,7 @@ def usage_context(request: HttpRequest, user, params: UsageParams) -> dict:
         'average_text': number(report.average),
         'periods_count': len(report.periods),
         'peak_text': peak_text,
+        'chips': [{'app': app, 'used_text': number(app.used)} for app in report.apps],
         'chart': chart,
         'chart_aria': aria,
         'table': table_context(report),
@@ -225,6 +252,23 @@ def usage_context(request: HttpRequest, user, params: UsageParams) -> dict:
         'empty_title': f'No credits used from {first_text} to {last_text}',
         'time_zone': tz.key,
         'page_url': page_url,
+        'fragment_url': reverse('billing:credits-usage'),
+        'form_action': reverse('billing:credits-history'),
+    }
+
+
+def limited_context(params: UsageParams, message: str) -> dict:
+    """The Usage tab without a report, for a request over `BILLING_USAGE_USER`: the filters as the
+    query string left them and `message` in `#usage-msg`. Runs no query."""
+    custom = params.range == 'custom'
+    return {
+        'limited': message,
+        'groups': [(key, label, key == params.group) for key, label in GROUPS],
+        'ranges': [{'value': key, 'label': label} for key, label in RANGES],
+        'range': params.range,
+        'date_from': params.date_from.isoformat() if custom and params.date_from else '',
+        'date_to': params.date_to.isoformat() if custom and params.date_to else '',
+        'dates_disabled': not custom,
         'fragment_url': reverse('billing:credits-usage'),
         'form_action': reverse('billing:credits-history'),
     }
@@ -248,4 +292,4 @@ def credits_usage_partial(request: AuthenticatedHttpRequest) -> HttpResponse:
     return response
 
 
-__all__ = ['credits_usage_partial', 'usage_context']
+__all__ = ['credits_usage_partial', 'limited_context', 'usage_context']

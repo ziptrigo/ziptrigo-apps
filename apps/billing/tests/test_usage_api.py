@@ -93,6 +93,22 @@ def test_groupings_and_the_app_filter(client):
     }
 
 
+def test_apps_may_be_repeated_or_comma_separated_or_mixed(client):
+    user = make_user()
+    spend(user, 4, 'file_transfer', utc(2026, 11, 20))
+    spend(user, 6, 'receipts', utc(2026, 11, 20))
+    spend(user, 1, '', utc(2026, 11, 20))
+
+    repeated = _get(client, user, app=['receipts', 'file_transfer']).json()
+    comma = _get(client, user, app='receipts,file_transfer').json()
+    mixed = _get(client, user, app=['receipts', 'other,file_transfer']).json()
+
+    assert {a['app'] for a in repeated['apps']} == {'receipts', 'file_transfer'}
+    assert repeated['used'] == comma['used'] == 10
+    assert mixed['used'] == 11
+    assert _get(client, user, app=['receipts', 'nope']).json()['detail'] == 'Unknown app: nope.'
+
+
 def test_an_app_without_usage_gives_an_empty_report(client):
     user = make_user()
     spend(user, 4, 'file_transfer', utc(2026, 11, 20))

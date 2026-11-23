@@ -390,10 +390,10 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # exists, so no user to key on) shares the per-IP budget.
     'PROMO_REDEEM_USER': (10, 60 * 60),
     'PROMO_REDEEM_IP': (30, 60 * 60),
-    # The credit usage report (issue #347), per user: `GET /api/billing/usage` and the Usage tab's
-    # htmx refreshes share it. Every call runs a grouped query over the user's ledger, and a person
-    # changing filters makes a handful a minute; charged after the request is validated, so a
-    # refused one spends nothing.
+    # The credit usage report (issue #347), per user: `GET /api/billing/usage`, the Usage tab's
+    # htmx refreshes and the full page's Usage tab share it (the History tab spends none). Every
+    # call runs a grouped query over the user's ledger, and a person changing filters makes a
+    # handful a minute; charged after the request is validated, so a refused one spends nothing.
     'BILLING_USAGE_USER': (60, 60),
     # The browser's automatic time zone detection (`POST /account/timezone/`, issue #177), per
     # user and charged for every call. A real client posts once per browser session and only

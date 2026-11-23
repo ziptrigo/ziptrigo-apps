@@ -40,7 +40,7 @@ def _date(name: str, value: str | None):
 @router.get('/usage', response=BillingUsageSchema, auth=JWTAuth(), summary='Credit usage')
 def credit_usage(
     request,
-    range: str = DEFAULT_RANGE,
+    range: str = DEFAULT_RANGE,  # shadows the builtin: ty rejects ninja's Query(alias=...)
     date_from: str | None = None,
     date_to: str | None = None,
     group: str | None = None,
@@ -57,10 +57,13 @@ def credit_usage(
 
     `range` is a preset (`last_7_days`, `last_30_days` (default), `last_90_days`, `this_month`,
     `last_month`, `this_quarter`, `this_year`, `last_12_months`, `all_time`) or `custom` with
-    `date_from` and `date_to` (`YYYY-MM-DD`); the ends of a custom range default to the first transaction and
-    today, a future end is cut to today and ends given the wrong way round are put right. The
-    answer says the dates it used. **400** for an unknown `range`, `group` or app, a malformed
-    date, dates sent with a preset, and a grouping that would make more than 120 periods.
+    `date_from` and `date_to` (`YYYY-MM-DD`); the ends of a custom range default to the first
+    transaction and today, a future end is cut to today and ends given the wrong way round are put
+    right. The answer says the dates it used. `app` limits the answer to some apps (their labels,
+    or `other`): repeat the parameter (`app=receipts&app=todo`) or separate them with commas
+    (`app=receipts,todo`); without it every app is counted. **400** for an unknown `range`,
+    `group` or app, a malformed date, dates sent with a preset, and a grouping that would make
+    more than 120 periods.
     """
     if range not in RANGE_KEYS:
         raise HttpError(400, f'range must be one of: {", ".join(RANGE_KEYS)}.')
@@ -71,7 +74,14 @@ def credit_usage(
         raise HttpError(400, 'date_from and date_to can only be used with range=custom.')
 
     known = set(usage.registry()) | {usage.OTHER}
-    labels = [label.strip() for label in (app or '').split(',') if label.strip()]
+    # `app` is the parameter ninja documents; the value is read from the query string so that both
+    # `?app=a&app=b` (what the Usage tab's address holds) and `?app=a,b` work.
+    labels = [
+        label.strip()
+        for value in request.GET.getlist('app')
+        for label in value.split(',')
+        if label.strip()
+    ]
     unknown = [label for label in labels if label not in known]
     if unknown:
         raise HttpError(400, f'Unknown app: {", ".join(unknown)}.')

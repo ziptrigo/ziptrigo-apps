@@ -315,8 +315,9 @@ Each app may import only from layers below it. Enforced by the import-linter con
   `billing` to open the welcome credits of a genuinely new account, including one created already
   confirmed by "Sign in with Google/Microsoft", which gets no `email_confirmed`. See "Welcome
   credits".
-- Cross-app links in templates (`{% url 'billing:credits-history' %}` in a file_transfer template)
-  are fine; they aren't imports.
+- Cross-app links in templates (a `{% url 'core:privacy' %}` in a file_transfer template)
+  are fine; they aren't imports. A link to the Credits page is built by `apps.billing.services.credits_url`
+  or `{% credits_url %}`, never by hand (see "Credit usage report").
 
 ### Settings and environment
 
@@ -3520,7 +3521,9 @@ Issue #347 (`billing/services/usage.py`, `usage_ranges.py`, `links.py`, `forms/u
 `docs/ui-design/mocks/credit-usage-report.html`.
 
 - **Credits used** = what the ledger took out per app (`CreditTransaction.source`): spends **minus refunds** (a refund is
-  subtracted in the period it was made, so a period can be negative in the table; the chart draws it as 0) plus negative
+  subtracted in the period it was made, so a period can be negative in the table; a bar is drawn to `max(0, period total)`,
+  taking negative app amounts off the positive segments, largest first: `views.usage.period_stack`, so the chart, the "Highest" line, the
+  sentence and the y scale all use the same totals) plus negative
   adjustments. Credits added (purchase, promo, welcome, positive adjustment) are only a summary tile, by type. A source that is
   no registered product (`apps.core.products`), or blank, is `other`. Apps come in registry order; an app with no usage in the
   interval is not listed. Days are the account's (`user_tz`); a period is a whole day, week (Monday), month, quarter or year even
@@ -3539,9 +3542,11 @@ Issue #347 (`billing/services/usage.py`, `usage_ranges.py`, `links.py`, `forms/u
   decides the suggestion) and the answer carries `HX-Push-Url` with the page's canonical address (defaults left out; `group`
   only when it differs from the suggestion; `app` only for a partial selection); opened without htmx the fragment redirects to the page;
   without JavaScript an Apply button submits the form. `usage_filters.js` forgets the chosen grouping, and an app filter
-  naming every app, when the period or dates change. Parsing is lenient (`forms/usage.py`); the one refusal shown is the 120-period
-  line (amber, `role="alert"`) with the suggested grouping applied. The fragment spends `BILLING_USAGE_USER` (60/minute per user,
-  after the request parsed; a direct visit that redirects spends nothing). The chart is server-rendered SVG like Short URLs' stats
+  naming every app, when the period or dates change, and keeps the last ticked app chip ticked ("At least one app stays shown." in `#usage-hint`). Parsing is lenient (`forms/usage.py`); the one refusal shown is the 120-period
+  line (amber, `role="alert"`) with the suggested grouping applied. The fragment **and the full page's Usage tab** spend `BILLING_USAGE_USER` (60/minute per user,
+  after the request parsed; a direct visit that redirects spends nothing, the History tab is not charged); over it the page is a
+  429 with the filters, the message in `#usage-msg` and no report (`views.usage.limited_context`, no report query), and a refresh
+  that works clears that line (an out-of-band `#usage-msg` in `usage_fragment.html`). The chart is server-rendered SVG like Short URLs' stats
   (no library): stacked bars, gridlines, a y axis, `role="img"` with a sentence, a `<title>` per segment, and the table has every
   number. Colours are the chart palette (below). An empty interval shows `core/partials/empty_state.html` and the tiles.
 - **Chart palette** (`core/css/site.css`, `--c-chart-1` to `--c-chart-8` and `--c-chart-other`, light and dark values, the
@@ -3553,9 +3558,9 @@ Issue #347 (`billing/services/usage.py`, `usage_ranges.py`, `links.py`, `forms/u
   is, and is built in one place: `apps.billing.services.credits_url(tab, absolute=False)` in Python and `{% load billing_ui %}{%
   credits_url 'history' %}` in a template (the products' `views/common.py` `credits_url()` helpers wrap it). A link about
   *usage* (the account page's **Credits** button, the Costs page heading, Receipts' "Balance" link) opens Usage.
-  `apps/billing/tests/test_credits_url_guard.py` fails on any non-test file that still names `credits-history`.
-- **API.** `GET /api/billing/usage` (`JWTAuth`, tag `Credits`; the caller's own usage; OpenAPI 2.20.0): `range`, `date_from`,
-  `date_to`, `group`, `app` (comma-separated labels); answers `{date_from, date_to, group, timezone, balance, used, refunded,
+  `apps/billing/tests/test_credits_url_guard.py` fails on any non-test file under `apps/`, `admin/` or `config/` that names `credits-history` or hard-codes `/billing/credits/` (only `billing/urls.py`, `services/links.py` and the page's own views are allowed).
+- **API.** `GET /api/billing/usage` (`JWTAuth`, tag `Credits`; the caller's own usage; OpenAPI 2.20.0, 2.20.1 for the `app` wording): `range`, `date_from`,
+  `date_to`, `group`, `app` (labels, repeated or comma-separated); answers `{date_from, date_to, group, timezone, balance, used, refunded,
   added: [{type, credits}], apps: [{app, name, used}], periods: [{start, label, total, apps}]}`, schemas `BillingUsage...`, period
   labels in the public wording. Strict, unlike the web: an unknown range, group or app, a malformed date, dates with a preset and
   more than 120 periods are a 400 with a `detail`; `BILLING_USAGE_USER` is charged after validation.
@@ -3566,7 +3571,7 @@ Issue #347 (`billing/services/usage.py`, `usage_ranges.py`, `links.py`, `forms/u
 ### Costs page
 
 `GET /billing/costs/` (`billing:costs`, `views/costs.py`, `billing/costs.html`, signed-in only; the
-**Costs** button next to Usage History in the account page's Credits section) lists what every app
+**Costs** button on the Credits page's header next to the Usage and History tabs, and the account page's Credits section) lists what every app
 charges. **Prices are never written in a template**: each is read live from its settings singleton,
 so the page follows the admin. `billing` can't import a product, so each product registers a
 `costs` provider on its `ProductApp` (`apps.core.products`): a callable taking the user and returning
@@ -4413,7 +4418,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
 - **Web UI** (`apps/receipts/{urls,views,forms,templatetags}`, `templates/receipts/`, `static/receipts/js/`;
   mounted at `/receipts/`; every view `@login_required`, another user's (or an unfinished upload's)
   receipt is a 404; all pages follow `docs/ui-design/README.md` and extend `receipts/layout.html`,
-  which adds the **"Storage is paused" banner** (with a Top up link to `billing:credits-history`)
+  which adds the **"Storage is paused" banner** (with a Top up link, `credits_url('history')`)
   while the account is frozen -- every page renders through `views.common.render_page`, which also
   creates the `ReceiptsAccount` on first visit). Views call `services.actions`/`filters`/`uploads`/
   `files`, never re-implementing a rule; `ValidationError` is a 422, `AccountFrozenError` and
@@ -5023,7 +5028,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   would let the user top up 1 credit, have `settle` find nothing owed and unblock creation. So
   `delete_forever` refuses a task that is unpaid, or whose subtasks are (`tasks.owes_credits`; a
   `ValidationError` with `UNPAID_MESSAGE`, which the web shows as a 422 / flash message, the 422
-  with a Top up link to `billing:credits-history`), and `purge_trash` skips such tasks, and a
+  with a Top up link (`credits_url('history')`)), and `purge_trash` skips such tasks, and a
   parent holding one, until a settle pays them; they then follow the normal Trash rules. Trashing,
   restoring and completing an unpaid task stay allowed, and deleting one does not clear the block
   (only a settle does). Nothing is ever refunded: completing, trashing, deleting forever or
@@ -5149,7 +5154,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   same-site `next`, else the `Referer`, else Today). Errors follow the 422 convention with
   `HX-Retarget` to the slot of the control that was used (`#quick-add-msg`, `#task-msg`,
   `#subtask-msg`, `#label-msg`, `#settings-msg`, else `#todo-msg`); `InsufficientCreditsError` is a
-  422 with a Top up link to `billing:credits-history`. A parent with open subtasks asks first: its
+  422 with a Top up link (`credits_url('history')`). A parent with open subtasks asks first: its
   circle and its Complete button open the close dialog (plain POST, so the redirect-back path above;
   see "States and resolutions"), which replaced the shared `confirmModal` question. The Postpone menu
   is Alpine in the template.
@@ -7037,7 +7042,7 @@ intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parke
   task does. `InsufficientCreditsError`, or `BLOCKED_MESSAGE` (`creation_blocked_at`), is
   `rejected_credits`: nothing is stored (the uploaded objects are deleted again), and the user is told
   in-app by **one coalesced notice per user**: a fixed text ("Emailed tasks were not created: not
-  enough credits", linking to `billing:credits-history`; nothing the sender wrote, subject included,
+  enough credits", linking to the History tab (`credits_url('history')`); nothing the sender wrote, subject included,
   reaches it) under the stable key `todo_email_credits`, written as `delete_for_key` then `notify`
   in its own savepoint next to the email row (a failing notice is logged, never loses the row), so a
   flood of rejected emails leaves a single, fresh notice and the rows ceiling below still bounds the
@@ -7627,7 +7632,7 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
     (equal is enough) and `NotesAccount.renewal_warned_at` is null or **older than** `renewal_warning_days`
     (at exactly that age it is not yet), and the price is above 0: one notice (title `Notes renewal: not
     enough credits`, body `N notes renew in the next 7 days for M credits and your balance is B.` -- `1 note
-    renews` in the singular --, url `billing:credits-history`, key `notes_renewal_warning`, written as
+    renews` in the singular --, url `credits_url('history')`, key `notes_renewal_warning`, written as
     `delete_for_key` then `notify`, so there is one, the latest), one email (`emails.send_renewal_warning_email`,
     subject `Your notes renew soon`, `notes/emails/renewal_warning.{txt,html}`: the numbers, the first renewal
     date and how many credits are missing; when the earliest renewal date has already passed, "(one renewal is
