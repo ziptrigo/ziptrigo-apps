@@ -56,6 +56,15 @@ class TestRendering:
             f'href="{reverse("todo:attachment-download", args=[attachment.pk])}?inline=1"' in html
         )
 
+    def test_the_page_carries_the_image_popup_and_its_script(self, web, task, fake_storage):
+        make_attachment(task, fake_storage)
+
+        html = page(web, task)
+
+        # A plain click on a thumbnail shows the full image in a popup (the href stays for "Open"-style clicks).
+        assert 'x-data="imageDialog"' in html
+        assert 'todo/js/image_dialog.js' in html
+
     def test_an_image_over_the_size_cap_has_none(self, web, task, fake_storage):
         make_attachment(task, fake_storage, size_bytes=THUMBNAIL_MAX_BYTES + 1)
 

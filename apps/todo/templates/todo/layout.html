@@ -65,6 +65,7 @@
     {% include 'core/partials/confirm_modal.html' %}
     {% include 'todo/partials/close_dialog.html' %}
     {% include 'todo/partials/move_dialog.html' %}
+    {% include 'todo/partials/image_dialog.html' %}
 </div>
 {% endblock %}
 
@@ -74,6 +75,7 @@
 {% comment %} Classic (not deferred): its alpine:init listener must exist before Alpine starts. {% endcomment %}
 <script src="{% static 'todo/js/recurrence.js' %}"></script>
 <script src="{% static 'todo/js/close_dialog.js' %}"></script>
+<script src="{% static 'todo/js/image_dialog.js' %}"></script>
 <script defer src="{% static 'todo/js/tasks.js' %}"></script>
 <script defer src="{% static 'todo/js/title_parse.js' %}"></script>
 <script defer src="{% static 'todo/js/title_tags.js' %}"></script>

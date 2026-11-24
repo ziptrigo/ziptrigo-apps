@@ -1,4 +1,6 @@
-{% comment %} A small preview of an image attachment (issue #344), under its row: a link that opens the image like "Open".
+{% comment %} A small preview of an image attachment (issue #344), under its row: a link to the image, like "Open". A plain click
+   shows the full image in a popup over the same page (image_dialog.js, `image_dialog.html` in the layout; the popup loads this
+   same `src`, which redirects to the full image); Ctrl/Cmd/Shift-click or a middle click follows the link into a new tab.
    Needs `file` (an uploaded Attachment) and `frozen` (the account's storage is paused: no thumbnails then). Only a file with
    `file.has_thumbnail` (bytes sniffed as an image, not over the size cap) gets one. The link is not a tab stop and is hidden
    from assistive technology: **Open** in the row is the keyboard and screen-reader path to the same image, so the thumbnail

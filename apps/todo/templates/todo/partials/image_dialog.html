@@ -1,0 +1,31 @@
+{% comment %} The image popup (image_dialog.js): the full image of an attachment, over the same page. Opened by a click on a
+   thumbnail (`a[data-attachment-thumbnail]`, `attachment_thumbnail.html`); the script sends `open-image-dialog` with the image's
+   `src` and the link's `href`. Escape, a click outside the image or Close close it. "Open in new tab" is the same link the
+   row's **Open** has. A modified click on a thumbnail (Ctrl, Cmd, Shift, middle button) skips the popup and opens the link. {% endcomment %}
+<div x-data="imageDialog" @open-image-dialog.window="show($event.detail)">
+    <div x-show="open" style="display: none"
+         @keydown.escape.window="if (open) close()" @click.self="close()"
+         x-transition:enter="transition-opacity duration-[220ms] ease-out"
+         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+         x-transition:leave="transition-opacity duration-[140ms] ease-in"
+         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 dark:bg-black/80 backdrop-blur-[2px]">
+        <div role="dialog" aria-modal="true" aria-label="Image preview"
+             class="relative flex max-h-full max-w-full flex-col rounded-2xl bg-white dark:bg-gray-800 shadow-2xl">
+            <div class="flex items-center justify-end gap-2 px-3 py-2">
+                <a :href="href" target="_blank" rel="noopener noreferrer"
+                   class="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white px-2 py-1 rounded-lg">Open in new tab</a>
+                <button type="button" x-ref="close" @click="close()"
+                        class="btn inline-flex items-center justify-center px-3 py-1 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    Close
+                </button>
+            </div>
+            <div class="flex min-h-0 items-center justify-center overflow-auto px-3 pb-3">
+                <p x-show="!loaded && !failed" class="px-10 py-8 text-sm text-gray-500 dark:text-gray-400" aria-live="polite">Loading image...</p>
+                <p x-show="failed" style="display: none" role="alert" class="px-10 py-8 text-sm text-red-700 dark:text-red-300">This image can't be shown here. Use Open in new tab.</p>
+                <img x-show="loaded" :src="src" alt="" @load="loaded = true" @error="failed = true"
+                     class="max-h-[80vh] max-w-full object-contain rounded-lg">
+            </div>
+        </div>
+    </div>
+</div>
