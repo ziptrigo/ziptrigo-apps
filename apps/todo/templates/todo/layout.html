@@ -69,7 +69,8 @@
 {% endblock %}
 
 {% block extra_js %}
-{% block todo_js_libs %}{% endblock %}
+{% comment %} SortableJS and the shared helper are on every To-do page: the sidebar's projects reorder by drag. A page that overrides this block includes them itself. {% endcomment %}
+{% block todo_js_libs %}{% include 'core/partials/sortable_script.html' %}{% endblock %}
 {% comment %} Classic (not deferred): its alpine:init listener must exist before Alpine starts. {% endcomment %}
 <script src="{% static 'todo/js/recurrence.js' %}"></script>
 <script src="{% static 'todo/js/close_dialog.js' %}"></script>

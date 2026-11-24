@@ -145,6 +145,23 @@ class TestProjectRules:
         theirs.refresh_from_db()
         assert theirs.position == 1
 
+    def test_reorder_of_a_partial_list_keeps_the_others_where_they_are(self, user):
+        a, b, c, d = (projects.create_project(user, name) for name in 'ABCD')
+
+        # The sidebar posts only the first projects it shows: C and A swap the places they hold.
+        assert projects.reorder_projects(user, [c.pk, b.pk, a.pk]) == 3
+
+        assert [p.name for p in projects.list_projects(user)] == ['C', 'B', 'A', 'D']
+
+    def test_reorder_numbers_projects_that_share_a_position(self, user):
+        a, b, c = (projects.create_project(user, name) for name in 'ABC')
+        type(a).objects.filter(pk__in=[a.pk, b.pk]).update(position=0)
+        type(a).objects.filter(pk=c.pk).update(position=0)
+
+        projects.reorder_projects(user, [c.pk, a.pk])
+
+        assert [p.name for p in projects.list_projects(user)] == ['C', 'B', 'A']
+
     def test_the_list_counts_open_and_closed_tasks_without_the_trash(self, funded_user, project):
         create_task(funded_user, title='Open')
         parent = create_task(funded_user, title='Parent', project=project)
@@ -901,6 +918,10 @@ class TestTaskPageAndLists:
         page = text(web.get(reverse('todo:today')))
 
         assert 'id="sidebar-projects"' in page
+        sidebar = page.split('id="sidebar-projects"')[1].split('</nav>')[0]
+        assert f'data-task-id="{project.pk}"' in sidebar
+        assert f'data-reorder-url="{reverse("todo:project-reorder")}"' in sidebar
+        assert 'aria-label="Reorder Website' in sidebar
         assert '1<span class="sr-only"> open task</span>' in page
         assert (
             '1 archived' in page

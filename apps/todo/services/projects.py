@@ -280,17 +280,35 @@ def update_project(
 
 
 def reorder_projects(user: User, ids: Sequence[UUID]) -> int:
-    """Write `position = index` for the given ids (the user's own; others are ignored)."""
-    own = {project.pk: project for project in Project.objects.filter(user=user, pk__in=ids)}
-    changed = []
-    for index, pk in enumerate(ids):
-        project = own.get(pk)
-        if project is not None:
-            project.position = index
-            changed.append(project)
+    """Put the user's projects with these ids in the order given (others are ignored).
+
+    The listed projects swap the places they already hold, so a partial list (the sidebar shows
+    only the first 20 projects) never moves one onto a place a project outside the request holds.
+    If the listed projects share a position (older data), every project of the user is numbered
+    first, keeping the order they are shown in."""
+    wanted = list(dict.fromkeys(ids))
     with transaction.atomic():
+
+        def load() -> list[Project]:
+            own = {p.pk: p for p in Project.objects.filter(user=user, pk__in=wanted)}
+            return [own[pk] for pk in wanted if pk in own]
+
+        ordered = load()
+        places = sorted(project.position for project in ordered)
+        if len(set(places)) != len(places):
+            everyone = list(Project.objects.filter(user=user).order_by('position', 'name'))
+            for index, project in enumerate(everyone):
+                project.position = index
+            Project.objects.bulk_update(everyone, ['position'])
+            ordered = load()
+            places = sorted(project.position for project in ordered)
+        changed = []
+        for project, place in zip(ordered, places, strict=True):
+            if project.position != place:
+                project.position = place
+                changed.append(project)
         Project.objects.bulk_update(changed, ['position'])
-    return len(changed)
+    return len(ordered)
 
 
 # -- Archive -------------------------------------------------------------------------------------

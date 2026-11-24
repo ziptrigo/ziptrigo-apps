@@ -1,7 +1,10 @@
 {% comment %} The "Projects" section of the sidebar (issue #314): the first 20 active projects with their open task counts,
    then "and N more" and how many are archived. Needs `sidebar_projects` (each with `open_count`), `sidebar_projects_more`,
    `archived_project_count` and `current_project_id` (`views.common.projects_context`). With `oob` it is sent out of band
-   (the projects page after an add, a rename or a reorder). {% endcomment %}
+   (the projects page after an add, a rename or a reorder). On a wide screen each project has a drag handle (shown on hover
+   or focus) to put the projects in a manual order: tasks.js posts the new order of the `data-task-id`s to `todo:project-reorder`
+   (the same order the Projects page edits), and the up and down arrow keys move a focused handle. A phone's horizontal strip has no
+   handles: reorder on the Projects page there. {% endcomment %}
 <nav id="sidebar-projects"{% if oob %} hx-swap-oob="true"{% endif %} aria-label="Projects" class="mt-4">
     {% comment %} Not a heading: the nav is named by its aria-label, and this block comes before the page's <h1> in the document. {% endcomment %}
     <p class="flex items-center px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -10,9 +13,13 @@
         <a href="{% url 'todo:projects' %}#new-project-name" aria-label="New project" title="New project"
            class="ml-auto rounded-md px-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><i class="fas fa-plus" aria-hidden="true"></i></a>
     </p>
-    <ul data-scroll-hint class="relative flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
+    <ul data-scroll-hint class="relative flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0"
+        data-sortable data-reorder-url="{% url 'todo:project-reorder' %}">
         {% for project in sidebar_projects %}
-        <li class="flex-shrink-0" data-project-id="{{ project.pk }}">
+        <li class="group relative flex-shrink-0" data-task-id="{{ project.pk }}" data-project-id="{{ project.pk }}">
+            <span class="drag-handle absolute left-0 top-1/2 z-10 hidden h-6 w-3 -translate-y-1/2 cursor-grab items-center justify-center text-[10px] text-gray-400 opacity-0 hover:text-gray-600 dark:hover:text-gray-300 focus:opacity-100 group-hover:opacity-100 md:flex"
+                  role="button" tabindex="0" data-name="{{ project.name }}"
+                  aria-label="Reorder {{ project.name }}: use the up and down arrow keys" title="Drag to reorder, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
             <a href="{% url 'todo:project' project.pk %}"{% if current_project_id == project.pk %} aria-current="page"{% endif %}
                class="btn flex items-center gap-2 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors {% if current_project_id == project.pk %}bg-sage-100 dark:bg-gray-700 font-semibold text-gray-900 dark:text-gray-100{% else %}text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800{% endif %}">
                 <span class="mx-[3px] h-2.5 w-2.5 flex-shrink-0 rounded-full" style="background-color: {{ project.color }}" aria-hidden="true"></span>
