@@ -5785,7 +5785,7 @@ line says so).
 - **Pages** (`views/projects.py`; another user's project is a 404). `todo:projects`
   `/todo/projects/` (`?tab=archived`): the htmx list in the Labels page's shape
   (`partials/project_list.html` into `#projects`, refusals 422 into `#project-msg`): add (name,
-  colour), edit in place, drag to reorder (active tab), a progress bar and `N open · M closed` per
+  colour), edit in place, drag to reorder (active tab; the sidebar's Projects block has its own drag handles, wide screens only, which post to the same `todo:project-reorder`, and `reorder_projects` makes the listed projects swap the places they hold, so the sidebar's first 20 can be reordered without disturbing the rest), a progress bar and `N open · M closed` per
   project, a "No project" line linking to the search with `projects=none`; an add or edit also
   sends the sidebar block out of band. Archive, Unarchive and Delete go through the shared
   confirmation modal (plain POSTs: `project-archive`, `project-unarchive`, `project-delete`, flash

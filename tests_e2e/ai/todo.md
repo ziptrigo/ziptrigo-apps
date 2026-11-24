@@ -1259,6 +1259,7 @@ one`; a second user (Session B) with a task.
 | 5 | Click the pencil of `House move`, change the name to `Moving house` and the colour, save. Press the pencil again, change the text and press Escape. | The row shows the new name and colour; Escape discards the second edit. |
 | 6 | Drag `Moving house` above `Website relaunch` (or focus its handle and press Up). Reload any To-do page. | The list keeps the order, and the sidebar shows it after the reload. |
 | 7 | As `qa.admin@example.com`, open `/todo/projects/<id of qa.user's project>/`. | 404. |
+| 8 | On a wide window, hover a project in the **sidebar**: a grip handle appears at its left. Drag `Website relaunch` above `Moving house` (or focus the handle with Tab and press Up). Reload. | The sidebar keeps the new order, and the Projects page lists it in the same order. On a phone-width window the sidebar strip has no handles. |
 
 ### TODO-64 Projects: tasks in a project, the project page and moving
 
