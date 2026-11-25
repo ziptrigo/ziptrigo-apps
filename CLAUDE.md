@@ -6154,7 +6154,7 @@ long reasoning.
   the endpoint share; a bigger image has none and its endpoint is a 404, signing nothing) shows a small preview (`<img loading="lazy" decoding="async">`, 5 rem high, `alt=""`) on its
   own line under its row, both in the task's Attachments list (`attachment_list.html`, so the list the upload script
   re-fetches too) and under a comment's files (`comment_files.html`); the `<img>` sits in a link to the file's
-  `?inline=1` download (new tab, `rel="noopener noreferrer"`), i.e. a click is "Open"; the link is `tabindex="-1"` and
+  `?inline=1` download (new tab, `rel="noopener noreferrer"`), i.e. a Ctrl/Cmd/Shift or middle click is "Open"; **a plain click shows the full image in a popup over the same page** (`partials/image_dialog.html`, once per page in the layout, Alpine `imageDialog` in `static/todo/js/image_dialog.js`: one delegated click listener, since htmx swaps the lists; the popup loads the same thumbnail `src`, which redirects to the full image; Escape, a click outside or Close close it and focus returns to the thumbnail; "Open in new tab" is the same link; no new endpoint or budget); the link is `tabindex="-1"` and
   `aria-hidden="true"` (it duplicates **Open**, which is the keyboard and screen-reader path), so it is a mouse shortcut only. Pending uploads and draft comment
   chips have none, and **none are rendered while the account's storage is frozen** (`attachments_frozen` /
   `comment_files_frozen`). The `src` is **`GET /todo/attachments/<id>/thumbnail/`** (`todo:attachment-thumbnail`), not a
@@ -6169,7 +6169,7 @@ long reasoning.
   (as the download is). **Rate limit `TODO_THUMBNAIL_USER` (600/min per user)**, its own budget so a page of images
   can't spend `TODO_DOWNLOAD_USER` (120/min): one hit per thumbnail each time the list or comments are drawn. The
   browser scales the full image; no rendition is built (hence the 10 MiB cap: a bigger image gets no preview), no Pillow, no child process. Tests: `apps/todo/tests/test_attachment_thumbnails.py`, the Playwright
-  `tests_e2e/test_todo_comment_files.py` (the image really loads), AI case TODO-80.
+  `tests_e2e/test_todo_comment_files.py` (the image really loads, and the popup opens in the same tab and closes with Escape or Close), AI case TODO-80.
 - **Deleting.** `delete_attachment` deletes the object first (a storage error raises and leaves
   everything as it was), then, under the row lock, the row and -- for an uploaded one, only by the
   call that actually deleted the row -- its bytes. **Trashing a task keeps its attachments, still

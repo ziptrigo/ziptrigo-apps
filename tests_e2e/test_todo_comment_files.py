@@ -160,3 +160,38 @@ def test_an_image_shows_a_thumbnail_on_the_task_and_on_its_comment(
     page.wait_for_function(
         "() => { const i = document.querySelector('#task-comments [data-attachment-thumbnail] img'); return i && i.complete && i.naturalWidth > 0; }"
     )
+
+
+def test_clicking_a_thumbnail_shows_the_full_image_in_a_popup(
+    page: Page, receipts_server: ReceiptsServer
+):
+    _open_new_task(page, receipts_server, 'Popup task')
+    page.locator('#attachment-file-input').set_input_files(
+        {'name': 'popup-photo.png', 'mimeType': 'image/png', 'buffer': PNG}
+    )
+    thumb = page.locator('#attachment-list [data-attachment-thumbnail]')
+    expect(thumb).to_have_count(1)
+    page.wait_for_function(
+        "() => { const i = document.querySelector('#attachment-list img'); return i && i.complete && i.naturalWidth > 0; }"
+    )
+    url_before = page.url
+
+    thumb.click()
+
+    dialog = page.locator('[role="dialog"][aria-label="Image preview"]')
+    expect(dialog).to_be_visible()
+    expect(dialog.locator('img')).to_be_visible()
+    page.wait_for_function(
+        '() => { const i = document.querySelector(\'[aria-label="Image preview"] img\'); return i && i.complete && i.naturalWidth > 0; }'
+    )
+    assert page.url == url_before  # the same tab, no navigation
+    assert len(page.context.pages) == 1
+
+    page.keyboard.press('Escape')
+    expect(dialog).to_be_hidden()
+
+    # Reopen and close with the button.
+    thumb.click()
+    expect(dialog).to_be_visible()
+    dialog.get_by_role('button', name='Close').click()
+    expect(dialog).to_be_hidden()
