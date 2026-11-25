@@ -275,7 +275,7 @@ class TestFilters:
             ({'date_range': 'this_month', 'date_from': '2026-10-05'}, {'Delta', 'Staples'}),
             ({'date_range': 'custom', 'date_from': '2026-10-05'}, {'Staples'}),
             ({'date_range': 'custom', 'date_to': '2026-09-30'}, {'September', 'March', 'Old'}),
-            # "Any date" wins over dates left in the form by a custom range (E2E run #152).
+            # "All" wins over dates left in the form by a custom range (E2E run #152).
             (
                 {'date_range': 'any', 'date_from': '2026-10-05', 'date_to': '2026-10-06'},
                 {'Delta', 'Staples', 'September', 'March', 'Old'},
@@ -309,7 +309,7 @@ class TestFilters:
             ),
             ({'date_range': 'custom'}, '/receipts/'),
             ({'date_range': '', 'date_from': '2026-10-05'}, '/receipts/?date_from=2026-10-05'),
-            # "Any date" picked after a custom range: the dates still arrive with it (E2E #152).
+            # "All" picked after a custom range: the dates still arrive with it (E2E #152).
             (
                 {'date_range': 'any', 'date_from': '2026-10-05', 'date_to': '2026-10-31'},
                 '/receipts/',
@@ -567,7 +567,7 @@ class TestExport:
                 {'date_range': 'custom', 'date_from': '2026-10-05', 'date_to': '2026-10-31'},
             )
         )
-        # What the form sends for "Any date": the two disabled date fields are not sent.
+        # What the form sends for "All": the two disabled date fields are not sent.
         anything = self.rows(web.get(reverse('receipts:export'), {'date_range': 'any'}))
 
         assert [r['vendor'] for r in custom] == ['Staples']

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.20.1
+  version: 2.21.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -2375,6 +2375,78 @@ paths:
         `inline` is for showing it in a browser (a PDF or image; a HEIC original is shown as its JPEG
 
         rendering). 402 while the account is frozen. Never cache the URL; ask again.'
+      tags:
+      - Receipts
+      security:
+      - JWTAuth: []
+  /api/receipts/reports:
+    get:
+      operationId: apps_receipts_api_reports_get_report
+      summary: Get Report
+      parameters:
+      - in: query
+        name: group
+        schema:
+          default: vendor
+          title: Group
+          type: string
+        required: false
+      - in: query
+        name: date_range
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date Range
+        required: false
+      - in: query
+        name: date_from
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date From
+        required: false
+      - in: query
+        name: date_to
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date To
+        required: false
+      - in: query
+        name: processed_only
+        schema:
+          default: true
+          title: Processed Only
+          type: boolean
+        required: false
+      - in: query
+        name: vetted_only
+        schema:
+          default: false
+          title: Vetted Only
+          type: boolean
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptReportSchema'
+      description: 'Receipts by `group` (`vendor` or `category`) in a period: `date_range` is one of `any`,
+
+        `last_15_days`, `last_30_days`, `this_month`, `this_quarter`, `this_year` (the default) or
+
+        `custom`, which takes `date_from` / `date_to` as `YYYY-MM-DD` (inclusive, either may be left
+
+        out); presets are resolved against the caller''s today. `vetted_only=true` keeps only vendors
+
+        the user confirmed. Amounts in different currencies are never added together: each row is a
+
+        vendor (or category) in one currency, and there is one total per currency.'
       tags:
       - Receipts
       security:
@@ -9470,6 +9542,147 @@ components:
       - filename
       - expires_in
       title: FileUrlSchema
+      type: object
+    ReceiptReportRowSchema:
+      description: 'One vendor (or category) in one currency. A vendor in two currencies has two rows.
+
+
+        `id` is the vendor''s or category''s id, `null` for the receipts that have none (`name` is then
+
+        "(no vendor)" or "Uncategorized"). `vetted` is a vendor''s state (`null` in a category report
+
+        and for receipts with no vendor). `total` and `average` are amounts with two decimals (the
+
+        average is over the receipts that have an amount); `share` is the percent of this row''s
+
+        *currency* total, with one decimal.'
+      properties:
+        id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Id
+        name:
+          title: Name
+          type: string
+        vetted:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Vetted
+        currency:
+          title: Currency
+          type: string
+        receipt_count:
+          title: Receipt Count
+          type: integer
+        total:
+          title: Total
+          type: string
+        share:
+          title: Share
+          type: string
+        average:
+          title: Average
+          type: string
+        last_receipt_date:
+          anyOf:
+          - format: date
+            type: string
+          - type: 'null'
+          title: Last Receipt Date
+      required:
+      - id
+      - name
+      - vetted
+      - currency
+      - receipt_count
+      - total
+      - share
+      - average
+      - last_receipt_date
+      title: ReceiptReportRowSchema
+      type: object
+    ReceiptReportSchema:
+      description: 'Receipts by vendor or by category in a period. `date_from` / `date_to` are the dates the
+
+        request resolved to (`null`: no bound); `description` says in words what is counted. Rows are
+
+        sorted by currency, then by total, largest first; `currency` is `""` for receipts with none.'
+      properties:
+        group:
+          enum:
+          - vendor
+          - category
+          title: Group
+          type: string
+        date_from:
+          anyOf:
+          - format: date
+            type: string
+          - type: 'null'
+          title: Date From
+        date_to:
+          anyOf:
+          - format: date
+            type: string
+          - type: 'null'
+          title: Date To
+        processed_only:
+          title: Processed Only
+          type: boolean
+        vetted_only:
+          title: Vetted Only
+          type: boolean
+        description:
+          title: Description
+          type: string
+        receipt_count:
+          title: Receipt Count
+          type: integer
+        rows:
+          items:
+            $ref: '#/components/schemas/ReceiptReportRowSchema'
+          title: Rows
+          type: array
+        totals:
+          items:
+            $ref: '#/components/schemas/ReceiptReportTotalSchema'
+          title: Totals
+          type: array
+      required:
+      - group
+      - date_from
+      - date_to
+      - processed_only
+      - vetted_only
+      - description
+      - receipt_count
+      - rows
+      - totals
+      title: ReceiptReportSchema
+      type: object
+    ReceiptReportTotalSchema:
+      description: The total of one currency. Amounts in different currencies are never added together.
+      properties:
+        currency:
+          title: Currency
+          type: string
+        receipt_count:
+          title: Receipt Count
+          type: integer
+        total:
+          title: Total
+          type: string
+        average:
+          title: Average
+          type: string
+      required:
+      - currency
+      - receipt_count
+      - total
+      - average
+      title: ReceiptReportTotalSchema
       type: object
     UploadTicketSchema:
       description: 'What a client needs to upload one file: `PUT` the bytes to `url` with exactly these

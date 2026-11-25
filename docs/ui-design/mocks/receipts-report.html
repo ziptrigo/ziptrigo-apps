@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports - Receipts - ZipTrigo (mock)</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="../reference/assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../../../apps/core/static/core/css/site.css">
+</head>
+<!--
+  MOCK for review (issue #351, receipt reports), not wired to anything. The data is made up in the
+  script at the bottom. Screens, switched with the amber bar:
+    1. /receipts/reports/ grouped by vendor (the page opens here);
+    2. the same, grouped by category;
+    3. nothing in the period (empty state);
+    4. the Receipts dashboard's header row with the new "Reports" link, and the shared date
+       dropdown with "Any date" renamed "All".
+  In the real page the filters are a GET form that htmx re-fetches into #report (HX-Push-Url keeps
+  the address), like the dashboard's list. The three Download buttons are plain links that carry
+  the same query string: /receipts/reports/export.xlsx|.csv|.pdf?group=vendor&date_range=...
+-->
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 font-sans">
+
+    <!-- Mock switcher (not part of the design) -->
+    <div class="bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100 text-sm">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-3">
+            <span class="font-semibold"><i class="fas fa-flask mr-1"></i>Mock</span>
+            <button type="button" data-screen="vendor" class="underline">1. By vendor</button>
+            <button type="button" data-screen="category" class="underline">2. By category</button>
+            <button type="button" data-screen="empty" class="underline">3. Nothing in the period</button>
+            <button type="button" data-screen="dashboard" class="underline">4. Dashboard link + "All"</button>
+            <button type="button" id="mock-theme" class="ml-auto underline">Toggle dark</button>
+        </div>
+    </div>
+
+    <header class="bg-gray-100 dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex flex-wrap gap-x-6 gap-y-2">
+                <a href="#" class="text-lg font-semibold hover:text-sage-300">
+                    <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+                </a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-receipt mr-1"></i>Receipts</a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-list-check mr-1"></i>To-do</a>
+            </div>
+            <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-user-circle mr-1"></i>Account</a>
+        </nav>
+    </header>
+
+    <main class="flex-grow">
+    <div class="container mx-auto px-4 py-8 max-w-5xl">
+
+      <!-- ============================ REPORT ============================ -->
+      <section id="screen-report" class="screen">
+        <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <a href="#" data-screen="dashboard" class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1"></i>Receipts</a>
+            <h1 class="mt-1 text-3xl font-semibold tracking-tight">Reports</h1>
+          </div>
+          <!-- Downloads: links with the current query string; free, like Export CSV -->
+          <div class="flex flex-wrap items-center gap-2" id="downloads">
+            <span class="text-sm text-gray-600 dark:text-gray-300 mr-1">Download</span>
+            <a href="#" class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"><i class="fas fa-file-excel mr-2 text-green-700 dark:text-green-400" aria-hidden="true"></i>XLSX</a>
+            <a href="#" class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"><i class="fas fa-file-csv mr-2 text-sage-500 dark:text-sage-300" aria-hidden="true"></i>CSV</a>
+            <a href="#" class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"><i class="fas fa-file-pdf mr-2 text-red-700 dark:text-red-400" aria-hidden="true"></i>PDF</a>
+          </div>
+        </div>
+
+        <!-- Group by: underline tabs (the page's main switch) -->
+        <nav data-tabs class="mb-5 flex gap-1 border-b border-gray-200 dark:border-gray-700" aria-label="Group by">
+          <a href="#" data-screen="vendor" data-tab="vendor" class="-mb-px border-b-2 px-3 py-2 text-sm font-medium"><i class="fas fa-store mr-1.5" aria-hidden="true"></i>By vendor</a>
+          <a href="#" data-screen="category" data-tab="category" class="-mb-px border-b-2 px-3 py-2 text-sm font-medium"><i class="fas fa-tags mr-1.5" aria-hidden="true"></i>By category</a>
+        </nav>
+
+        <!-- Filters (GET form: ?group=&date_range=&date_from=&date_to=&status=&vendors=) -->
+        <form class="mb-3 flex flex-wrap items-end gap-x-5 gap-y-3" onsubmit="return false">
+          <div>
+            <label for="range" class="block text-sm font-medium mb-1">Receipt date</label>
+            <select id="range" class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+              <option value="any">All</option>
+              <option value="last_15_days">Last 15 days</option>
+              <option value="last_30_days">Last 30 days</option>
+              <option value="this_month">This month</option>
+              <option value="this_quarter">This quarter</option>
+              <option value="this_year" selected>This year</option>
+              <option value="custom">Custom</option>
+            </select>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">(the themed select in the real page)</p>
+          </div>
+          <div id="custom-dates" class="hidden flex items-end gap-2">
+            <div>
+              <label for="from" class="block text-sm font-medium mb-1">From</label>
+              <input id="from" type="text" value="07/01/2026" placeholder="mm/dd/yyyy" class="w-32 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label for="to" class="block text-sm font-medium mb-1">To</label>
+              <input id="to" type="text" value="09/30/2026" placeholder="mm/dd/yyyy" class="w-32 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+            </div>
+          </div>
+          <fieldset>
+            <legend class="block text-sm font-medium mb-1">Include</legend>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 py-2 text-sm">
+              <label class="inline-flex items-center gap-2"><input type="checkbox" id="processed-only" checked class="rounded border-gray-300 text-sage-500">Processed receipts only</label>
+              <label class="inline-flex items-center gap-2"><input type="checkbox" id="vetted-only" class="rounded border-gray-300 text-sage-500">Vetted vendors only</label>
+            </div>
+          </fieldset>
+        </form>
+        <p id="words" class="mb-5 text-sm text-gray-600 dark:text-gray-300"></p>
+
+        <div id="report-body">
+          <!-- Summary tiles: one total per currency (receipts in different currencies are never added together) -->
+          <dl class="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <dt class="text-sm text-gray-600 dark:text-gray-300">Receipts</dt>
+              <dd class="mt-1 text-2xl font-semibold tabular-nums" id="tile-count">0</dd>
+              <dd class="text-xs text-gray-500 dark:text-gray-400" id="tile-count-note"></dd>
+            </div>
+            <div class="sm:col-span-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <dt class="text-sm text-gray-600 dark:text-gray-300">Total</dt>
+              <dd class="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-2xl font-semibold tabular-nums" id="tile-totals"></dd>
+              <dd class="text-xs text-gray-500 dark:text-gray-400">One total per currency: amounts in different currencies are not converted or added together.</dd>
+            </div>
+          </dl>
+
+          <!-- Table -->
+          <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            <table class="w-full text-sm">
+              <caption class="sr-only" id="caption"></caption>
+              <thead class="bg-gray-50 dark:bg-gray-900/40 text-left text-gray-600 dark:text-gray-300">
+                <tr>
+                  <th scope="col" class="px-4 py-2 font-medium" id="col-name">Vendor</th>
+                  <th scope="col" class="px-4 py-2 font-medium text-right">Receipts</th>
+                  <th scope="col" class="px-4 py-2 font-medium text-right">Total</th>
+                  <th scope="col" class="px-4 py-2 font-medium hidden md:table-cell w-1/4">Share</th>
+                  <th scope="col" class="px-4 py-2 font-medium text-right hidden sm:table-cell">Average</th>
+                  <th scope="col" class="px-4 py-2 font-medium hidden sm:table-cell">Last receipt</th>
+                </tr>
+              </thead>
+              <tbody id="rows" class="divide-y divide-gray-100 dark:divide-gray-700"></tbody>
+              <tfoot id="foot" class="border-t-2 border-gray-200 dark:border-gray-600 font-semibold"></tfoot>
+            </table>
+          </div>
+          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            A name opens the Receipts list filtered by that vendor (or category) and this date range.
+            Sorted by total, largest first; a vendor with receipts in two currencies has one line per currency.
+          </p>
+        </div>
+
+        <!-- Empty state (core/partials/empty_state.html) -->
+        <div id="report-empty" class="hidden rounded-xl border border-dashed border-gray-300 dark:border-gray-600 p-10 text-center">
+          <i class="fas fa-chart-pie text-3xl text-gray-400" aria-hidden="true"></i>
+          <p class="mt-3 font-medium">No receipts in this period</p>
+          <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">Choose a longer period, or include receipts that are not processed yet.</p>
+        </div>
+      </section>
+
+      <!-- ============================ DASHBOARD (excerpt) ============================ -->
+      <section id="screen-dashboard" class="screen hidden">
+        <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <h1 class="text-3xl font-semibold tracking-tight">Receipts</h1>
+          <a href="#" class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400"><i class="fas fa-arrow-up-from-bracket mr-2"></i>Upload</a>
+        </div>
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 dark:border-gray-700">
+          <nav class="-mb-px flex flex-wrap gap-x-1 text-sm font-medium">
+            <a href="#" class="border-b-2 border-brand-primary px-3 py-2">All</a>
+            <a href="#" class="border-b-2 border-transparent px-3 py-2 text-gray-500">Needs review <span class="ml-1 rounded-full px-2 py-0.5 text-xs bg-amber-50 text-amber-700">3</span></a>
+            <a href="#" class="border-b-2 border-transparent px-3 py-2 text-gray-500">Processing</a>
+            <a href="#" class="border-b-2 border-transparent px-3 py-2 text-gray-500">Failed</a>
+            <a href="#" class="border-b-2 border-transparent px-3 py-2 text-gray-500">Duplicates</a>
+          </nav>
+          <span class="mb-2 inline-flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+            <a href="#" data-screen="vendor" class="inline-flex items-center rounded-md ring-2 ring-amber-400 px-1 text-gray-900 dark:text-gray-100"><i class="fas fa-chart-pie mr-1.5"></i>Reports</a>
+            <a href="#" class="inline-flex items-center gap-1.5"><i class="fas fa-store"></i>Vendors</a>
+            <a href="#" class="inline-flex items-center"><i class="fas fa-file-zipper mr-1.5"></i>Exports</a>
+            <a href="#" class="inline-flex items-center"><i class="fas fa-trash mr-1.5"></i>Trash</a>
+          </span>
+        </div>
+        <p class="mb-6 text-sm text-gray-600 dark:text-gray-300">New <strong>Reports</strong> link (amber ring only in the mock), before Vendors.</p>
+
+        <h2 class="text-lg font-semibold mb-2">Every date dropdown: "Any date" becomes "All"</h2>
+        <p class="mb-3 text-sm text-gray-600 dark:text-gray-300">
+          One change in <code>apps/core/date_ranges.py</code>, so it applies to the Receipts dashboard, the Receipts and To-do
+          export blocks on the account page, and this report. To-do search's own "Any date" (<code>date_range=any</code>) and
+          Notes' "Updated: Any" are renamed the same way. The stored value stays <code>any</code>, so links keep working.
+        </p>
+        <div class="flex gap-8">
+          <div class="w-44 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-sm text-sm py-1">
+            <div class="px-3 py-1.5 bg-sage-100 dark:bg-sage-700/40 font-medium">All</div>
+            <div class="px-3 py-1.5">Last 15 days</div>
+            <div class="px-3 py-1.5">Last 30 days</div>
+            <div class="px-3 py-1.5">This month</div>
+            <div class="px-3 py-1.5">This quarter</div>
+            <div class="px-3 py-1.5">This year</div>
+            <div class="px-3 py-1.5">Custom</div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+    </main>
+
+    <script>
+    (function () {
+        // Made-up receipts: [vendor, vetted, category, currency, count, total, last]
+        var DATA = [
+            ['Amazon', true, 'Office supplies', 'USD', 31, 2184.37, '11/19/2026'],
+            ['Delta Air Lines', true, 'Travel', 'USD', 6, 3402.10, '10/02/2026'],
+            ['Staples', true, 'Office supplies', 'USD', 12, 611.84, '11/12/2026'],
+            ['Marriott', true, 'Lodging', 'USD', 5, 1890.00, '10/03/2026'],
+            ['Uber', false, 'Travel', 'USD', 24, 486.22, '11/21/2026'],
+            ['Pingo Doce', false, 'Meals', 'EUR', 18, 742.55, '08/27/2026'],
+            ['Uber', false, 'Travel', 'EUR', 4, 61.30, '08/25/2026'],
+            ['Adobe', true, 'Software', 'USD', 11, 659.89, '11/01/2026'],
+            ['Shell', true, 'Fuel', 'USD', 9, 402.71, '11/16/2026'],
+            ['Joe\'s Diner', false, 'Meals', 'USD', 7, 188.40, '11/08/2026'],
+            ['(no vendor)', false, null, 'USD', 2, 0, '06/14/2026'],
+        ];
+        var state = { group: 'vendor', range: 'this_year', processed: true, vetted: false, empty: false };
+        var SYM = { USD: '$', EUR: '€' };
+        function money(c, x) { return SYM[c] + x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+        function rows() {
+            if (state.empty) return [];
+            var scale = { any: 1.6, last_15_days: 0.12, last_30_days: 0.22, this_month: 0.18, this_quarter: 0.45, this_year: 1, custom: 0.3 }[state.range];
+            var out = {};
+            DATA.forEach(function (d) {
+                if (state.vetted && !d[1]) return;
+                if (state.processed && d[0] === '(no vendor)') return;
+                var name = state.group === 'vendor' ? d[0] : (d[2] || 'Uncategorized');
+                var key = name + '|' + d[3];
+                var n = Math.max(0, Math.round(d[4] * scale));
+                if (!n) return;
+                var t = d[5] * scale;
+                if (!out[key]) out[key] = { name: name, vetted: d[1], cur: d[3], n: 0, total: 0, last: d[6] };
+                out[key].n += n; out[key].total += t;
+            });
+            return Object.values(out).sort(function (a, b) { return a.cur === b.cur ? b.total - a.total : (a.cur < b.cur ? 1 : -1); });
+        }
+
+        function render() {
+            document.querySelectorAll('.screen').forEach(function (s) { s.classList.add('hidden'); });
+            document.getElementById(state.dash ? 'screen-dashboard' : 'screen-report').classList.remove('hidden');
+            if (state.dash) return;
+            document.querySelectorAll('[data-tab]').forEach(function (t) {
+                var on = t.dataset.tab === state.group;
+                t.classList.toggle('border-brand-primary', on); t.classList.toggle('border-transparent', !on);
+                t.classList.toggle('text-gray-500', !on);
+                if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+            });
+            document.getElementById('custom-dates').classList.toggle('hidden', state.range !== 'custom');
+            var label = document.getElementById('range').selectedOptions[0].text;
+            var words = { any: 'all dates', last_15_days: '11/09/2026 to 11/23/2026', last_30_days: '10/25/2026 to 11/23/2026', this_month: '11/01/2026 to 11/30/2026', this_quarter: '10/01/2026 to 12/31/2026', this_year: '01/01/2026 to 12/31/2026', custom: '07/01/2026 to 09/30/2026' }[state.range];
+            document.getElementById('words').textContent = 'Receipts dated ' + words + (state.processed ? ', processed only' : ', every status but failed') + (state.vetted ? ', vetted vendors only' : '') + '. Receipts in the Trash are never counted.';
+            document.getElementById('col-name').textContent = state.group === 'vendor' ? 'Vendor' : 'Category';
+            document.getElementById('caption').textContent = 'Receipts by ' + state.group + ', ' + label;
+
+            var r = rows();
+            document.getElementById('report-body').classList.toggle('hidden', !r.length);
+            document.getElementById('report-empty').classList.toggle('hidden', !!r.length);
+            document.getElementById('downloads').classList.toggle('opacity-50', !r.length);
+            if (!r.length) return;
+
+            var totals = {}, count = 0;
+            r.forEach(function (x) { totals[x.cur] = (totals[x.cur] || 0) + x.total; count += x.n; });
+            document.getElementById('tile-count').textContent = count.toLocaleString('en-US');
+            document.getElementById('tile-count-note').textContent = r.length + ' ' + (state.group === 'vendor' ? 'vendors' : 'categories');
+            document.getElementById('tile-totals').innerHTML = Object.keys(totals).sort().reverse().map(function (c) {
+                return '<span>' + money(c, totals[c]) + ' <span class="text-sm font-normal text-gray-500">' + c + '</span></span>';
+            }).join('');
+
+            var html = '';
+            r.forEach(function (x) {
+                var pct = totals[x.cur] ? x.total / totals[x.cur] * 100 : 0;
+                var chip = state.group === 'vendor' && x.name !== '(no vendor)'
+                    ? (x.vetted ? ' <span class="ml-1 rounded-full px-2 py-0.5 text-xs bg-sage-100 text-sage-700 dark:bg-sage-700/40 dark:text-sage-200">Vetted</span>'
+                                : ' <span class="ml-1 rounded-full px-2 py-0.5 text-xs bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300">New vendor</span>') : '';
+                html += '<tr>' +
+                    '<th scope="row" class="px-4 py-2 text-left font-medium"><a href="#" class="hover:underline">' + x.name + '</a>' + chip + '</th>' +
+                    '<td class="px-4 py-2 text-right tabular-nums">' + x.n + '</td>' +
+                    '<td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">' + money(x.cur, x.total) + ' <span class="text-xs text-gray-500">' + x.cur + '</span></td>' +
+                    '<td class="px-4 py-2 hidden md:table-cell"><div class="flex items-center gap-2"><div class="h-2 flex-1 rounded-full bg-gray-100 dark:bg-gray-700"><div class="h-2 rounded-full bg-sage-300" style="width:' + pct.toFixed(1) + '%"></div></div><span class="w-10 text-right text-xs tabular-nums text-gray-500">' + Math.round(pct) + '%</span></div></td>' +
+                    '<td class="px-4 py-2 text-right tabular-nums hidden sm:table-cell">' + money(x.cur, x.total / x.n) + '</td>' +
+                    '<td class="px-4 py-2 hidden sm:table-cell text-gray-600 dark:text-gray-300">' + x.last + '</td>' +
+                    '</tr>';
+            });
+            document.getElementById('rows').innerHTML = html;
+            document.getElementById('foot').innerHTML = Object.keys(totals).sort().reverse().map(function (c) {
+                var n = r.filter(function (x) { return x.cur === c; }).reduce(function (s, x) { return s + x.n; }, 0);
+                return '<tr><th scope="row" class="px-4 py-2 text-left">Total ' + c + '</th><td class="px-4 py-2 text-right tabular-nums">' + n + '</td><td class="px-4 py-2 text-right tabular-nums">' + money(c, totals[c]) + '</td><td class="hidden md:table-cell"></td><td class="px-4 py-2 text-right tabular-nums hidden sm:table-cell">' + money(c, totals[c] / n) + '</td><td class="hidden sm:table-cell"></td></tr>';
+            }).join('');
+        }
+
+        document.querySelectorAll('[data-screen]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.preventDefault();
+                var s = b.dataset.screen;
+                state.dash = s === 'dashboard';
+                state.empty = s === 'empty';
+                if (s === 'vendor' || s === 'category') state.group = s;
+                render();
+            });
+        });
+        document.getElementById('range').addEventListener('change', function (e) { state.range = e.target.value; state.empty = false; render(); });
+        document.getElementById('processed-only').addEventListener('change', function (e) { state.processed = e.target.checked; render(); });
+        document.getElementById('vetted-only').addEventListener('change', function (e) { state.vetted = e.target.checked; render(); });
+        document.getElementById('mock-theme').addEventListener('click', function () { document.documentElement.classList.toggle('dark'); });
+        render();
+    })();
+    </script>
+</body>
+</html>

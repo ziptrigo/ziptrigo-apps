@@ -11,6 +11,7 @@ from . import export as _export  # noqa: F401 -- same
 from . import exports as _exports  # noqa: F401 -- same
 from . import inbox as _inbox  # noqa: F401 -- same
 from . import receipts as _receipts  # noqa: F401 -- same
+from . import reports as _reports  # noqa: F401 -- same
 from . import uploads as _uploads  # noqa: F401 -- same
 from . import vendors as _vendors  # noqa: F401 -- same
 from .router import router

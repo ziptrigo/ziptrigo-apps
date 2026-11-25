@@ -2,7 +2,7 @@
 To-do's "Task created"; issue #326 moved it here from Receipts so the two can't drift apart).
 
 A preset is resolved against *today* on every request, so a link to "This month" stays this month;
-`custom` uses a `date_from` / `date_to` pair. "Any date" has a value of its own: picking it fires
+`custom` uses a `date_from` / `date_to` pair. "All" has a value of its own: picking it fires
 the request before Alpine disables the date inputs, so the dates still arrive, and only an explicit
 `any` can win over them (no `date_range` at all with dates is an old link, read as Custom).
 """
@@ -13,7 +13,7 @@ from datetime import date, timedelta
 DATE_RANGE_ANY = 'any'
 DATE_RANGE_CUSTOM = 'custom'
 DATE_RANGES = (
-    (DATE_RANGE_ANY, 'Any date'),
+    (DATE_RANGE_ANY, 'All'),
     ('last_15_days', 'Last 15 days'),
     ('last_30_days', 'Last 30 days'),
     ('this_month', 'This month'),

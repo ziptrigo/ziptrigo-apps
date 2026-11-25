@@ -1370,7 +1370,7 @@ file (TODO-24 and TODO-62 make such tasks), another task with a file in no proje
 
 | # | Step | Expected |
 |---|------|----------|
-| 1 | Open `/account/` and scroll to **Apps** > **App actions**. | There are two blocks: **Receipts** (with **Receipt date**) and **To-do** (checkbox icon): "Download your task files as zip files, or your tasks as a spreadsheet.", a **Task created** select (Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom; no date fields until Custom), the buttons **Download files** (zip icon) and **Export XLSX** (spreadsheet icon) and a **Your exports** link to `/todo/exports/`. Choosing Custom in one block does not change the other. |
+| 1 | Open `/account/` and scroll to **Apps** > **App actions**. | There are two blocks: **Receipts** (with **Receipt date**) and **To-do** (checkbox icon): "Download your task files as zip files, or your tasks as a spreadsheet.", a **Task created** select (All, Last 15 days, Last 30 days, This month, This quarter, This year, Custom; no date fields until Custom), the buttons **Download files** (zip icon) and **Export XLSX** (spreadsheet icon) and a **Your exports** link to `/todo/exports/`. Choosing Custom in one block does not change the other. |
 | 2 | In the To-do block click **Download files**. | A dialog "Download files" opens with focus on a button: "**N files** (size) in **1 zip file** of about 100.0 MB each. Each zip opens on its own, and the first one also holds `tasks.xlsx`, a spreadsheet of the tasks and their comments with the files listed against them.", "All your tasks. To download only some, choose a date range first. Files of tasks in the Trash and of deleted comments are not included.", "This costs **3N credits** (3 per file). Your balance is `B0`. You are charged now; if we can't make the files, you get the credits back." and "... You can download them for 30 days, then they are deleted."; **Cancel** and **Download for 3N credits**. There is no folder-layout choice. Nothing was charged yet. |
 | 3 | Press Escape; open it again and click **Cancel**; open it and click the backdrop. | The dialog closes each time and focus returns to the button. Balance still `B0`. Receipts' dialog (`#export-modal`) is not affected. |
 | 4 | Choose **This month**, open the dialog. | It counts only files of tasks **created** this month (not when the file was attached), says "Only tasks created in this range: Task created: <first> to <last>." and the price follows. Choose **Custom**, enter a from and a to date, open it again: the count follows; the dates are the account's day, from midnight to midnight in the account's time zone. |
@@ -1388,7 +1388,7 @@ export is ready when its page opens.
 
 | # | Step | Expected |
 |---|------|----------|
-| 1 | Open the dialog (**Any date**) and click **Download for 3N credits**. | A spinner ("Starting..."), then `/todo/exports/<id>/` opens with the flash "We're preparing your zip files. We'll tell you here and by email when they are ready." |
+| 1 | Open the dialog (**All**) and click **Download for 3N credits**. | A spinner ("Starting..."), then `/todo/exports/<id>/` opens with the flash "We're preparing your zip files. We'll tell you here and by email when they are ready." |
 | 2 | Look at the page. | Heading **Export**; a green **Ready** pill, "N files, <size>, in 1 zip file . asked for <date, time>"; "Available to download until **<date in 30 days>**, then it is deleted."; one row `task-files-<YYYY-MM-DD>.zip` (the date is the day the export was asked for **in the account's time zone**: set the account to a zone behind UTC, such as Pacific, and ask for it in the evening there, and it is still that day, not the UTC one) with "N files, with tasks.xlsx" and a **Download** button; "Charged 3N credits."; **Delete**. The sidebar of To-do is still there, **Settings** highlighted. |
 | 3 | `/billing/credits/`. | Balance `B0 - 3N`; the newest row is a Spend "To-do export: N files" for 3N, source To-do. |
 | 4 | Click **Download**, open the zip. | `WSA/<number> - <title>/<file>` for the project task's own files, `WSA/<number> - <title>/comments/<file>` for its comment's, `No project/<number> - <title>/<file>` for the other task, and `tasks.xlsx` at the root. The task in the Trash and its file are absent. Every file's bytes equal the attachment's. |
@@ -1405,7 +1405,7 @@ export is ready when its page opens.
 
 | # | Step | Expected |
 |---|------|----------|
-| 1 | On `/account/`, To-do block, **Any date**, click **Export XLSX**. | `tasks-<today>.xlsx` downloads and the page stays; the balance is still `B0` and `/todo/exports/` has no new export. |
+| 1 | On `/account/`, To-do block, **All**, click **Export XLSX**. | `tasks-<today>.xlsx` downloads and the page stays; the balance is still `B0` and `/todo/exports/` has no new export. |
 | 2 | Open it. | The same two sheets as TODO-71 step 5, but **Files** holds file names (`report.pdf`), not zip paths. |
 | 3 | Choose **Last 15 days** and export again; then a Custom range in 2001. | Only tasks created in the range; for 2001 just the header rows. |
 | 4 | Pause the storage (TODO-31's shell step) and export again. | It still works (the workbook holds no files). Unpause afterwards. |

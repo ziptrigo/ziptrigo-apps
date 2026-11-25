@@ -57,7 +57,8 @@ apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted 
                       uploads, email intake, AI extraction, billing, jobs, admin, the web pages, the
                       JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (see "Receipts"),
                       and "Download files": zip files of everything, built in the background and
-                      kept 30 days (issue #315, see "Receipts" > "Exports").
+                      kept 30 days (issue #315, see "Receipts" > "Exports"), and Reports (issue #351,
+                      by vendor or category, XLSX/CSV/PDF, see "Receipts" > "Reports").
 apps/short_url/       Short URLs (issue #162): links with editable destinations, the public `/s/<code>`
                       redirect (root-mounted), click analytics, password and preview pages, abuse
                       tooling, one-off billing of its extras, dashboard/stats pages, the JWT API
@@ -2106,7 +2107,8 @@ merge) and never 403, **409** for a vendor rename that clashes with another vend
 **429** from the site-wide `RateLimitExceeded` handler with `Retry-After`. The rate limits are the
 web's, so the budgets are shared: `RECEIPTS_UPLOAD_USER` (`POST /uploads`),
 `RECEIPTS_UPLOAD_COMPLETE_USER` (`.../complete`), `RECEIPTS_REPROCESS_USER`, `RECEIPTS_EXPORT_USER`
-and `RECEIPTS_REGENERATE_USER`.
+`RECEIPTS_REGENERATE_USER` and, for `GET /reports` (issue #351, receipts by vendor or category: see
+"Receipts" > "Reports"), `RECEIPTS_REPORT_USER`.
 Where the endpoint looks up a receipt, the lookup (404) comes before its rate limit is charged
 (`reprocess`); `POST /uploads/{id}/complete` is the exception and charges
 `RECEIPTS_UPLOAD_COMPLETE_USER` first, like the web view. Tests: `apps/receipts/tests/
@@ -3997,6 +3999,47 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   vendor, see "Vendors"), `receipts.purge_exports` (daily; expires exports past their retention
   and finishes deleting ended ones, see "Exports"); `receipts.retry_due` also resumes stalled export
   builds. Idempotent, per-row `try/except` + `logger.exception`.
+- **Reports** (issue #351; `services/reports.py`, `services/report_files.py`, `forms/reports.py`, `views/reports.py`,
+  `api/reports.py`, `schemas/report.py`, templates `reports.html` and `partials/report_{content,tabs,downloads}.html`; no
+  migration; OpenAPI 2.21.0, additive). A link **Reports** (chart icon, before Vendors) on the dashboard's header row opens
+  `/receipts/reports/` (`receipts:reports`): the user's receipts totalled **by vendor or by category** (underline tabs, `?group=
+  vendor|category`) in a period. Free.
+  - *What is counted.* Live receipts only (never the Trash, never `uploaded=False`), and by default only **processed** ones;
+    unticking **Processed receipts only** adds `needs_review` and nothing else (failed and in-progress receipts are never
+    counted). **Vetted vendors only** keeps receipts whose `vendor_ref.vetted_at` is set (so receipts with no vendor go too).
+    The period is the dashboard's **Receipt date** select (`apps.core.date_ranges.DATE_RANGES`, themed select, the core date
+    pickers for Custom) on `receipt_date`, inclusive; a receipt with no date is in a report only when no bound is set.
+    **The default is this year** (the dashboard's is every date), so the canonical query spells out `date_range=any`.
+  - *Currencies are never added together.* `build_report(user, ReportFilters)` is **one aggregate query**
+    (`values()` + `Count`/`Sum`/`Max`, no query per row; a test pins 1): a row is a vendor (or category) **in one
+    currency** (`ReportRow`: key, name, currency, count, total, average over the receipts that have an amount, last date, a
+    vendor's `vetted`, `share` = percent of *that currency's* total); `totals` is one `CurrencyTotal` per currency; a
+    receipt with no currency is its own group (`''`, shown "no currency", last). Rows: currency, then total descending. A
+    vendor-less receipt is "(no vendor)" (no link: the dashboard has no such filter), a category-less one "Uncategorized".
+  - *The page.* `forms.reports.parse_report` is the one lenient parser (page, partial, downloads): `report_form=1` (a hidden
+    field of the form) makes an unticked checkbox mean "off" instead of "the default"; the canonical `params` write
+    `processed=0` / `vetted=1` only when they differ from the defaults. The filters are a GET form that htmx re-fetches into
+    `#report` (`hx-trigger="change delay:50ms, submit"`, like the Credits Usage tab); the answer carries `HX-Push-Url` = the
+    page URL, the group **tabs and the download links come out of band** (`#report-tabs`, `#report-downloads`: both carry the
+    filters), and `reports/list/` opened without htmx redirects to the page. A name links to the dashboard filtered by that
+    vendor or category and the same dates (`ParsedReport.dashboard_query`). The sentence in words is
+    `reports.describe_filters` (the active date wording on the page, `PUBLIC` in the files and the API).
+  - *Downloads* (`reports/export.xlsx|csv|pdf`, plain links with the page's query plus `group`; `report_files`): the same
+    table in all three, with one **Total** line per currency. **CSV** `receipts-by-vendor-<date>.csv` (ISO dates, two
+    decimals, every cell through the formula guard `cell_text`); **XLSX** (openpyxl write-only: real numbers and dates, the
+    share as a percentage, inline strings with `quotePrefix` for formula-like text, control characters dropped first;
+    a second sheet **Filters** says what is covered); **PDF** (reportlab, a new dependency; A4, Helvetica, user text escaped
+    before it reaches a `Paragraph`; the standard fonts hold Latin text only, so a name in another script loses those
+    characters instead of failing). `Cache-Control: private, no-store`; the date in the name is the user's today. They share
+    `RECEIPTS_REPORT_USER` (30 per minute), charged after the filters are parsed; the page and the partial spend nothing.
+  - *API.* `GET /api/receipts/reports?group=&date_range=&date_from=&date_to=&processed_only=&vetted_only=` (`api/reports.py`):
+    the same service, parsed strictly (an unknown group or range, a bad date, dates sent with a preset, a first date after
+    the last: 400, before the budget is charged; presets resolve against the caller's today). Answers `ReceiptReportSchema`
+    (`rows`, `totals`, `description`; amounts as two-decimal strings). Not in the CLI.
+  - *Also renamed:* every date dropdown's "Any date" is now **All** (`DATE_RANGES`, To-do's filter bar, Notes' "Updated"); the
+    stored value is still `any`, so links keep working.
+  - *Tests:* `apps/receipts/tests/test_reports.py` (service and parsing), `test_views_reports.py` (page, partial, the three
+    downloads opened with openpyxl, `csv` and a PDF header), `test_api_reports.py`; AI cases RCPT-74 to RCPT-76.
 - **Exports** (issue #315, PR 1 of 2: backend and web, PR 2: the JWT API and CLI, see the two bullets at the end of this list. `models/export.py`,
   `services/export_plan.py`, `services/exports.py`, `views/exports.py`, `forms/export.py`, migration
   `0006_exports`; templates `exports.html`, `export.html`, `partials/export_{modal,form,panel}.html`,
@@ -4429,16 +4472,17 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     (move to the Trash), `<id>/restore/`, `<id>/delete/` (forever), `<id>/dismiss-duplicate/`,
     `/receipts/trash/`, `/receipts/settings/` (+ `settings/inbox/`, `settings/regenerate/`,
     `settings/categories/...`), `/receipts/vendors/` (+ `vendors/list/`, `suggest/`, `vet/`,
-    `merge/`, `<id>/rename/`, `<id>/delete/`). URL names are in `urls.py` (`receipts:detail`, ...).
+    `merge/`, `<id>/rename/`, `<id>/delete/`), `/receipts/reports/` (+ `reports/list/`,
+    `reports/export.xlsx|csv|pdf`). URL names are in `urls.py` (`receipts:detail`, ...).
   - **Dashboard**: status tabs with counts (All, Needs review, Processing = received + processing +
     waiting for credits, Failed, Duplicates), search (vendor, notes, amount; `autocomplete="off"` so
     the browser's past-search suggestions don't cover the list), category, a receipt-date dropdown
-    (`date_range`: Any date, Last 15/30 days -- ending today --, This month/quarter/year -- the whole
+    (`date_range`: All, Last 15/30 days -- ending today --, This month/quarter/year -- the whole
     calendar period --, or Custom, which alone shows and enables the `date_from`/`date_to` inputs;
     `forms.filters.resolve_date_range` turns a preset into dates against `timezone.localdate()` on
     every request, so a "This month" link stays relative, and ignores the date inputs; dates without
     a `date_range` -- older links, and the canonical URL of a custom range -- mean Custom, while
-    "Any date" sends an explicit `date_range=any` that wins over them: picking it fires the list
+    "All" sends an explicit `date_range=any` that wins over them: picking it fires the list
     request before Alpine disables the date inputs, so the old dates still arrive), sortable
     Receipt date (default newest first, undated on top) and Added columns, 25 per page, a
     "Vendors" link (with the number to vet) next to Trash and the vendor filter chip (see "Vendors").

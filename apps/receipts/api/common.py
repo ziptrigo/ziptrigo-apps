@@ -25,6 +25,8 @@ Status codes (documented once, here):
   time), or with an `expected_cost` that is no longer the cost (the detail names the real total;
   nothing was charged or created), and `DELETE /exports/{id}` of one still being prepared. A
   part number the export doesn't have is a 404, like another user's export.
+- **400** (reports, issue #351) an unknown `group` or `date_range`, a malformed date, dates sent
+  with a preset, or a first date after the last.
 - **429** the site-wide rate limiter (`ratelimit.enforce`), with `Retry-After`.
 """
 
@@ -149,7 +151,7 @@ def clamp_page(limit: int, offset: int) -> tuple[int, int]:
     return max(1, min(limit, MAX_LIMIT)), max(0, offset)
 
 
-def _parse_date(name: str, value: str | None) -> date | None:
+def parse_date(name: str, value: str | None) -> date | None:
     if value is None or not value.strip():
         return None
     try:
@@ -184,8 +186,8 @@ def receipt_filters(
         category=category or None,
         vendor=vendor,
         q=q,
-        date_from=_parse_date('date_from', date_from),
-        date_to=_parse_date('date_to', date_to),
+        date_from=parse_date('date_from', date_from),
+        date_to=parse_date('date_to', date_to),
         duplicates=duplicates,
         sort=sort or DEFAULT_SORT,
     )

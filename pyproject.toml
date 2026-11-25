@@ -58,6 +58,8 @@ dependencies = [
     # `regex` for the search snippets only: unlike `re` its `search(timeout=...)` is bounded, so a
     # pattern that backtracks badly can't hang a web worker (`apps.todo.services.search`, #181).
     'regex>=2025.1,<2027.0',
+    # PDF writer for the Receipts report download (issue #351, `apps.receipts.services.report_files`).
+    'reportlab>=4.2,<5.0',
     'requests>=2.32,<3.0',
     'segno>=1.6,<2.0',
     # User-agent parsing (device, browser, OS, crawler detection) for short link analytics

@@ -373,7 +373,7 @@ due time** for the time field (TODO-41 covers the rest of To-do).
 | 4 | Type `13/45/2025` in the first box and Tab. | A red message under the box "Enter a date as mm/dd/yyyy, for example <today as MM/DD/YYYY>."; the box has a red border and `aria-invalid="true"`; the list is **not** refreshed and the URL still has `date_from=2025-06-01`. Fix it to `06/02/2025`: the message goes. |
 | 5 | Empty the first box and Tab. | The date is cleared (`date_from` leaves the URL) and the list refreshes. |
 | 6 | Click the calendar button; use the arrows to move a month; pick a day. | A popover with the month and year (`June 2025`), Monday first; picking a day fills the box (`MM/DD/YYYY`), refreshes the list and closes the popover. **Today** and **Clear** work; Escape and a click outside close it. |
-| 7 | Choose **Any date** in the range select. | Both boxes and their hidden values are disabled and hidden; no stale date is sent. |
+| 7 | Choose **All** in the range select. | Both boxes and their hidden values are disabled and hidden; no stale date is sent. |
 | 8 | Open `/todo/settings/`. In **Default due time** type `7:45`, Tab. | The box shows `7:45 AM`; typing `1930` shows `7:30 PM`; `19.30`, `7:30pm`, `730p` all show `7:30 PM`. |
 | 9 | Click the box. | A list of half-hour times from `12:00 AM` to `11:30 PM` opens under it, the nearest to the current value highlighted; ArrowDown / ArrowUp move (the list scrolls), Enter picks, Escape closes without changing; a click on an option picks it and the box keeps the focus. |
 | 10 | Empty the box and Tab, then **Save**. | "Enter a time." under the box (this field is required); nothing is saved. Type `9am`, **Save**: "Saved.". |
