@@ -83,6 +83,19 @@ class TestGrouping:
         assert rows[('B', 'USD')].share == Decimal('25.0')
         assert rows[('A', 'EUR')].share == Decimal('100.0')
 
+    def test_a_share_is_clamped_to_0_100_even_with_a_negative_amount(self, funded_user, make):
+        # Amounts are never negative through the app (`clean_changes` refuses them), but a row
+        # written some other way must not push a bar outside its track.
+        a = create_vendor(funded_user, 'A')
+        b = create_vendor(funded_user, 'B')
+        make(vendor_ref=a, vendor='A', amount='100.00')
+        make(vendor_ref=b, vendor='B', amount='-30.00')
+
+        rows = by_vendor(build_report(funded_user, ReportFilters()))
+
+        assert all(Decimal('0') <= row.share <= Decimal('100') for row in rows.values())
+        assert rows[('B', 'USD')].share == Decimal('0.0')
+
     def test_rows_are_sorted_by_currency_then_total_descending(self, funded_user, make):
         small = create_vendor(funded_user, 'Small')
         big = create_vendor(funded_user, 'Big')

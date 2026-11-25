@@ -23,7 +23,7 @@ from apps.core.datetime_format import PUBLIC
 
 from ..schemas.report import ReceiptReportSchema
 from ..services.reports import GROUPS, ReportFilters, build_report, describe_filters
-from .common import _parse_date
+from .common import parse_date
 from .router import router
 
 DEFAULT_RANGE = 'this_year'
@@ -42,8 +42,8 @@ def report_filters(
 ) -> ReportFilters:
     if group not in GROUPS:
         raise HttpError(400, f'group must be one of: {", ".join(GROUPS)}.')
-    first = _parse_date('date_from', date_from)
-    last = _parse_date('date_to', date_to)
+    first = parse_date('date_from', date_from)
+    last = parse_date('date_to', date_to)
     if date_range is None:
         date_range = DATE_RANGE_CUSTOM if first or last else DEFAULT_RANGE
     if date_range not in _RANGES:

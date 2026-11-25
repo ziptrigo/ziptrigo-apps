@@ -80,7 +80,7 @@
     </table>
 </div>
 <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-    A name opens the Receipts list filtered by {% if by_vendor %}that vendor{% else %}that category{% endif %} and this date range.
+    A name opens the Receipts list for {% if by_vendor %}that vendor{% else %}that category{% endif %} and this date range. The list shows every receipt there, whatever its status or currency, so it can hold more receipts than the count here.
     Sorted by total, largest first; {% if by_vendor %}a vendor{% else %}a category{% endif %} with receipts in two currencies has one line per currency.
 </p>
 {% endif %}

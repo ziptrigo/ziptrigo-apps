@@ -151,7 +151,7 @@ def clamp_page(limit: int, offset: int) -> tuple[int, int]:
     return max(1, min(limit, MAX_LIMIT)), max(0, offset)
 
 
-def _parse_date(name: str, value: str | None) -> date | None:
+def parse_date(name: str, value: str | None) -> date | None:
     if value is None or not value.strip():
         return None
     try:
@@ -186,8 +186,8 @@ def receipt_filters(
         category=category or None,
         vendor=vendor,
         q=q,
-        date_from=_parse_date('date_from', date_from),
-        date_to=_parse_date('date_to', date_to),
+        date_from=parse_date('date_from', date_from),
+        date_to=parse_date('date_to', date_to),
         duplicates=duplicates,
         sort=sort or DEFAULT_SORT,
     )

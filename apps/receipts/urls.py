@@ -20,13 +20,13 @@ urlpatterns = [
         name='export-part-download',
     ),
     path('exports/<uuid:export_id>/delete/', views.export_delete, name='export-delete'),
-    # Upload: the page, then two JSON endpoints the script calls around its direct S3 PUT.
     # Reports (issue #351): the page, its htmx partial and the three downloads.
     path('reports/', views.reports_page, name='reports'),
     path('reports/list/', views.report_list, name='report-list'),
     path('reports/export.csv', views.report_csv, name='report-csv'),
     path('reports/export.xlsx', views.report_xlsx, name='report-xlsx'),
     path('reports/export.pdf', views.report_pdf, name='report-pdf'),
+    # Upload: the page, then two JSON endpoints the script calls around its direct S3 PUT.
     path('upload/', views.upload_page, name='upload'),
     path('upload/start/', views.upload_start, name='upload-start'),
     path('upload/<uuid:receipt_id>/complete/', views.upload_complete, name='upload-complete'),

@@ -214,7 +214,10 @@ def build_report(user: User, filters: ReportFilters) -> Report:
     total_of = {t.currency: t.total for t in totals}
     for row in rows:
         whole = total_of[row.currency]
-        row.share = (row.total * 100 / whole).quantize(Decimal('0.1')) if whole else Decimal('0.0')
+        # Clamped to 0-100 defensively: amounts are never negative today (`clean_changes` and the AI
+        # parser refuse them), but a stray one must not push a bar outside its track.
+        share = (row.total * 100 / whole) if whole > 0 else Decimal('0')
+        row.share = min(Decimal('100'), max(Decimal('0'), share)).quantize(Decimal('0.1'))
     rows.sort(key=_sort_key)
     return Report(
         filters=filters,

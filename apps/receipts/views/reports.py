@@ -20,6 +20,7 @@ from django.views.decorators.http import require_GET
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.services.timezones import user_today
 from apps.core import ratelimit
+from apps.core.date_ranges import DATE_RANGE_CUSTOM
 from apps.core.htmx import is_htmx
 
 from ..forms import DATE_RANGES, ParsedReport, parse_report
@@ -77,7 +78,7 @@ def _context(request: AuthenticatedHttpRequest, parsed: ParsedReport) -> dict:
         'sentence': describe_filters(parsed.filters),
         'by_vendor': parsed.group == GROUP_VENDOR,
         'date_range_options': [{'value': v, 'label': label} for v, label in DATE_RANGES],
-        'dates_disabled': parsed.date_range != 'custom',
+        'dates_disabled': parsed.date_range != DATE_RANGE_CUSTOM,
         'form_values': parsed.params,
         'report_url': reverse('receipts:reports'),
         'list_url': reverse('receipts:report-list'),
