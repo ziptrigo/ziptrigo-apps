@@ -25,6 +25,8 @@ Status codes (documented once, here):
   time), or with an `expected_cost` that is no longer the cost (the detail names the real total;
   nothing was charged or created), and `DELETE /exports/{id}` of one still being prepared. A
   part number the export doesn't have is a 404, like another user's export.
+- **400** (reports, issue #351) an unknown `group` or `date_range`, a malformed date, dates sent
+  with a preset, or a first date after the last.
 - **429** the site-wide rate limiter (`ratelimit.enforce`), with `Retry-After`.
 """
 

@@ -1,0 +1,62 @@
+{% extends 'receipts/layout.html' %}
+
+{% block title %}Reports - Receipts - ZipTrigo{% endblock %}
+
+{% block receipts_content %}
+<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <div>
+        <a href="{% url 'receipts:dashboard' %}"
+           class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Receipts</a>
+        <h1 class="mt-1 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Reports</h1>
+    </div>
+    {% include 'receipts/partials/report_downloads.html' %}
+</div>
+
+{% include 'receipts/partials/report_tabs.html' %}
+
+{% comment %}The filters are a GET form that htmx re-fetches into #report on every change, and the answer's
+   HX-Push-Url keeps the page URL in the address bar. Without JavaScript it submits to the page itself.
+   `report_form` tells the server that an unticked checkbox means "off" and not "the default".
+   The custom dates are disabled (not sent) until "Custom" is picked. {% endcomment %}
+<form id="report-filters" method="get" action="{{ report_url }}"
+      hx-get="{{ list_url }}" hx-target="#report" hx-swap="innerHTML" hx-sync="this:replace"
+      hx-trigger="change delay:50ms, submit"
+      x-data="{ range: '{{ parsed.date_range }}' }"
+      @change="if ($event.target.name === 'date_range') range = $event.target.value">
+    <input type="hidden" name="report_form" value="1">
+    <div class="mb-3 flex flex-wrap items-end gap-x-5 gap-y-3">
+        <div>
+            <label for="report-date-range" class="mb-1 block text-sm font-medium">Receipt date</label>
+            {% include 'core/components/select.html' with name='date_range' id='report-date-range' options=date_range_options value=parsed.date_range root_class='w-48' compact=True %}
+        </div>
+        <div x-show="range === 'custom'" {% if parsed.date_range != 'custom' %}style="display: none"{% endif %} class="flex items-end gap-2">
+            <div>
+                <label for="report-from" class="mb-1 block text-sm font-medium">From</label>
+                {% include 'core/components/date_picker.html' with name='date_from' id='report-from' hidden_id='report-from-value' value=parsed.params.date_from aria_label='Receipt date from' disabled_expr="range !== 'custom'" root_class='w-36' compact=True disabled=dates_disabled %}
+            </div>
+            <div>
+                <label for="report-to" class="mb-1 block text-sm font-medium">To</label>
+                {% include 'core/components/date_picker.html' with name='date_to' id='report-to' hidden_id='report-to-value' value=parsed.params.date_to aria_label='Receipt date to' disabled_expr="range !== 'custom'" root_class='w-36' compact=True disabled=dates_disabled %}
+            </div>
+        </div>
+        <fieldset>
+            <legend class="mb-1 block text-sm font-medium">Include</legend>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 py-2 text-sm">
+                <label class="inline-flex items-center gap-2">
+                    <input type="checkbox" name="processed" value="1" id="report-processed" {% if parsed.filters.processed_only %}checked{% endif %}
+                           class="h-4 w-4 rounded border-gray-300 accent-sage-500">Processed receipts only
+                </label>
+                <label class="inline-flex items-center gap-2">
+                    <input type="checkbox" name="vetted" value="1" id="report-vetted" {% if parsed.filters.vetted_only %}checked{% endif %}
+                           class="h-4 w-4 rounded border-gray-300 accent-sage-500">Vetted vendors only
+                </label>
+            </div>
+        </fieldset>
+        <noscript><button type="submit" class="btn rounded-lg bg-brand-primary px-4 py-2 text-sm font-medium text-gray-900 hover:bg-sage-400">Apply</button></noscript>
+    </div>
+
+    <div id="report" data-list>
+        {% include 'receipts/partials/report_content.html' %}
+    </div>
+</form>
+{% endblock %}

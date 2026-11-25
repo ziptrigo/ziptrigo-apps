@@ -50,7 +50,7 @@ DATE_CUSTOM = 'custom'
 #: The date ranges, with their names for the filter bar. Presets are resolved against the user's
 #: "today" on every run, so a saved "Next 7 days" stays relative.
 DATE_RANGES = {
-    DATE_ANY: 'Any date',
+    DATE_ANY: 'All',
     'overdue': 'Overdue',
     'today': 'Today',
     'next_7_days': 'Next 7 days',

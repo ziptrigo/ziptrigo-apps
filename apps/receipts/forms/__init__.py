@@ -9,6 +9,7 @@ from .filters import (
     parse_filters,
 )
 from .receipt import ReceiptForm
+from .reports import ParsedReport, ReportFilterForm, parse_report
 from .settings import CategoryNameForm, InboxSettingsForm
 from .vendor import (
     DEFAULT_VENDOR_TAB,
@@ -32,11 +33,14 @@ __all__ = [
     'ExportForm',
     'InboxSettingsForm',
     'ParsedFilters',
+    'ParsedReport',
     'ParsedVendorFilters',
     'ReceiptFilterForm',
     'ReceiptForm',
+    'ReportFilterForm',
     'VendorFilterForm',
     'VendorNameForm',
     'parse_filters',
+    'parse_report',
     'parse_vendor_filters',
 ]

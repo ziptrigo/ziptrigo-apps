@@ -61,7 +61,7 @@ UPDATED_CUSTOM = 'custom'
 #: The updated ranges, with their names for the filter bar. Presets are resolved against the user's
 #: "today" on every run, so a saved "Last 7 days" stays relative.
 UPDATED_RANGES = {
-    UPDATED_ANY: 'Any time',
+    UPDATED_ANY: 'All',
     'today': 'Today',
     'last_7_days': 'Last 7 days',
     'last_30_days': 'Last 30 days',

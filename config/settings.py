@@ -692,6 +692,9 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'RECEIPTS_REPROCESS_USER': (30, 60 * 60),
     # A CSV export walks every matching row; a handful an hour is plenty for a human.
     'RECEIPTS_EXPORT_USER': (10, 60 * 60),
+    # A report (issue #351) is one aggregate query and a small file; the three downloads share
+    # this budget, and a page of someone clicking through filters never reaches it.
+    'RECEIPTS_REPORT_USER': (30, 60),
     # "Download files" (issue #315) charges credits and builds zip files of everything, so a
     # handful an hour is plenty (a refused or failed request spends none: it is charged only once
     # the form is valid, right before the export is created). Downloading a part is a redirect to

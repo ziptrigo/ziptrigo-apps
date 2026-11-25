@@ -1,4 +1,4 @@
-{# Status tabs with counts, and the Vendors and Trash links. Sent again, out of band, with every list refresh. #}
+{# Status tabs with counts, and the Reports, Vendors, Exports and Trash links. Sent again, out of band, with every list refresh. #}
 <div id="receipt-tabs"{% if oob %} hx-swap-oob="true"{% endif %}
      class="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 dark:border-gray-700">
     <nav data-tabs aria-label="Receipt status" class="-mb-px flex flex-wrap gap-x-1">
@@ -16,6 +16,10 @@
         {% endfor %}
     </nav>
     <span class="mb-2 inline-flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+        <a href="{% url 'receipts:reports' %}"
+           class="inline-flex items-center rounded-md hover:text-gray-700 dark:hover:text-gray-200">
+            <i class="fas fa-chart-pie mr-1.5" aria-hidden="true"></i>Reports
+        </a>
         <a href="{% url 'receipts:vendors' %}"
            class="inline-flex items-center gap-1.5 rounded-md hover:text-gray-700 dark:hover:text-gray-200">
             <i class="fas fa-store" aria-hidden="true"></i>Vendors

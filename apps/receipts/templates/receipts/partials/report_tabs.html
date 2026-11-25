@@ -1,0 +1,13 @@
+{# Group by: underline tabs, the page's main switch. Sent again, out of band, with every refresh. #}
+<div id="report-tabs"{% if oob %} hx-swap-oob="true"{% endif %} class="mb-5 border-b border-gray-200 dark:border-gray-700">
+    <nav data-tabs aria-label="Group by" class="-mb-px flex flex-wrap gap-x-1">
+        {% for tab in tabs %}
+        <a href="{{ tab.href }}"
+           hx-get="{{ tab.list_url }}" hx-target="#report" hx-swap="innerHTML" hx-sync="#report-filters:replace"
+           {% if tab.active %}aria-current="page"{% endif %}
+           class="inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium {% if tab.active %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+            <i class="{{ tab.icon }} mr-1.5" aria-hidden="true"></i>{{ tab.label }}
+        </a>
+        {% endfor %}
+    </nav>
+</div>

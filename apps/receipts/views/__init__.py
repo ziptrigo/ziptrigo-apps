@@ -25,6 +25,7 @@ from .exports import (
     export_part_download,
     exports_page,
 )
+from .reports import report_csv, report_list, report_pdf, report_xlsx, reports_page
 from .trash import delete_receipt_forever, restore_receipt, trash_page
 from .uploads import upload_complete, upload_page, upload_start
 from .vendors import (
@@ -56,6 +57,11 @@ __all__ = [
     'export_part_download',
     'exports_page',
     'receipt_list',
+    'report_csv',
+    'report_list',
+    'report_pdf',
+    'report_xlsx',
+    'reports_page',
     'regenerate_address',
     'reprocess_receipt',
     'restore_receipt',

@@ -1,5 +1,5 @@
 """The shared `Router` instance for `/api/receipts/`. Every endpoint module (`receipts.py`,
-`uploads.py`, `export.py`, `exports.py`, `categories.py`, `vendors.py`, `inbox.py`) registers onto
+`uploads.py`, `export.py`, `exports.py`, `reports.py`, `categories.py`, `vendors.py`, `inbox.py`) registers onto
 this one object -- the same shape as `apps.file_transfer.api.router` -- so the package stays one domain per
 file.
 

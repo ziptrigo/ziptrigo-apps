@@ -1,0 +1,86 @@
+{% load l10n receipts_ui datetime_format %}
+{% comment %} Everything the filters change: the group, the sentence, the tiles and the table. This is what the
+   form swaps into #report (it sits inside the form, so the hidden `group` keeps the tab when a filter changes);
+   the tabs and the download links are sent again out of band, since both carry the filters. {% endcomment %}
+{% if parsed.group != 'vendor' %}<input type="hidden" name="group" value="{{ parsed.group }}">{% endif %}
+{% if oob %}
+{% include 'receipts/partials/report_tabs.html' with oob=True %}
+{% include 'receipts/partials/report_downloads.html' with oob=True %}
+{% endif %}
+
+<p class="mb-5 text-sm text-gray-600 dark:text-gray-300">{{ sentence }}</p>
+
+{% if report.is_empty %}
+<div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600">
+    {% include 'core/partials/empty_state.html' with icon='fas fa-chart-pie' title='No receipts in this period' text='Choose a longer period, or include receipts that are not processed yet.' %}
+</div>
+{% else %}
+<dl class="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+        <dt class="text-sm text-gray-600 dark:text-gray-300">Receipts</dt>
+        <dd class="mt-1 text-2xl font-semibold tabular-nums">{{ report.receipt_count }}</dd>
+        <dd class="text-xs text-gray-500 dark:text-gray-400">{{ report.group_count }} {% if by_vendor %}vendor{{ report.group_count|pluralize }}{% else %}{% if report.group_count == 1 %}category{% else %}categories{% endif %}{% endif %}</dd>
+    </div>
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:col-span-2">
+        <dt class="text-sm text-gray-600 dark:text-gray-300">Total</dt>
+        <dd class="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-2xl font-semibold tabular-nums">
+            {% for total in report.totals %}
+            <span>{{ total.total_text }} <span class="text-sm font-normal text-gray-500 dark:text-gray-400">{{ total.currency_label }}</span></span>
+            {% endfor %}
+        </dd>
+        <dd class="text-xs text-gray-500 dark:text-gray-400">One total per currency: amounts in different currencies are not converted or added together.</dd>
+    </div>
+</dl>
+
+<div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+    <table class="w-full text-sm">
+        <caption class="sr-only">Receipts by {{ parsed.group }}. {{ sentence }}</caption>
+        <thead class="bg-gray-50 dark:bg-gray-900/40 text-left text-gray-600 dark:text-gray-300">
+            <tr>
+                <th scope="col" class="px-4 py-2 font-medium">{% if by_vendor %}Vendor{% else %}Category{% endif %}</th>
+                <th scope="col" class="px-4 py-2 text-right font-medium">Receipts</th>
+                <th scope="col" class="px-4 py-2 text-right font-medium">Total</th>
+                <th scope="col" class="hidden w-1/4 px-4 py-2 font-medium md:table-cell">Share</th>
+                <th scope="col" class="hidden px-4 py-2 text-right font-medium sm:table-cell">Average</th>
+                <th scope="col" class="hidden px-4 py-2 font-medium sm:table-cell">Last receipt</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+            {% for item in rows %}{% with row=item.row %}
+            <tr>
+                <th scope="row" class="px-4 py-2 text-left font-medium">
+                    {% if item.url %}<a href="{{ item.url }}" class="hover:underline">{{ row.name }}</a>{% else %}<span class="text-gray-600 dark:text-gray-300">{{ row.name }}</span>{% endif %}
+                    {% if by_vendor and row.vetted is not None %} {% vendor_chip row.vetted %}{% endif %}
+                </th>
+                <td class="px-4 py-2 text-right tabular-nums">{{ row.count }}</td>
+                <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums">{{ row.total_text }} <span class="text-xs text-gray-500 dark:text-gray-400">{{ row.currency_label }}</span></td>
+                <td class="hidden px-4 py-2 md:table-cell">
+                    <div class="flex items-center gap-2">
+                        <div class="h-2 flex-1 rounded-full bg-gray-100 dark:bg-gray-700" aria-hidden="true"><div class="h-2 rounded-full bg-sage-300" style="width: {{ row.share|unlocalize }}%"></div></div>
+                        <span class="w-12 text-right text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ row.share }}%</span>
+                    </div>
+                </td>
+                <td class="hidden px-4 py-2 text-right tabular-nums sm:table-cell">{{ row.average_text }}</td>
+                <td class="hidden px-4 py-2 text-gray-600 dark:text-gray-300 sm:table-cell">{% if row.last_date %}{{ row.last_date|fdate }}{% endif %}</td>
+            </tr>
+            {% endwith %}{% endfor %}
+        </tbody>
+        <tfoot class="border-t-2 border-gray-200 dark:border-gray-600 font-semibold">
+            {% for total in report.totals %}
+            <tr>
+                <th scope="row" class="px-4 py-2 text-left">Total <span class="font-normal text-gray-500 dark:text-gray-400">{{ total.currency_label }}</span></th>
+                <td class="px-4 py-2 text-right tabular-nums">{{ total.count }}</td>
+                <td class="whitespace-nowrap px-4 py-2 text-right tabular-nums">{{ total.total_text }}</td>
+                <td class="hidden md:table-cell"></td>
+                <td class="hidden px-4 py-2 text-right tabular-nums sm:table-cell">{{ total.average_text }}</td>
+                <td class="hidden sm:table-cell"></td>
+            </tr>
+            {% endfor %}
+        </tfoot>
+    </table>
+</div>
+<p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+    A name opens the Receipts list filtered by {% if by_vendor %}that vendor{% else %}that category{% endif %} and this date range.
+    Sorted by total, largest first; {% if by_vendor %}a vendor{% else %}a category{% endif %} with receipts in two currencies has one line per currency.
+</p>
+{% endif %}

@@ -945,12 +945,12 @@ apps' registrations; nothing is hard-coded on the page.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Scroll to the **Apps** section. | Below the apps list and above "Notifications on this device" (when push is configured) there is an **App actions** subheading with "Things you do now and then with an app's data." and two bordered blocks, each headed with its app's icon and name: **Receipts** and **To-do**, in the apps list's order. No other app has a block. |
-| 2 | Read the Receipts block. | "Download your receipt files as zip files, or a CSV list of your receipts.", a **Receipt date** select (Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom), the buttons **Download files** and **Export CSV**, and a **Your exports** link. No date fields are visible. |
+| 2 | Read the Receipts block. | "Download your receipt files as zip files, or a CSV list of your receipts.", a **Receipt date** select (All, Last 15 days, Last 30 days, This month, This quarter, This year, Custom), the buttons **Download files** and **Export CSV**, and a **Your exports** link. No date fields are visible. |
 | 2b | Read the To-do block. | "Download your task files as zip files, or your tasks as a spreadsheet.", a **Task created** select with the same options, the buttons **Download files** and **Export XLSX**, and a **Your exports** link to `/todo/exports/`. Its fields and ids do not clash with Receipts' (choosing a range in one leaves the other alone). |
 | 3 | Choose **Custom**. | Two date fields appear (in the account's date order); choose another option and they hide again. |
 | 4 | Switch **Receipts** off in the apps list above (ACC-45), reload, and look at the block. | The block is still there (an app hidden from the menu keeps its data). Switch Receipts back on. Put **QR Codes** first in the apps list: the block order follows the apps list when other apps get actions. |
 | 5 | Click **Download files** in each block. | The "Download files" dialog opens over the page (RCPT-63 for Receipts, TODO-70 for To-do); Escape closes it and focus returns to the button. |
-| 6 | Click **Export CSV** with **Any date**. | `receipts-<today>.csv` downloads and the page stays. |
+| 6 | Click **Export CSV** with **All**. | `receipts-<today>.csv` downloads and the page stays. |
 | 7 | Sign in as a user who has never opened Receipts or To-do (a fresh account) and open `/account/`. | Both blocks are shown the same and opening the page did not create a Receipts or To-do account (no "Email receipts to" address exists until `/receipts/` is opened). |
 | 8 | Click **Export XLSX** in the To-do block. | `tasks-<today>.xlsx` downloads and the page stays (TODO-72). |
 

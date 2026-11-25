@@ -21,6 +21,8 @@ re-run without enough credits, phone width, dark mode and keyboard use. RCPT-63 
 and file names, a file that has gone, a failed build and its refund (these use **shell steps**), and the rules around
 an export's life (one at a time, paused storage, delete, expiry, other users' exports). RCPT-71 and RCPT-72: the same
 exports through the JWT API (`/api/receipts/exports`) and the `inv receipts` CLI (`export-files` and companions).
+RCPT-74 to RCPT-76: **Reports** (issue #351): receipts by vendor or by category in a period, the filters, the three
+downloads (XLSX, CSV, PDF) and `GET /api/receipts/reports`.
 
 Out of scope: inbound email through real SES (the shell steps feed `.eml` files to the real intake
 instead), the rest of the JWT API and the CLI (only the exports', RCPT-71 and RCPT-72), rate limits (off on this server), real AI extraction, and anything
@@ -176,7 +178,7 @@ Example: `rcptPick([{ name: 'staples-1.png', type: 'image/png', base64: PNG_A }]
 | 1 | Go to `/receipts/`. | Page title "Receipts - ZipTrigo", heading **Receipts**, the **Upload** button top right (no **Export CSV** or **Download files**: they are in the account page's App actions, RCPT-63). |
 | 2 | Read the address strip under the heading. | "Email receipts to" followed by an address of the form `receipts+xxxxxxxx@ziptrigo.com` (8 lowercase letters/digits, none of `i l o 0 1`), a **Copy** button and a **Settings ->** link. **Record** it as `ADDR1`. |
 | 3 | Look at the tabs row. | Tabs **All** (underlined, current), **Needs review**, **Processing**, **Failed**, **Duplicates**, none with a count badge. On the right **Vendors** (no "to vet" badge) and **Trash** (no number). |
-| 4 | Look at the filters. | Search box with placeholder "Search vendor, notes or amount"; **Category** select with "All categories", "Uncategorized", then the 12 defaults in this order: Advertising & marketing, Bank & payment fees, Equipment, Meals & entertainment, Office supplies, Professional services, Rent & utilities, Software & subscriptions, Phone & internet, Travel, Vehicle & fuel, Other; **Receipt date** select with Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom. No date fields are visible. |
+| 4 | Look at the filters. | Search box with placeholder "Search vendor, notes or amount"; **Category** select with "All categories", "Uncategorized", then the 12 defaults in this order: Advertising & marketing, Bank & payment fees, Equipment, Meals & entertainment, Office supplies, Professional services, Rent & utilities, Software & subscriptions, Phone & internet, Travel, Vehicle & fuel, Other; **Receipt date** select with All, Last 15 days, Last 30 days, This month, This quarter, This year, Custom. No date fields are visible. |
 | 5 | Look at the list. | Header row: **Receipt date** (sortable), Vendor, **Added** (sortable), Category, Amount, Status. One empty-state row: "No receipts yet. Upload one, or email it to your address above." |
 | 6 | Look for **Export CSV** and **Download files**. | Neither is on the dashboard (they moved to `/account/` > Apps > App actions, RCPT-63). The **Exports** link is still next to Vendors and Trash. |
 | 7 | Reload the page. | Same address `ADDR1` (the account is not recreated). |
@@ -482,7 +484,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | 3 | Choose **Custom**. | Two date fields (text boxes with calendar buttons, aria-labels "Receipt date from" / "Receipt date to", placeholder `mm/dd/yyyy`) appear, enabled. |
 | 4 | Type `06/01/2025` in from and `07/31/2025` in to (Tab after each; ISO `2025-06-01` works too). | Only R1. The boxes read `06/01/2025` and `07/31/2025`. URL has `date_from=2025-06-01&date_to=2025-07-31` and **no** `date_range`. |
 | 5 | Reload. | **Custom** is selected, both dates kept, only R1. |
-| 6 | Choose **Any date**. | Date inputs hidden; all 5 rows; URL `/receipts/`. |
+| 6 | Choose **All**. | Date inputs hidden; all 5 rows; URL `/receipts/`. |
 
 ### RCPT-27 Sorting by receipt date and by added
 
@@ -508,7 +510,7 @@ the receipts in the chosen receipt-date range with the documented columns.
 | 1 | Pick tab **Duplicates**, category "Office supplies", search `42`. | Only R2. URL contains `status=duplicates`, `category=<id>` and `q=42`, and is a `/receipts/?…` URL (never `/receipts/list/…`). |
 | 2 | Reload. | Same tab, category, search and list. |
 | 3 | Open `/receipts/list/?status=failed` directly in the address bar. | Redirected to `/receipts/?status=failed` (the full page). |
-| 4 | Go to `/account/`; under Apps > App actions > Receipts leave **Receipt date** on **Any date** and read the form: the **Export CSV** button submits a GET form to `/receipts/export.csv`. | No date fields are visible. Choosing **Custom** shows two date fields (and sends `date_range=custom&date_from=...&date_to=...`); choosing another preset hides them again. |
+| 4 | Go to `/account/`; under Apps > App actions > Receipts leave **Receipt date** on **All** and read the form: the **Export CSV** button submits a GET form to `/receipts/export.csv`. | No date fields are visible. Choosing **Custom** shows two date fields (and sends `date_range=custom&date_from=...&date_to=...`); choosing another preset hides them again. |
 | 5 | In the console: `const r = await fetch('/receipts/export.csv'); [r.headers.get('content-type'), r.headers.get('content-disposition'), await r.text()]`. | `text/csv; charset=utf-8`; `attachment; filename="receipts-<today YYYY-MM-DD>.csv"`; first line exactly `receipt_date,vendor,amount,currency,category,document_type,document_number,payment_method,notes,status,source,added,original_filename,vendor_as_read`; then one row per live receipt, oldest added first, among them (with the other receipts of this run, e.g. fake.pdf's, in their places): R1, then R2, R3 and R4 in the order their uploads were created in RCPT-08 (they upload in parallel, so that order varies). R4's row has vendor `ODP` and the last column `vendor_as_read` = `Staples`; R1's row has `2025-06-30,Staples,12.50,USD,Travel,receipt,INV-001,Visa ••1111,client lunch,processed,upload,…,staples-1.png,Staples`. No trashed receipts. |
 | 6 | On `/account/` click **Export CSV**. | The browser downloads `receipts-<today>.csv`; the page stays. |
 | 7 | Choose **Custom** with `Receipt date` from `2025-06-01` to `2025-06-30` and click **Export CSV**. | The file has only R1 (receipt date 2025-06-30) and every other receipt dated in that range; no receipt outside it and none without a date. |
@@ -862,7 +864,7 @@ Restore button on a trashed receipt's page brings it back to that page, editable
 ### RCPT-52 Receipt-date presets against today
 
 **Purpose:** each preset covers the right days relative to the user's today (its own time zone);
-Custom works with only one end; "Any date" wins over dates left in the URL.
+Custom works with only one end; "All" wins over dates left in the URL.
 **Preconditions:** `F`. Let `TODAY` be today's date in your browser's time zone (the account picked it
 up at sign-in) and `T20` the date 20 days before it.
 
@@ -878,7 +880,7 @@ up at sign-in) and `T20` the date 20 days before it.
 | 8 | Choose **Custom**, set only the **from** date to `T20` (leave **to** empty). | `J1` and `W1`; the URL has `date_from` and no `date_to` or `date_range`. |
 | 9 | Clear **from**, set only **to** = January 1 of this year. | Only `A1`. |
 | 10 | Open `/receipts/?q=rangecheck&date_from=<TODAY>`. | **Custom** selected with that date: only `J1` (dates without a `date_range` mean Custom). |
-| 11 | Open `/receipts/?q=rangecheck&date_range=any&date_from=<TODAY>`. | **Any date** selected, the date fields hidden, all three listed ("Any date" wins over the left-over date). |
+| 11 | Open `/receipts/?q=rangecheck&date_range=any&date_from=<TODAY>`. | **All** selected, the date fields hidden, all three listed ("All" wins over the left-over date). |
 
 ### RCPT-53 The CSV export guards against spreadsheet formulas
 
@@ -1191,11 +1193,11 @@ file** (admin > Receipts settings > **Export per receipt**).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/receipts/`, then `/account/`. | The dashboard's header has only **Upload**; next to Vendors and Trash there is an **Exports** link. On `/account/`, in the **Apps** section below the apps list and above "Notifications on this device", an **App actions** area has a **Receipts** block (receipt icon): "Download your receipt files as zip files, or a CSV list of your receipts.", a **Receipt date** select (Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom; no date fields until Custom), the buttons **Download files** (zip icon) and **Export CSV**, and a **Your exports** link to `/receipts/exports/`. |
+| 1 | Open `/receipts/`, then `/account/`. | The dashboard's header has only **Upload**; next to Vendors and Trash there are **Reports** (before Vendors) and **Exports** links. On `/account/`, in the **Apps** section below the apps list and above "Notifications on this device", an **App actions** area has a **Receipts** block (receipt icon): "Download your receipt files as zip files, or a CSV list of your receipts.", a **Receipt date** select (All, Last 15 days, Last 30 days, This month, This quarter, This year, Custom; no date fields until Custom), the buttons **Download files** (zip icon) and **Export CSV**, and a **Your exports** link to `/receipts/exports/`. |
 | 2 | On `/account/` click **Download files**. | A dialog "Download files" opens over the page with focus on a button: "**N files** (size) in **1 zip file** of about 100.0 MB each. Each zip opens on its own, and the first one also holds `receipts.csv`, a list of every file with its date, vendor, type and amount." then "All your receipts. To download only some, choose a date range first. Receipts in the Trash are not included."; **Organize the folders as** with two cards, **Year / Vendor** (checked, `2026/Acme/invoice.pdf`) and **Vendor / Year** (`Acme/2026/invoice.pdf`); "This costs **3N credits** (3 per file). Your balance is `B0`. You are charged now; if we can't make the files, you get the credits back." and "We prepare the files in the background and tell you here and by email when they are ready. You can download them for 30 days, then they are deleted."; **Cancel** and **Download for 3N credits**. Nothing was charged yet. |
 | 3 | Press Escape; open it again and click **Cancel**; open it and click the backdrop. | The dialog closes each time and focus returns to **Download files**. Balance still `B0`. |
 | 4 | Choose **Last 15 days** (or **This year**) and open the dialog. | It counts only the receipts whose receipt date is in that range ("**M files**" and "This costs **3M credits**"), says "Only these receipts: Receipt date: <from> to <to>." |
-| 5 | Choose **Custom**, enter a from and a to date, and open the dialog; then choose **Any date**. | The count and the price follow the range each time (the dates appear in the dialog's text); with **Any date** it is every receipt again and the text says "All your receipts". The dialog needs no reload to follow the select. |
+| 5 | Choose **Custom**, enter a from and a to date, and open the dialog; then choose **All**. | The count and the price follow the range each time (the dates appear in the dialog's text); with **All** it is every receipt again and the text says "All your receipts". The dialog needs no reload to follow the select. |
 | 6 | Choose a custom range in which no receipt falls (for example in 2001) and open the dialog. | "There are no receipt files to download with the chosen filters."; the download button is disabled. |
 | 7 | Open `/receipts/exports/new/` directly (not from the button). | You land on `/account/#apps` (the dialog is a fragment). |
 | 8 | As `qa.admin` set **Export per receipt** to `5` (admin > Receipts > Receipts settings); as `F` open the dialog. | "This costs **5N credits** (5 per file)": the price is read live. Set it back to `3`. |
@@ -1383,6 +1385,57 @@ its `POST` answers.
 | 3 | Rename with only spaces. | Under the name in red: `Give the file a name.`; nothing changes. Escape or the cross (Cancel) closes the box and clears the message. |
 | 4 | Open the email-body receipt. | No `File:` line and no Rename. |
 | 5 | Move the uploaded receipt to the Trash and open it. | `File: Lunch with Sam.jpg` without Rename. |
+
+### RCPT-74 Reports: by vendor and by category, filters
+
+**Purpose:** `/receipts/reports/` totals the user's receipts by vendor or by category in a period, with one total per currency
+(issue #351).
+**Preconditions:** signed in as `F` with receipts of at least two vendors (one vetted, one not), two categories and, through a
+shell step or the receipt's form, one receipt in **EUR** (every fake-read receipt is 42.10 USD); one receipt in the Trash, one
+**Needs review**, one **Failed**. Today is `T`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/receipts/`. | The header row has **Reports** (chart icon) before **Vendors**, **Exports** and **Trash**. Click **Reports**. |
+| 2 | Look at `/receipts/reports/`. | A back link "Receipts", heading **Reports**, a **Download** group with **XLSX**, **CSV** and **PDF**; tabs **By vendor** (active) and **By category**; filters **Receipt date** (the themed select with **This year** chosen), **Processed receipts only** (ticked) and **Vetted vendors only** (unticked); a sentence "Receipts dated 01/01/<year> to 12/31/<year>, processed only. Receipts in the Trash are never counted."; two tiles (**Receipts** with the vendor count, **Total** with one amount per currency and "One total per currency: amounts in different currencies are not converted or added together."); a table Vendor, Receipts, Total, Share (a bar and a percent), Average, Last receipt (dates in the account's date format), one footer line **Total USD** (and **Total EUR**). |
+| 3 | Read the rows. | One row per vendor **and currency** (the EUR receipt is its own row, never added to USD), largest total first inside a currency; each vendor has a **Vetted** or **New vendor** pill; a share is of its own currency's total. The Trash, **Needs review** and **Failed** receipts are not counted. |
+| 4 | Click a vendor name. | `/receipts/?date_range=this_year&vendor=<id>`: the dashboard filtered by that vendor, with the **Receipt date** select on This year. Go back. |
+| 5 | Click **By category**. | The table swaps in place (no reload), the address becomes `/receipts/reports/?group=category`, the header is **Category**, rows are the categories (and **Uncategorized**, no pill) and the **Download** links now say `group=category`. A name opens the dashboard with `category=<id>` (`category=none` for Uncategorized). |
+| 6 | Untick **Processed receipts only**. | The list refreshes by itself, the address gets `processed=0`, the sentence says "processed and needs review", the **Needs review** receipt is now counted; the **Failed** one and the Trash still are not. |
+| 7 | Tick **Vetted vendors only**. | Only vetted vendors remain (and receipts with no vendor are gone); the address has `vetted=1`. |
+| 8 | Choose **All** in **Receipt date**. | The sentence says "Receipts of all dates", the address gets `date_range=any` (the stored value is still `any`) and the date boxes stay hidden. |
+| 9 | Choose **Custom** and enter a range in which no receipt falls (for example in 2001). | Two date fields appear when **Custom** is chosen; once both are set the list shows the empty state "No receipts in this period" with "Choose a longer period, or include receipts that are not processed yet."; no tiles or table. |
+| 10 | Open the address of step 7 directly in a new tab. | The full page with the same filters, tab and results (the address is the state). `/receipts/reports/list/` opened directly redirects to `/receipts/reports/`. |
+| 11 | Sign out, open `/receipts/reports/`. | The sign-in page. As another user (`qa.other`) the page shows only that user's receipts, never `F`'s. |
+| 12 | Switch the account's date format to `dd/mm/yyyy` on `/account/` and reload the report. | The sentence and **Last receipt** are written `dd/mm/yyyy`. |
+
+### RCPT-75 Reports: the downloads
+
+**Purpose:** the report downloads as XLSX, CSV and PDF with the filters in force; they are free.
+**Preconditions:** RCPT-74; the balance `B0` on `/billing/credits/`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On the report (by vendor, This year) click **CSV**. | `receipts-by-vendor-<T>.csv` downloads and the page stays. Open it: header `Vendor,Vetted,Currency,Receipts,Total,Share (%),Average,Last receipt`, one line per vendor and currency (amounts with two decimals, dates ISO), then a `Total` line per currency. The numbers match the page. |
+| 2 | Click **XLSX**. | `receipts-by-vendor-<T>.xlsx` opens in a spreadsheet: a sheet **By vendor** with the same columns, numbers and dates as real values (the share is a percentage), a bold frozen header, the **Total** lines at the end, and a sheet **Filters** with the title and the sentence. |
+| 3 | Click **PDF**. | `receipts-by-vendor-<T>.pdf` opens: the title **Receipts by vendor**, the sentence, the table with a total line per currency, the note about currencies and "Page 1". |
+| 4 | Switch to **By category**, untick **Processed receipts only** and download each of the three. | The files are named `receipts-by-category-<T>...`, have a **Category** column and no **Vetted** column, and contain the same rows as the page with those filters. |
+| 5 | Give a vendor the name `=HYPERLINK("http://example.com","x")` (rename it on the Vendors page), reload the report and download the CSV and the XLSX. | In the CSV the cell starts with an apostrophe; in the XLSX it is text (nothing is evaluated, no link). The PDF shows the text as typed. A vendor named `<b>Bold</b> & Co` shows as typed in the page and the PDF. |
+| 6 | Check **Costs** (`/billing/costs/`) and the balance. | The balance is still `B0`; the downloads are free. |
+| 7 | Open `/receipts/reports/export.pdf?date_range=nonsense&group=color` directly. | A report with the defaults (by vendor, this year): a bad value falls back to the default, no error page. |
+
+### RCPT-76 Reports through the API
+
+**Purpose:** `GET /api/receipts/reports` returns the same report as JSON (OpenAPI 2.21.0).
+**Preconditions:** RCPT-74; a bearer token for `F`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `GET /api/receipts/reports`. | 200 with `group: "vendor"`, the resolved `date_from` / `date_to` (this year), `processed_only: true`, `vetted_only: false`, a `description`, `receipt_count`, `rows` (`id`, `name`, `vetted`, `currency`, `receipt_count`, `total`, `share`, `average`, `last_receipt_date`; amounts as strings with two decimals) and `totals` (one per currency). The numbers equal the page's. |
+| 2 | `GET ...?group=category&date_range=any&processed_only=false&vetted_only=true`. | The category report of every date, with needs-review receipts included and only vetted vendors' receipts. |
+| 3 | `GET ...?date_range=custom&date_from=2026-01-01&date_to=2026-03-31`. | Only receipts dated in that range. |
+| 4 | `GET ...?group=color`, `?date_range=next_week`, `?date_from=yesterday`, `?date_range=this_year&date_from=2026-01-01`, `?date_from=2026-03-01&date_to=2026-01-01`. | Each is **400** with a `detail` naming the problem. |
+| 5 | Call it with no token, and with another user's token. | **401**; the other user's report shows only their own receipts. |
 
 ## Out of scope
 
